@@ -70,6 +70,7 @@ async function loadLessons(selectId) {
 }
 
 async function loadLesson() {
+  selectedSlides.clear();
   activities = [];
   students = [];
   responses = [];
@@ -748,16 +749,38 @@ function slidesCard() {
   });
   const thumbs = h("div", { class: "thumbs" });
   for (let i = 1; i <= lesson.slide_count; i++) {
-    thumbs.append(h("figure", { class: "thumb" },
-      h("img", { src: slideSrc(lesson, i), alt: i + "쪽", loading: "lazy" }),
+    const preview = h("div", { class: "thumb-preview" });
+    const image = h("img", { class: "thumb-photo", src: slideSrc(lesson, i), alt: i + "쪽", loading: "lazy" });
+    const hitbox = h("button", {
+      class: "thumb-hitbox", type: "button", "aria-label": i + "쪽 선택", "aria-pressed": selectedSlides.has(i),
+      onclick() { toggleSlideSelection(i, figure, checkbox, hitbox); },
+    });
+    const alignHitbox = () => {
+      hitbox.style.left = image.offsetLeft + "px";
+      hitbox.style.top = image.offsetTop + "px";
+      hitbox.style.width = image.offsetWidth + "px";
+      hitbox.style.height = image.offsetHeight + "px";
+    };
+    image.addEventListener("load", alignHitbox);
+    preview.append(image, hitbox);
+    if (image.complete && image.naturalWidth) alignHitbox();
+    const checkbox = h("input", {
+      type: "checkbox", checked: selectedSlides.has(i), "aria-label": i + "쪽 선택",
+      onchange() { setSlideSelection(i, checkbox.checked, figure, checkbox, hitbox); },
+    });
+    const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : "") },
+      preview,
+      h("label", { class: "thumb-check" }, checkbox, "선택"),
       h("figcaption", {}, h("span", {}, i + "쪽"),
-        h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide(i, status); } }, "삭제"))));
+        h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], status); } }, "삭제")));
+    thumbs.append(figure);
   }
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? lesson.slide_count + "장" : "없음")),
     h("p", { class: "muted small" }, "PowerPoint에서 「파일 → 다른 이름으로 저장 → PDF」로 저장한 파일을 올리면 쪽마다 그림으로 바뀝니다. 그림 파일(PNG, JPG) 여러 장을 올려도 됩니다(파일 이름 순서). 100쪽까지."),
     h("div", { class: "row" }, file, btn), bar, status,
     lesson.slide_count ? h("div", { class: "row slide-tools" },
+      h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
       h("span", { class: "muted small grow" }, "미리보기에 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
       h("button", { class: "ghost", type: "button", onclick() { deleteSlide(null, status); } }, "번호 다시 맞추기")) : null,
     lesson.slide_count ? thumbs : null);
@@ -829,19 +852,36 @@ function slideFolderOf(l) {
 // 저장소에 실제로 있는 그림 목록을 보고 1, 2, 3 … 으로 다시 번호를 매기므로, 중간에 멈춰 꼬인 상태도 바로잡는다.
 // k 가 없으면(번호 다시 맞추기) 아무것도 지우지 않고 번호만 맞춘다.
 let slideBusy = false;
+const selectedSlides = new Set();
 
-async function deleteSlide(k, status) {
+function setSlideSelection(page, selected, figure, checkbox, hitbox) {
+  if (selected) selectedSlides.add(page);
+  else selectedSlides.delete(page);
+  figure.classList.toggle("selected", selected);
+  checkbox.checked = selected;
+  hitbox.setAttribute("aria-pressed", String(selected));
+  const bulk = document.querySelector(".slide-tools .danger");
+  if (bulk) {
+    bulk.disabled = !selectedSlides.size;
+    bulk.textContent = "선택한 슬라이드 삭제 (" + selectedSlides.size + ")";
+  }
+}
+
+function toggleSlideSelection(page, figure, checkbox, hitbox) {
+  setSlideSelection(page, !selectedSlides.has(page), figure, checkbox, hitbox);
+}
+
+async function deleteSlide(target, status) {
   if (slideBusy) return;
+  const targets = target == null ? [] : [...new Set(Array.isArray(target) ? target : [target])].sort((a, b) => a - b);
   const folder = slideFolderOf(lesson);
   if (!folder) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
   const base = lesson.slide_dir.split("?")[0];
   if (folder !== slideFolder(lesson) || lessons.some((x) => x.id !== lesson.id && (x.slide_dir || "").split("?")[0] === base)) {
     return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n이 수업에서 PDF를 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
   }
-  if (k) {
-    const onIt = activities.filter((a) => a.page === k && !(a.page_to > k));
-    if (!confirm(k + "쪽 슬라이드를 지울까요? 뒤쪽 슬라이드가 한 칸씩 앞으로 당겨집니다." +
-      (onIt.length ? "\n이 쪽에만 있던 질문 " + onIt.length + "개는 지우지 않고, 그 자리로 당겨지는 다음 슬라이드에 붙습니다." : ""))) return;
+  if (targets.length) {
+    if (!confirm(targets.length + "장의 슬라이드를 지울까요? 남은 슬라이드와 질문 쪽 번호를 맞춥니다.")) return;
   }
   slideBusy = true;
   document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
@@ -851,12 +891,13 @@ async function deleteSlide(k, status) {
     const listed = await st.list(folder.replace(/\/$/, ""), { limit: 1000 });
     if (listed.error) throw listed.error;
     let nums = (listed.data || []).map((o) => /^(\d+)\.jpg$/.exec(o.name)).filter(Boolean).map((m) => +m[1]).sort((x, y) => x - y);
-    if (k) {
-      if (!nums.includes(k)) throw new Error(k + "쪽 그림이 이미 없습니다. 「번호 다시 맞추기」를 눌러 주세요.");
-      status.textContent = k + "쪽을 지우는 중…";
-      const r = await st.remove([folder + k + ".jpg"]);
+    if (targets.length) {
+      const missing = targets.filter((n) => !nums.includes(n));
+      if (missing.length) throw new Error(missing.join(", ") + "쪽 그림이 이미 없습니다. 「번호 다시 맞추기」를 눌러 주세요.");
+      status.textContent = targets.length + "장의 슬라이드를 지우는 중…";
+      const r = await st.remove(targets.map((n) => folder + n + ".jpg"));
       if (r.error) throw r.error;
-      nums = nums.filter((x) => x !== k);
+      nums = nums.filter((x) => !targets.includes(x));
     }
     // 남은 그림을 1, 2, 3 … 으로 당긴다(작은 번호부터 옮기므로 옮길 자리는 늘 비어 있다)
     for (const [i, num] of nums.entries()) {
@@ -866,8 +907,8 @@ async function deleteSlide(k, status) {
       if (r.error) throw r.error;
     }
     const left = nums.length;
-    if (k) {
-      const shift = (pg) => (pg == null ? pg : pg > k ? pg - 1 : pg);
+    if (targets.length) {
+      const shift = (pg) => (pg == null ? pg : pg - targets.filter((n) => n < pg).length);
       for (const a of activities) {
         if (a.page == null) continue;
         const page = Math.min(shift(a.page), Math.max(left, 1));
@@ -880,11 +921,12 @@ async function deleteSlide(k, status) {
         if (u.error) throw u.error;
       }
     }
-    const pageNow = k && lesson.page > k ? lesson.page - 1 : lesson.page;
+    const pageNow = lesson.page - targets.filter((n) => n < lesson.page).length;
     const dir = base + "?v=" + Date.now();   // 이름이 바뀐 그림을 브라우저가 예전 것으로 보이지 않게
     const u = await sb.from("lessons").update({ slide_dir: left ? dir : "", slide_count: left, page: Math.min(Math.max(pageNow, 1), Math.max(left, 1)) }).eq("id", lesson.id);
     if (u.error) throw u.error;
-    flash(k ? k + "쪽을 지웠습니다." : "슬라이드 번호를 맞췄습니다 (" + left + "장).");
+    selectedSlides.clear();
+    flash(targets.length ? targets.length + "장의 슬라이드를 지웠습니다." : "슬라이드 번호를 맞췄습니다 (" + left + "장).");
     slideBusy = false;
     await loadLessons(lesson.id);
   } catch (e) {
