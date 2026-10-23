@@ -14,13 +14,23 @@ let timer = null;
 let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
 let me = null;            // 로그인한 교사(auth user)
+let passwordRecovery = false;
 
 if (!sb) notConfigured(app);
-else init();
+else {
+  sb.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+      passwordRecovery = true;
+      showPasswordRecovery();
+    }
+  });
+  init();
+}
 
 // ---------- 로그인 ----------
 async function init() {
   const { data } = await sb.auth.getSession();
+  if (passwordRecovery) return showPasswordRecovery();
   if (!data.session) return showLogin();
   me = data.session.user;
   const { data: ok, error } = await sb.rpc("is_teacher");
@@ -56,7 +66,57 @@ function showLogin() {
       },
     }, h("label", {}, "이메일", email), h("label", {}, "비밀번호", pw),
       h("button", { class: "primary big", type: "submit" }, "로그인"), msg),
+    h("button", {
+      class: "link",
+      type: "button",
+      async onclick() {
+        const address = email.value.trim();
+        if (!address) {
+          msg.textContent = "먼저 이메일을 입력해 주세요.";
+          email.focus();
+          return;
+        }
+        msg.textContent = "재설정 메일을 보내는 중…";
+        const redirectTo = new URL(location.pathname, location.origin).href;
+        const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo });
+        msg.textContent = error
+          ? "재설정 메일을 보내지 못했습니다: " + error.message
+          : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
+      },
+    }, "비밀번호 재설정 메일 보내기"),
     h("p", { class: "muted small center" }, "교사 계정은 Supabase 대시보드 → Authentication → Users 에서 만듭니다.")));
+}
+
+function showPasswordRecovery() {
+  const password = h("input", { type: "password", autocomplete: "new-password", required: true });
+  const confirm = h("input", { type: "password", autocomplete: "new-password", required: true });
+  const msg = h("p", { class: "msg" });
+  app.replaceChildren(h("main", { class: "narrow" },
+    h("header", { class: "intro" }, h("p", { class: "eyebrow" }, "교사용"), h("h1", {}, "새 비밀번호 설정")),
+    h("form", {
+      class: "card stack",
+      async onsubmit(e) {
+        e.preventDefault();
+        if (password.value !== confirm.value) {
+          msg.textContent = "비밀번호가 서로 다릅니다.";
+          return;
+        }
+        msg.textContent = "비밀번호를 저장하는 중…";
+        const { error } = await sb.auth.updateUser({ password: password.value });
+        if (error) {
+          msg.textContent = "비밀번호를 저장하지 못했습니다: " + error.message;
+          return;
+        }
+        passwordRecovery = false;
+        await sb.auth.signOut();
+        app.replaceChildren(h("main", { class: "narrow" },
+          h("section", { class: "card stack" },
+            h("h1", {}, "비밀번호를 변경했습니다."),
+            h("p", {}, "새 비밀번호로 다시 로그인해 주세요."),
+            h("button", { class: "primary big", type: "button", onclick: showLogin }, "로그인으로 이동"))));
+      },
+    }, h("label", {}, "새 비밀번호", password), h("label", {}, "새 비밀번호 확인", confirm),
+      h("button", { class: "primary big", type: "submit" }, "비밀번호 저장"), msg)));
 }
 
 // ---------- 데이터 ----------
