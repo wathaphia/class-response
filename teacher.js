@@ -854,7 +854,7 @@ function slidesCard() {
   const ppt = isPptx(lesson);
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? lesson.slide_count + "장" : "없음")),
-    h("p", { class: "muted small" }, "PDF는 쪽별 그림으로 저장되고, PPTX는 원본 애니메이션을 보존해 표시합니다. 그림(PNG, JPG) 여러 장도 올릴 수 있습니다. 한 번에 하나의 자료를 고르세요."),
+    h("p", { class: "muted small" }, "PDF 파일, 그림 파일(PNG·JPG), PowerPoint 파일(PPTX)을 업로드할 수 있습니다. PPTX는 원본 애니메이션을 보존해 표시합니다. 그림은 여러 장을 한 번에 선택할 수 있습니다."),
     h("div", { class: "row" }, file, btn), bar, status,
     ppt ? h("p", { class: "muted small" }, "현재 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF 자료에서 사용할 수 있습니다.") : null,
     lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
