@@ -253,7 +253,7 @@ function drawRun() {
       h("section", { class: "card row between" }, openText, openBtn),
       roster,
       panel)));
-  run = { img, simStage, simKey: "", where, prev, next, openBtn, openText, panel, roster, blocks: new Map() };
+  run = { img, stage, simStage, simKey: "", pptKey: "", where, prev, next, openBtn, openText, panel, roster, blocks: new Map() };
   refreshRun();
 }
 
@@ -261,8 +261,21 @@ function refreshRun() {
   if (!run) return;
   const L = lesson;
   if (L.slide_count > 0) {
-    run.img.src = slideSrc(L, L.page);
-    run.img.alt = "슬라이드 " + L.page;
+    if (isPptx(L)) {
+      const key = L.slide_dir + ":" + L.page;
+      run.img.hidden = true;
+      if (run.pptKey !== key) {
+        run.stage.querySelector(".pptx-frame")?.remove();
+        run.stage.insertBefore(pptxFrame(L, L.page), run.simStage);
+        run.pptKey = key;
+      }
+    } else {
+      run.stage.querySelector(".pptx-frame")?.remove();
+      run.pptKey = "";
+      run.img.hidden = false;
+      run.img.src = slideSrc(L, L.page);
+      run.img.alt = "슬라이드 " + L.page;
+    }
     run.where.textContent = L.page + " / " + L.slide_count;
     run.prev.disabled = L.page <= 1;
     run.next.disabled = L.page >= L.slide_count;
@@ -277,7 +290,9 @@ function refreshRun() {
   // 「슬라이드 자리에 띄우기」 시뮬레이션: 교사 화면에서도 슬라이드 대신 띄운다(다시 그릴 때마다 새로 띄우지 않게 key로 확인)
   const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, L.page)) : null;
   const simKey = stageSim ? stageSim.id + ":" + (stageSim.html || "").length + ":" + stageSim.title : "";
-  run.img.hidden = !!stageSim;
+  if (!isPptx(L)) run.img.hidden = !!stageSim;
+  const pptFrame = run.stage.querySelector(".pptx-frame");
+  if (pptFrame) pptFrame.hidden = !!stageSim;
   run.simStage.hidden = !stageSim;
   if (simKey !== run.simKey) {
     run.simKey = simKey;
@@ -315,7 +330,8 @@ function runBlock(a) {
   if (a.kind === "sim") return h("section", { class: "card stack" },
     h("div", { class: "row between" },
       h("div", {}, h("p", { class: "muted small" }, "시뮬레이션 · " + whereText(a)), h("h2", {}, a.title)),
-      h("button", { class: "primary", type: "button", onclick() { openSimFull(a.title, a.html); } }, "크게 실행")),
+      h("button", { class: "primary", type: "button", onclick() { showFloatingSim(a.title, a.html, a.id + ":" + (a.html || "").length); } }, "화면에 띄우기"),
+      h("button", { class: "ghost", type: "button", onclick() { openSimFull(a.title, a.html); } }, "크게 실행")),
     h("p", { class: "pill" }, a.sim_full && lesson.slide_count ? "학생 화면: 슬라이드 자리에 크게 보임" : "학생 화면: 슬라이드 아래 카드로 보임"));
   if (isInfoActivity(a)) return h("section", { class: "card stack" },
     h("div", { class: "row between" },
@@ -786,12 +802,12 @@ function drawSettings() {
 
 // 슬라이드 올리기: PDF 한 개 또는 그림 여러 장 → 쪽마다 JPG로 바꿔 Storage에 올린다.
 function slidesCard() {
-  const file = h("input", { type: "file", accept: "application/pdf,image/png,image/jpeg", multiple: true });
+  const file = h("input", { type: "file", accept: ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg", multiple: true });
   const bar = h("progress", { max: 1, value: 0, hidden: true });
   const status = h("p", { class: "msg" });
   const btn = h("button", { class: "primary", type: "button" }, lesson.slide_count ? "다시 올리기 (기존 슬라이드를 바꿈)" : "올리기");
   btn.addEventListener("click", async () => {
-    if (!file.files.length) { status.textContent = "PDF 파일이나 그림 파일을 먼저 고르세요."; return; }
+    if (!file.files.length) { status.textContent = "PDF, PPTX 또는 그림 파일을 먼저 고르세요."; return; }
     btn.disabled = true;
     bar.hidden = false;
     try {
@@ -835,15 +851,50 @@ function slidesCard() {
         h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], status); } }, "삭제")));
     thumbs.append(figure);
   }
+  const ppt = isPptx(lesson);
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? lesson.slide_count + "장" : "없음")),
-    h("p", { class: "muted small" }, "PowerPoint에서 「파일 → 다른 이름으로 저장 → PDF」로 저장한 파일을 올리면 쪽마다 그림으로 바뀝니다. 그림 파일(PNG, JPG) 여러 장을 올려도 됩니다(파일 이름 순서). 100쪽까지."),
+    h("p", { class: "muted small" }, "PDF는 쪽별 그림으로 저장되고, PPTX는 원본 애니메이션을 보존해 표시합니다. 그림(PNG, JPG) 여러 장도 올릴 수 있습니다. 한 번에 하나의 자료를 고르세요."),
     h("div", { class: "row" }, file, btn), bar, status,
-    lesson.slide_count ? h("div", { class: "row slide-tools" },
+    ppt ? h("p", { class: "muted small" }, "현재 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF 자료에서 사용할 수 있습니다.") : null,
+    lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
       h("span", { class: "muted small grow" }, "미리보기에 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
       h("button", { class: "ghost", type: "button", onclick() { deleteSlide(null, status); } }, "번호 다시 맞추기")) : null,
-    lesson.slide_count ? thumbs : null);
+    lesson.slide_count && !ppt ? thumbs : null);
+}
+
+async function loadZipJs() {
+  if (window.JSZip) return window.JSZip;
+  await new Promise((ok, fail) => document.head.append(h("script", {
+    src: "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+    onload: ok, onerror: () => fail(new Error("PPTX 처리 도구를 불러오지 못했습니다")),
+  })));
+  return window.JSZip;
+}
+
+async function uploadPptx(file, progress) {
+  if (file.size > 50 * 1024 * 1024) throw new Error("PPTX 파일은 50MB 이하로 올려 주세요.");
+  const Zip = await loadZipJs();
+  const zip = await Zip.loadAsync(file);
+  const pages = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length;
+  if (!pages || pages > 300) throw new Error("PPTX에서 슬라이드를 읽지 못했거나 300장을 넘습니다.");
+  const folder = slideFolder(lesson);
+  progress(0, 1, "PPTX 올리는 중");
+  const objectPath = folder + "deck.pptx";
+  const { error } = await sb.storage.from("slides").upload(objectPath, file, {
+    upsert: true, contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", cacheControl: "3600",
+  });
+  if (error) throw error;
+  const { data } = sb.storage.from("slides").getPublicUrl(objectPath);
+  const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + data.publicUrl + "?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", lesson.id);
+  if (updateError) throw updateError;
+  // 교체 전 PDF/JPG가 남지 않게 이 수업 전용 폴더의 이미지 파일만 정리한다.
+  const { data: old } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
+  const images = (old || []).filter((o) => /^\d+\.jpg$/.test(o.name)).map((o) => folder + o.name);
+  if (images.length) await sb.storage.from("slides").remove(images);
+  progress(1, 1, "올리는 중");
+  return pages;
 }
 
 async function loadPdfJs() {
@@ -998,6 +1049,11 @@ async function deleteSlide(target, status) {
 }
 
 async function uploadSlides(files, progress) {
+  const pptx = files.filter((f) => /\.pptx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  if (pptx.length) {
+    if (pptx.length !== 1 || files.length !== 1) throw new Error("PPTX는 한 번에 하나만 올릴 수 있습니다.");
+    return uploadPptx(pptx[0], progress);
+  }
   const images = await toSlideImages(files, progress);
   const folder = slideFolder(lesson);
   for (const [i, blob] of images.entries()) {
@@ -1013,6 +1069,7 @@ async function uploadSlides(files, progress) {
   const dir = SB_URL + "/storage/v1/object/public/slides/" + folder + "{n}.jpg?v=" + Date.now();
   const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", lesson.id);
   if (error) throw error;
+  await sb.storage.from("slides").remove([folder + "deck.pptx"]);
   return images.length;
 }
 
@@ -1022,8 +1079,9 @@ async function removeSlideFiles(l) {
   if (lessons.some((x) => x.id !== l.id && x.slide_dir.split("?")[0] === l.slide_dir.split("?")[0])) return;
   // 그림을 올린 교사의 폴더(교사가 여러 명일 수 있으므로 주소에서 읽는다)
   const m = /\/public\/slides\/(.+\/)\{n\}/.exec(l.slide_dir);
-  if (!m) return;
-  const folder = decodeURIComponent(m[1]);
+  const ppt = isPptx(l) && /\/object\/public\/slides\/(.+)\/deck\.pptx/.exec(l.slide_dir);
+  if (!m && !ppt) return;
+  const folder = decodeURIComponent(m ? m[1] : ppt[1] + "/");
   const { data } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
   if (data && data.length) await sb.storage.from("slides").remove(data.map((o) => folder + o.name));
 }

@@ -44,6 +44,44 @@ function simFrame(html, title) {
   return f;
 }
 
+// 수업 화면 위에 떠 있는 시뮬레이션 창. iframe을 재사용해 조작 상태를 보존한다.
+let floatingSim = null;
+function showFloatingSim(title, html, key) {
+  if (floatingSim && floatingSim.dataset.key === key) return floatingSim;
+  closeFloatingSim();
+  const frame = simFrame(html, title);
+  const head = h("div", { class: "sim-float-head" },
+    h("strong", {}, title || "시뮬레이션"),
+    h("div", { class: "row" },
+      h("button", { class: "ghost", type: "button", "aria-label": "시뮬레이션 크게 보기", onclick() { openSimFull(title, frame.srcdoc); } }, "크게"),
+      h("button", { class: "ghost", type: "button", "aria-label": "시뮬레이션 닫기", onclick: closeFloatingSim }, "닫기")));
+  const box = h("section", { class: "sim-float", "aria-label": "실시간 시뮬레이션" }, head, frame);
+  box.dataset.key = key;
+  let drag = null;
+  head.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return;
+    const r = box.getBoundingClientRect();
+    drag = { x: e.clientX - r.left, y: e.clientY - r.top };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    box.style.left = Math.max(0, Math.min(innerWidth - box.offsetWidth, e.clientX - drag.x)) + "px";
+    box.style.top = Math.max(0, Math.min(innerHeight - 80, e.clientY - drag.y)) + "px";
+    box.style.right = "auto";
+    box.style.bottom = "auto";
+  });
+  head.addEventListener("pointerup", () => { drag = null; });
+  document.body.append(box);
+  floatingSim = box;
+  return box;
+}
+
+function closeFloatingSim() {
+  if (floatingSim) floatingSim.remove();
+  floatingSim = null;
+}
+
 // 시뮬레이션을 화면 가득 띄운다. 닫기 버튼이나 Esc로 닫는다.
 function openSimFull(title, html) {
   const close = () => { box.remove(); document.removeEventListener("keydown", esc); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
@@ -59,6 +97,24 @@ function openSimFull(title, html) {
 function slideSrc(lesson, n) {
   const dir = lesson.slide_dir.trim();
   return encodeURI(dir.includes("{n}") ? dir.split("{n}").join(n) : dir.replace(/\/+$/, "") + "/" + n + ".png");
+}
+
+function isPptx(lesson) { return (lesson.slide_dir || "").startsWith("pptx:"); }
+function pptxUrl(lesson, page) {
+  const src = lesson.slide_dir.slice(5).split("?")[0];
+  return "https://view.officeapps.live.com/op/embed.aspx?src=" + encodeURIComponent(src) + "&wdSlideIndex=" + page;
+}
+function pptxFrame(lesson, page) {
+  return h("iframe", { class: "pptx-frame", title: "PowerPoint 슬라이드 " + page, src: pptxUrl(lesson, page), allowfullscreen: true, loading: "lazy" });
+}
+function openPptxFull(lesson, page) {
+  const close = () => { box.remove(); document.removeEventListener("keydown", esc); };
+  const esc = (e) => { if (e.key === "Escape") close(); };
+  const box = h("div", { class: "sim-full" },
+    h("div", { class: "sim-full-head" }, h("strong", {}, "PowerPoint · " + page + " / " + lesson.slide_count), h("button", { class: "ghost", type: "button", onclick: close }, "닫기")),
+    pptxFrame(lesson, page));
+  document.addEventListener("keydown", esc);
+  document.body.append(box);
 }
 
 function fmtTime(t) {

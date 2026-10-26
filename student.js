@@ -217,11 +217,12 @@ function buildShell() {
     h("main", { class: "lesson" }, conn, closed, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
   const empty = h("p", { class: "muted center" });
-  shell = { img, simStage, prev, next, where, back, closed, conn, title, who, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "" };
+  shell = { img, simStage, prev, next, where, back, closed, conn, title, who, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
 }
 
 // 슬라이드를 화면 가득 띄운다. 누르거나 Esc로 닫는다. 선생님이 쪽을 넘기면 띄운 그림도 바뀐다.
 function zoom() {
+  if (isPptx(state.lesson)) return openPptxFull(state.lesson, viewing);
   if (shell.stageSim) {
     const a = shell.stageSim;
     return loadSim(a).then((html) => openSimFull(a.title, html));
@@ -259,8 +260,21 @@ function render(pageChanged) {
   shell.closed.hidden = L.open;
   shell.slideBox.hidden = !hasSlides;
   if (hasSlides) {
-    const src = slideSrc(L, viewing);
-    if (shell.img.getAttribute("src") !== src) shell.img.src = src;
+    if (isPptx(L)) {
+      const key = L.slide_dir + ":" + viewing;
+      shell.img.hidden = true;
+      if (shell.pptKey !== key) {
+        shell.slideBox.querySelector(".pptx-frame")?.remove();
+        shell.slideBox.insertBefore(pptxFrame(L, viewing), shell.simStage);
+        shell.pptKey = key;
+      }
+    } else {
+      shell.slideBox.querySelector(".pptx-frame")?.remove();
+      shell.pptKey = "";
+      shell.img.hidden = false;
+      const src = slideSrc(L, viewing);
+      if (shell.img.getAttribute("src") !== src) shell.img.src = src;
+    }
     if (shell.zoom && shell.zoom.getAttribute("src") !== src) shell.zoom.src = src;
     shell.img.alt = "슬라이드 " + viewing;
     shell.where.textContent = viewing + " / " + L.slide_count;
@@ -307,6 +321,8 @@ async function loadSim(a) {
 function showStageSim(a) {
   shell.stageSim = a || null;
   shell.img.hidden = !!a;
+  const pptFrame = shell.slideBox.querySelector(".pptx-frame");
+  if (pptFrame) pptFrame.hidden = !!a;
   shell.simStage.hidden = !a;
   const key = a ? a.id + ":" + a.html_ver : "";
   if (key === shell.stageKey) return;
@@ -333,7 +349,9 @@ function simCard(a) {
     c.el.replaceChildren(
       h("div", { class: "card-head" }, h("h2", {}, a.title), h("span", { class: "badge" }, "시뮬레이션")),
       h("p", { class: "muted small" }, "직접 조작해 보세요. 화면이 작으면 「화면 가득 보기」를 누르세요."),
-      h("button", { class: "primary", type: "button", onclick() { loadSim(a).then((html) => openSimFull(a.title, html)); } }, "화면 가득 보기"),
+      h("div", { class: "row wrap" },
+        h("button", { class: "primary", type: "button", onclick() { loadSim(a).then((html) => showFloatingSim(a.title, html, a.id + ":" + a.html_ver)); } }, "화면에 띄우기"),
+        h("button", { class: "ghost", type: "button", onclick() { loadSim(a).then((html) => openSimFull(a.title, html)); } }, "화면 가득 보기")),
       f);
     loadSim(a).then((html) => { if (c.key === key) f.srcdoc = html; })
       .catch(() => f.replaceWith(h("p", { class: "error" }, "시뮬레이션을 불러오지 못했습니다. 새로고침해 보세요.")));
