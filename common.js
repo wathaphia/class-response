@@ -194,8 +194,8 @@ function summaryView(questions, docs, opts) {
   });
 }
 
-function openModal(title, body) {
-  const close = () => box.remove();
+function openModal(title, body, onClose) {
+  const close = () => { box.remove(); if (onClose) onClose(); };
   const box = h("div", { class: "overlay", onclick(e) { if (e.target === box) close(); } },
     h("div", { class: "modal" },
       h("div", { class: "modal-head" }, h("h2", {}, title), h("button", { class: "ghost", type: "button", onclick: close }, "닫기")),

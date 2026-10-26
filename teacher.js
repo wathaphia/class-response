@@ -15,6 +15,10 @@ let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
 let me = null;            // 로그인한 교사(auth user)
 let passwordRecovery = false;
+let screenChannel = null;
+let screenChannelKey = "";
+let screenChannelReady = null;
+const screenWatchers = new Map();
 
 if (!sb) notConfigured(app);
 else {
@@ -669,6 +673,79 @@ function flash(text) {
 }
 
 // ---------- 학생 관리 ----------
+function ensureTeacherScreenChannel() {
+  if (screenChannel && screenChannelKey === lesson.id) return screenChannelReady;
+  if (screenChannel) {
+    for (const watch of [...screenWatchers.values()]) watch.close();
+    sb.removeChannel(screenChannel);
+  }
+  screenChannelKey = lesson.id;
+  screenChannel = sb.channel("class-screen:" + lesson.id, { config: { broadcast: { self: false } } });
+  screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
+  screenChannelReady = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("화면 공유 연결을 준비하지 못했습니다. 새로고침해 주세요.")), 10000);
+    screenChannel.subscribe((status) => {
+      if (status === "SUBSCRIBED") { clearTimeout(timeout); resolve(screenChannel); }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { clearTimeout(timeout); reject(new Error("화면 공유 채널에 연결하지 못했습니다.")); }
+    });
+  });
+  return screenChannelReady;
+}
+
+async function sendTeacherScreenSignal(payload) {
+  if (screenChannel) await screenChannel.send({ type: "broadcast", event: "signal", payload });
+}
+
+async function handleTeacherScreenSignal(message) {
+  if (!message || message.to !== "teacher") return;
+  const watch = screenWatchers.get(message.from);
+  if (!watch) return;
+  try {
+    if (message.type === "offer" && message.sdp) {
+      await watch.pc.setRemoteDescription(message.sdp);
+      for (const candidate of watch.queued) await watch.pc.addIceCandidate(candidate);
+      watch.queued = [];
+      await watch.pc.setLocalDescription(await watch.pc.createAnswer());
+      await sendTeacherScreenSignal({ type: "answer", from: "teacher", to: message.from, sdp: watch.pc.localDescription });
+      watch.status.textContent = "학생 화면에 연결했습니다.";
+    } else if (message.type === "candidate" && message.candidate) {
+      if (watch.pc.remoteDescription) await watch.pc.addIceCandidate(message.candidate);
+      else watch.queued.push(message.candidate);
+    } else if (message.type === "stopped") {
+      watch.status.textContent = "학생이 화면 공유를 중지했습니다.";
+      watch.video.srcObject = null;
+    }
+  } catch (e) {
+    watch.status.textContent = "화면 연결 오류: " + e.message;
+  }
+}
+
+async function watchStudentScreen(s) {
+  if (screenWatchers.size) return alert("실시간 화면은 한 번에 한 명씩 볼 수 있습니다. 먼저 열린 화면 창을 닫아 주세요.");
+  try {
+    await ensureTeacherScreenChannel();
+    const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, controls: true });
+    const status = h("p", { class: "muted small" }, "학생에게 화면 공유 요청을 보냈습니다. 학생이 공유를 허용할 때까지 기다립니다.");
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, video, status,
+      h("p", { class: "muted small" }, "지연과 데이터 사용량을 줄이기 위해 최대 640×360, 초당 8프레임으로 받습니다. 연결되지 않으면 학교 네트워크가 P2P 연결을 막았을 수 있습니다.")), () => {
+      sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id });
+      pc.close();
+      screenWatchers.delete(s.id);
+    });
+    const watch = { pc, video, status, queued: [], close };
+    screenWatchers.set(s.id, watch);
+    pc.ontrack = (e) => { video.srcObject = e.streams[0]; status.textContent = "실시간 화면을 보고 있습니다."; };
+    pc.onicecandidate = (e) => e.candidate && sendTeacherScreenSignal({ type: "candidate", from: "teacher", to: s.id, candidate: e.candidate });
+    pc.onconnectionstatechange = () => {
+      if (["failed", "disconnected"].includes(pc.connectionState)) status.textContent = "연결이 끊겼습니다. 학생에게 다시 요청해 주세요.";
+    };
+    await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id });
+  } catch (e) {
+    alert(e.message || e);
+  }
+}
+
 function drawStudents() {
   const now = Date.now();
   const rows = students.map((s) => {
@@ -682,6 +759,7 @@ function drawStudents() {
       h("td", {}, s.class_no), h("td", {}, s.name),
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)), h("td", {}, status),
       h("td", { class: "actions" },
+        h("button", { class: "ghost", type: "button", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
         h("button", {
           class: locked ? "primary" : "ghost", type: "button", disabled: !s.pin_set && !locked,
           async onclick() {
@@ -722,7 +800,7 @@ function drawStudents() {
   main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", {}, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 비밀번호는 암호화되어 교사도 볼 수 없습니다. 잊은 학생은 초기화해 주세요.")),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 화면 공유를 직접 허용해야 볼 수 있으며, 한 번에 한 명씩 저화질로 연결합니다.")),
     students.length ? h("div", { class: "table-wrap" }, h("table", {},
       h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));

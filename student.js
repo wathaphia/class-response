@@ -16,6 +16,12 @@ let following = true;   // 교사가 띄운 쪽을 따라가는 중인지
 let timer = null;
 let shell = null;
 const cards = new Map(); // 활동 id → 화면 카드
+let screenChannel = null;
+let screenChannelKey = "";
+let screenPc = null;
+let screenPending = false;
+let screenStudentId = null;
+let screenQueuedCandidates = [];
 
 if (!sb) notConfigured(app);
 else start();
@@ -40,6 +46,7 @@ function enterLesson(newCode) {
 
 // 이미 입장한 기기: 수업 코드만 넣으면 된다
 function showCodeOnly(notice) {
+  leaveScreenShare();
   stopPolling();
   shell = null;
   cards.clear();
@@ -63,6 +70,7 @@ function showCodeOnly(notice) {
 
 // ---------- 입장 ----------
 function showEntry(notice) {
+  leaveScreenShare();
   stopPolling();
   shell = null;
   cards.clear();
@@ -151,6 +159,14 @@ function logout(notice) {
   showEntry(notice);
 }
 
+function leaveScreenShare() {
+  if (screenPc) stopScreenShare();
+  if (screenChannel) sb.removeChannel(screenChannel);
+  screenChannel = null;
+  screenChannelKey = "";
+  screenPending = false;
+}
+
 // ---------- 서버에서 상태 받기 ----------
 function stopPolling() {
   clearTimeout(timer);
@@ -178,6 +194,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && to
 function apply(data) {
   const before = state;
   state = data;
+  ensureScreenChannel();
   if (!shell) buildShell();
   shell.conn.hidden = true;
   const teacherPage = clampPage(data.lesson.page);
@@ -203,6 +220,7 @@ function buildShell() {
   const conn = h("p", { class: "banner bad", hidden: true }, "연결이 끊겼습니다. 다시 연결하는 중…");
   const title = h("strong", {});
   const who = h("span", {});
+  const screenNotice = h("section", { class: "screen-share-note", hidden: true });
   const simStage = h("div", { class: "sim-stage", hidden: true });
   const slideBox = h("div", { class: "slide-box" }, img, simStage,
     h("nav", { class: "pager" }, prev, where, next, back, h("span", { class: "spacer" }),
@@ -214,10 +232,105 @@ function buildShell() {
       h("div", { class: "row" },
         h("button", { class: "link", type: "button", onclick() { history.replaceState(null, "", location.pathname); showCodeOnly(); } }, "다른 수업"),
         h("button", { class: "link", type: "button", onclick() { logout("나갔습니다. 다시 들어오려면 입장하세요."); } }, "나가기"))),
-    h("main", { class: "lesson" }, conn, closed, slideBox, list));
+    h("main", { class: "lesson" }, conn, closed, screenNotice, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
   const empty = h("p", { class: "muted center" });
-  shell = { img, simStage, prev, next, where, back, closed, conn, title, who, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
+  shell = { img, simStage, prev, next, where, back, closed, conn, title, who, screenNotice, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
+  renderScreenNotice();
+}
+
+function ensureScreenChannel() {
+  if (!state || !state.lesson.id) return;
+  if (screenChannel && screenChannelKey === state.lesson.id) return;
+  if (screenPc) stopScreenShare();
+  if (screenChannel) sb.removeChannel(screenChannel);
+  screenChannelKey = state.lesson.id;
+  screenStudentId = state.me.id;
+  screenChannel = sb.channel("class-screen:" + state.lesson.id, { config: { broadcast: { self: false } } });
+  screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleScreenSignal(payload));
+  screenChannel.subscribe();
+}
+
+function renderScreenNotice() {
+  if (!shell || !shell.screenNotice) return;
+  shell.screenNotice.hidden = !screenPending && !screenPc;
+  shell.screenNotice.replaceChildren(
+    h("span", {}, screenPc ? "화면을 교사에게 공유 중입니다. 브라우저의 공유 표시를 확인하고, 언제든 공유를 중지할 수 있습니다." : "교사가 화면 공유를 요청했습니다. 허용을 누른 뒤 화면 선택 창에서 이 수업 탭을 고르세요."),
+    screenPending && !screenPc ? h("button", { class: "primary", type: "button", onclick: startScreenShare }, "화면 공유 허용") : null,
+    screenPc ? h("button", { class: "ghost", type: "button", onclick: stopScreenShare }, "공유 중지" ) : null);
+}
+
+async function sendScreenSignal(payload) {
+  if (!screenChannel) return;
+  await screenChannel.send({ type: "broadcast", event: "signal", payload });
+}
+
+async function handleScreenSignal(message) {
+  if (!message || message.to !== screenStudentId) return;
+  if (message.type === "request") {
+    screenPending = true;
+    renderScreenNotice();
+    return;
+  }
+  if (!screenPending && !screenPc) return;
+  if (message.type === "answer" && screenPc && message.sdp) {
+    await screenPc.setRemoteDescription(message.sdp);
+    for (const c of screenQueuedCandidates) await screenPc.addIceCandidate(c);
+    screenQueuedCandidates = [];
+  } else if (message.type === "candidate" && screenPc && message.candidate) {
+    if (screenPc.remoteDescription) await screenPc.addIceCandidate(message.candidate);
+    else screenQueuedCandidates.push(message.candidate);
+  } else if (message.type === "stop") {
+    stopScreenShare(false);
+  }
+}
+
+async function startScreenShare() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    screenPending = false;
+    shell.screenNotice.replaceChildren(h("span", {}, "이 브라우저에서는 화면 공유를 사용할 수 없습니다. Chrome 또는 Edge를 사용해 주세요."));
+    return;
+  }
+  try {
+    // 화면 선택과 브라우저 권한은 학생이 직접 승인해야 한다.
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 6, max: 8 } }, audio: false });
+    screenPending = false;
+    screenPc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    screenQueuedCandidates = [];
+    stream.getTracks().forEach((track) => {
+      if (track.kind === "video") track.applyConstraints({ width: { max: 640 }, height: { max: 360 }, frameRate: { max: 8 } }).catch(() => {});
+      screenPc.addTrack(track, stream);
+      track.addEventListener("ended", () => stopScreenShare());
+    });
+    for (const sender of screenPc.getSenders()) {
+      const params = sender.getParameters();
+      params.encodings = params.encodings || [{}];
+      params.encodings[0].maxBitrate = 250000;
+      params.encodings[0].maxFramerate = 8;
+      await sender.setParameters(params).catch(() => {});
+    }
+    screenPc.onicecandidate = (e) => e.candidate && sendScreenSignal({ type: "candidate", from: screenStudentId, to: "teacher", candidate: e.candidate });
+    const offer = await screenPc.createOffer();
+    await screenPc.setLocalDescription(offer);
+    await sendScreenSignal({ type: "offer", from: screenStudentId, to: "teacher", sdp: screenPc.localDescription });
+    renderScreenNotice();
+  } catch (e) {
+    screenPending = false;
+    renderScreenNotice();
+    if (e.name !== "NotAllowedError") alert("화면 공유를 시작하지 못했습니다: " + e.message);
+  }
+}
+
+function stopScreenShare(send = true) {
+  if (send) sendScreenSignal({ type: "stopped", from: screenStudentId, to: "teacher" });
+  if (screenPc) {
+    screenPc.getSenders().forEach((s) => s.track && s.track.stop());
+    screenPc.close();
+  }
+  screenPc = null;
+  screenPending = false;
+  screenQueuedCandidates = [];
+  renderScreenNotice();
 }
 
 // 슬라이드를 화면 가득 띄운다. 누르거나 Esc로 닫는다. 선생님이 쪽을 넘기면 띄운 그림도 바뀐다.
@@ -260,6 +373,7 @@ function render(pageChanged) {
   shell.closed.hidden = L.open;
   shell.slideBox.hidden = !hasSlides;
   if (hasSlides) {
+    let src = "";
     if (isPptx(L)) {
       const key = L.slide_dir + ":" + viewing;
       shell.img.hidden = true;
@@ -272,7 +386,7 @@ function render(pageChanged) {
       shell.slideBox.querySelector(".pptx-frame")?.remove();
       shell.pptKey = "";
       shell.img.hidden = false;
-      const src = slideSrc(L, viewing);
+      src = slideSrc(L, viewing);
       if (shell.img.getAttribute("src") !== src) shell.img.src = src;
     }
     if (shell.zoom && shell.zoom.getAttribute("src") !== src) shell.zoom.src = src;

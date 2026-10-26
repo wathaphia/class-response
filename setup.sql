@@ -246,8 +246,8 @@ begin
   end if;
 
   return jsonb_build_object(
-    'me', jsonb_build_object('class_no', s.class_no, 'name', s.name),
-    'lesson', jsonb_build_object('code', l.code, 'title', l.title, 'slide_dir', l.slide_dir,
+    'me', jsonb_build_object('id', s.id, 'class_no', s.class_no, 'name', s.name),
+    'lesson', jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title, 'slide_dir', l.slide_dir,
                                  'slide_count', l.slide_count, 'page', l.page, 'open', l.open, 'kind', l.kind),
     'activities', coalesce((
       select jsonb_agg(jsonb_build_object(
