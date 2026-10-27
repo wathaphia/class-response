@@ -1306,7 +1306,32 @@ function drawSettings() {
         h("button", { class: "ghost", type: "button", onclick: showJoin }, "QR 크게 보기"),
         h("button", { class: "ghost", type: "button", onclick: duplicate }, "다른 반용으로 복제"),
         h("button", { class: "ghost danger", type: "button", onclick: remove }, "수업 지우기"))) : null),
-    slides && slides.allCard ? h("div", { class: "stack settings-right" }, slides.allCard) : null));
+    slides && slides.allCard ? h("div", { class: "settings-slot" }, h("div", { class: "stack settings-right" }, slides.allCard)) : null));
+  pinSettingsRight();
+}
+
+// 수업 설정 오른쪽(전체 슬라이드·다중 선택 삭제)을 넓은 화면에서 화면에 고정한다(왼쪽을 스크롤해도 움직이지 않게).
+// 자리는 그리드의 빈 칸(settings-slot)이 잡고, 패널은 그 칸의 위치·너비에 맞춰 position: fixed로 띄운다.
+let pinWatch = null;
+function pinSettingsRight() {
+  if (pinWatch) { pinWatch.ro.disconnect(); removeEventListener("resize", pinWatch.fit); pinWatch = null; }
+  const slot = main.querySelector(".settings-slot");
+  if (!slot) return;
+  const panel = slot.firstChild;
+  const head = app.querySelector(".top");
+  const fit = () => {
+    if (!slot.isConnected) return;
+    if (!matchMedia("(min-width: 901px)").matches) { panel.style.cssText = ""; return; }
+    const r = slot.getBoundingClientRect();
+    const top = (head ? head.offsetHeight : 0) + 16;
+    panel.style.cssText = "left:" + r.left + "px;width:" + r.width + "px;top:" + top + "px;max-height:" + (innerHeight - top - 16) + "px";
+  };
+  const ro = new ResizeObserver(fit);
+  ro.observe(slot);
+  if (head) ro.observe(head);
+  addEventListener("resize", fit);
+  pinWatch = { ro, fit };
+  fit();
 }
 
 // 단계 그림 미리보기 이름: "3쪽" 또는 "3쪽 · 2/4"
