@@ -1178,22 +1178,48 @@ function slidesCard() {
   }
   const anim = !!slideSteps(lesson);
   const ppt = isPptx(lesson);   // Office 뷰어로 보여 주는 자료: 쪽 미리보기·삭제·전환 효과 없음
+  // 전환 효과 미리보기: 1쪽 ↔ 2쪽을 이 화면에서만 넘겨 본다(수업 쪽·학생 화면은 그대로)
+  const pvPages = slideTotal(lesson) >= 2 ? [pageOfSlide(lesson, 1), pageOfSlide(lesson, 2)] : [1, Math.min(2, lesson.slide_count || 1)];
+  const pv = h("img", { class: "slide", alt: "전환 효과 미리보기" });
+  let pvAt = 0;
+  const pvGo = (to) => {
+    if (to === pvAt) return;
+    swapSlide(pv, slideSrc(lesson, pvPages[to]), fxPick.value, to > pvAt ? 1 : -1);
+    pvAt = to;
+  };
+  const pvPlay = () => {
+    const was = pvAt;
+    pvGo(0);   // 2쪽에 있었으면 먼저 1쪽으로 돌아가는 효과를 보여 준 뒤
+    setTimeout(() => pvGo(1), was === 0 ? 50 : 750);   // 2쪽으로 넘어가는 효과
+  };
   const fxPick = h("select", {
     "aria-label": "슬라이드 전환 효과",
-    async onchange() {
-      const { error } = await sb.from("lessons").update({ slide_dir: withFx(lesson.slide_dir, fxPick.value) }).eq("id", lesson.id);
-      if (error) return alert("바꾸지 못했습니다: " + error.message);
-      flash("전환 효과: " + SLIDE_FX[fxPick.value]);
-      await loadLessons(lesson.id);
+    onchange() {
+      pvPlay();   // 고르자마자 미리보기, 효과가 끝난 뒤 저장
+      setTimeout(async () => {
+        const { error } = await sb.from("lessons").update({ slide_dir: withFx(lesson.slide_dir, fxPick.value) }).eq("id", lesson.id);
+        if (error) return alert("바꾸지 못했습니다: " + error.message);
+        flash("전환 효과: " + SLIDE_FX[fxPick.value]);
+        await loadLessons(lesson.id);
+      }, 1400);
     },
   }, Object.entries(SLIDE_FX).map(([k, name]) => h("option", { value: k, selected: k === slideFx(lesson) }, name)));
+  if (lesson.slide_count && !ppt) swapSlide(pv, slideSrc(lesson, pvPages[0]), "none", 1);
+  const fxBox = h("div", { class: "fx-box stack" },
+    h("label", { class: "row" }, h("span", {}, "슬라이드 전환 효과"), fxPick,
+      h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")),
+    h("div", { class: "fx-preview" }, pv),
+    h("div", { class: "row" },
+      h("button", { class: "ghost", type: "button", onclick() { pvGo(0); } }, "◀ 1쪽"),
+      h("button", { class: "ghost", type: "button", onclick() { pvGo(1); } }, "2쪽 ▶"),
+      h("button", { class: "ghost", type: "button", onclick: pvPlay }, "다시 보기"),
+      h("span", { class: "muted small grow" }, "미리보기는 이 화면에서만 움직이고 학생 화면은 바뀌지 않습니다.")));
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
     h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), bar, status,
     anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
-    lesson.slide_count && !ppt ? h("label", { class: "row" }, h("span", {}, "슬라이드 전환 효과"), fxPick,
-      h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")) : null,
+    lesson.slide_count && !ppt ? fxBox : null,
     ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
     lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
