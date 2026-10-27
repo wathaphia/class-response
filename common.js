@@ -413,9 +413,12 @@ function openSimFull(title, html, { autoplay = false } = {}) {
   if (box.requestFullscreen) box.requestFullscreen().catch(() => {});
 }
 
-function slideSrc(lesson, n) {
+// small: 학생 기기·썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.
+// 교사 화면(TV)과 학생의 「크게 보기」는 큰 그림(1280px)을 쓴다.
+function slideSrc(lesson, n, small) {
   const dir = lesson.slide_dir.trim();
-  return encodeURI(dir.includes("{n}") ? dir.split("{n}").join(n) : dir.replace(/\/+$/, "") + "/" + n + ".png");
+  const k = small && /[?&]sm=1/.test(dir) && dir.includes("{n}.jpg") ? n + "s" : n;
+  return encodeURI(dir.includes("{n}") ? dir.split("{n}").join(k) : dir.replace(/\/+$/, "") + "/" + n + ".png");
 }
 
 function isPptx(lesson) { return (lesson.slide_dir || "").startsWith("pptx:"); }
