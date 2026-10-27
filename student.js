@@ -246,14 +246,17 @@ function buildShell() {
 }
 
 function ensureScreenChannel() {
-  if (!state || !state.lesson.id) return;
-  if (screenChannel && screenChannelKey === state.lesson.id) return;
+  // 채널 이름은 수업 코드로 만든다(예전 setup.sql 은 수업 id·학생 id를 보내 주지 않음)
+  if (!state) return;
+  const key = screenChannelName(state.lesson.code || code);
+  if (!key) return;
+  if (screenChannel && screenChannelKey === key) return;
   if (screenPc) stopScreenShare();
   if (screenChannel) sb.removeChannel(screenChannel);
-  screenChannelKey = state.lesson.id;
-  // 예전 setup.sql 은 학생 id를 보내 주지 않으므로 그때는 학번·이름으로 알아본다(교사 화면도 같은 이름을 함께 보냄)
+  screenChannelKey = key;
+  // 학생 id가 없으면 학번·이름으로 알아본다(교사 화면도 같은 이름을 함께 보냄)
   screenStudentId = state.me.id || screenKey(state.me);
-  screenChannel = sb.channel("class-screen:" + state.lesson.id, { config: { broadcast: { self: false } } });
+  screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleScreenSignal(payload));
   screenChannel.subscribe();
 }
@@ -316,6 +319,7 @@ function mirrorSnapshot() {
     else if (el.type !== "password") c.setAttribute("value", el.value);
   });
   clone.querySelectorAll(".screen-share-note").forEach((el) => el.remove());
+  clone.querySelectorAll(".slide").forEach((el) => el.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"));   // 갱신마다 전환 효과가 다시 돌지 않게
   clone.querySelectorAll("iframe").forEach((el) => el.replaceWith(h("p", { class: "card muted" }, "[시뮬레이션 화면]")));
   return clone.outerHTML;
 }

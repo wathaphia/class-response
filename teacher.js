@@ -696,13 +696,14 @@ function flash(text) {
 
 // ---------- 학생 관리 ----------
 function ensureTeacherScreenChannel() {
-  if (screenChannel && screenChannelKey === lesson.id) return screenChannelReady;
+  const key = screenChannelName(lesson.code);
+  if (screenChannel && screenChannelKey === key) return screenChannelReady;
   if (screenChannel) {
     for (const watch of [...screenWatchers.values()]) watch.close();
     sb.removeChannel(screenChannel);
   }
-  screenChannelKey = lesson.id;
-  screenChannel = sb.channel("class-screen:" + lesson.id, { config: { broadcast: { self: false } } });
+  screenChannelKey = key;
+  screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
   screenChannelReady = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("화면 공유 연결을 준비하지 못했습니다. 새로고침해 주세요.")), 10000);

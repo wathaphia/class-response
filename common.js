@@ -68,6 +68,7 @@ function slideLabel(lesson, page) {
 }
 // 실시간 화면 신호에서 학생을 알아보는 이름(학생 id를 모를 때 씀)
 const screenKey = (s) => "k:" + s.class_no + ":" + s.name;
+const screenChannelName = (code) => (code ? "class-screen:" + String(code).trim().toUpperCase() : "");
 
 // 슬라이드 전환 효과: slide_dir 끝의 fx=… (없으면 페이드)
 const SLIDE_FX = { fade: "페이드", push: "밀어내기", zoom: "확대", none: "없음" };
