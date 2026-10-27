@@ -35,7 +35,8 @@ let mirrorLite = false;
 let liteKeep = 0;
 let liteEvery = 500;                 // 일괄 미리보기 그림 간격(교사가 학생 수에 맞춰 정함)
 let screenDataChannel = null;
-const LITE = { every: 500, maxW: 320, q: 0.4, rtc: { fps: 10, br: 150000, h: 240 } };
+// 일괄 미리보기(작은 칸 320×180): 중계 트래픽을 줄이려고 영상은 6 FPS·높이 180·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
+const LITE = { every: 500, maxW: 320, q: 0.4, rtc: { fps: 6, br: 70000, h: 180 } };
 
 if (!sb) notConfigured(app);
 else start();
@@ -362,7 +363,8 @@ function stopMirror(send = true) {
   clearInterval(mirrorBeat);
   clearTimeout(mirrorTimer);
   mirrorBeat = mirrorTimer = null;
-  simFrames().forEach((f) => f.contentWindow?.postMessage({ craMirror: "stop" }, "*"));
+  // 멈춘 시뮬레이션은 다음에 보여 줄 때(일괄 미리보기 ↔ 크게 보기) 촬영기·영상을 다시 시작해야 한다
+  simFrames().forEach((f) => { f.contentWindow?.postMessage({ craMirror: "stop" }, "*"); simStarted.delete(f); });
   if (send && was) sendScreenSignal({ type: "stopped", from: screenStudentId, to: "teacher" });
   renderScreenNotice();
 }
@@ -386,7 +388,7 @@ function startSimAgents() {
         : { craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
       // 캔버스가 있으면 영상(WebRTC)으로도 보낸다. 중계 서버 접속 정보는 학생 토큰으로 받는다.
       iceServers({ body: { token, code: state.lesson.code || code } })
-        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: forceRelay(), opt: mirrorLite ? LITE.rtc : null }, "*"));
+        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: relayFirst(ice), opt: mirrorLite ? LITE.rtc : null }, "*"));
     };
     f.addEventListener("load", () => { if (mirrorOn) start(); });
     start();
@@ -534,7 +536,8 @@ async function startScreenShare() {
     // 화면 선택과 브라우저 권한은 학생이 직접 승인해야 한다.
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 6, max: 8 } }, audio: false });
     screenPending = false;
-    screenPc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const ice = await iceServers({ body: { token, code: state.lesson.code || code } });
+    screenPc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relayFirst(ice) ? "relay" : "all" });
     screenQueuedCandidates = [];
     stream.getTracks().forEach((track) => {
       if (track.kind === "video") track.applyConstraints({ width: { max: 640 }, height: { max: 360 }, frameRate: { max: 8 } }).catch(() => {});

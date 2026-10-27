@@ -138,6 +138,10 @@ const STUN_ONLY = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun
 let iceCache = null;
 // 시험용: 이 브라우저에서 localStorage 「cra-force-relay」=1 이면 중계 서버만 쓴다(중계 경로가 되는지 확인할 때)
 function forceRelay() { try { return localStorage.getItem("cra-force-relay") === "1"; } catch { return false; } }
+// 중계 우선: TURN 접속 정보를 받았으면 보내는 쪽(학생)은 중계 서버로만 보낸다(학교망·방화벽에서도 끊기지 않게).
+// 받는 쪽(교사)은 모든 경로를 열어 두어, 중계 → 교사로 바로 이어지고 중계를 두 번 거치지 않는다. 못 받았으면 STUN(직접 연결).
+const hasTurn = (list) => list.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
+const relayFirst = (list) => forceRelay() || hasTurn(list);
 async function iceServers(auth) {
   const url = typeof TURN_URL === "string" ? TURN_URL.trim() : "";
   if (!url) return STUN_ONLY;
