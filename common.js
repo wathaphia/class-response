@@ -103,6 +103,38 @@ function deckUrl(lesson) {
   return /[?&]deck=1/.test(lesson.slide_dir || "") ? lesson.slide_dir.split("?")[0].replace(/\{n\}\.jpg$/, "deck.pptx") : null;
 }
 
+// 시뮬레이션 화면 촬영기: 학생 화면의 시뮬레이션 안에 넣는다. 부모(학생 화면)가 start 를 보내면
+// 바뀐 화면 구조(head·body)와 캔버스 그림(JPEG)만 보내고, 부모가 다 보냈다고 답(ack)해야 다음 장면을 찍는다.
+// 밀린 장면이 쌓이지 않아 지연이 늘지 않는다(최신 장면만 보냄).
+const SIM_AGENT = `<script>(function(){if(window.__craAgent)return;window.__craAgent=1;
+var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0;
+function snap(){var d=document,canv=d.querySelectorAll("canvas"),data={},root=d.documentElement.cloneNode(true),cc=root.querySelectorAll("canvas");
+for(var i=0;i<canv.length;i++){var c=canv[i],url="";
+try{var s=Math.min(1,maxW/(c.width||1)),t=d.createElement("canvas");t.width=Math.max(1,Math.round(c.width*s));t.height=Math.max(1,Math.round(c.height*s));var x=t.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,t.width,t.height);x.drawImage(c,0,0,t.width,t.height);url=t.toDataURL("image/jpeg",q);}catch(e){}
+if(url&&url!==last[i]){data[i]=url;last[i]=url;}
+var r=c.getBoundingClientRect(),img=d.createElement("img");img.setAttribute("data-cra-canvas",String(i));img.className=c.className;
+img.setAttribute("style",(c.getAttribute("style")||"")+";width:"+r.width+"px;height:"+r.height+"px;");cc[i].parentNode.replaceChild(img,cc[i]);}
+var fi=d.querySelectorAll("input,textarea,select"),ti=root.querySelectorAll("input,textarea,select");
+for(var j=0;j<fi.length&&j<ti.length;j++){var a=fi[j],b=ti[j];
+if(a.type==="checkbox"||a.type==="radio"){if(a.checked)b.setAttribute("checked","");else b.removeAttribute("checked");}
+else if(a.tagName==="TEXTAREA")b.textContent=a.value;
+else if(a.tagName==="SELECT"){for(var k=0;k<b.options.length;k++){if(k===a.selectedIndex)b.options[k].setAttribute("selected","");else b.options[k].removeAttribute("selected");}}
+else if(a.type!=="password")b.setAttribute("value",a.value);}
+var sc=root.querySelectorAll("script");for(var m=0;m<sc.length;m++)sc[m].parentNode.removeChild(sc[m]);
+var head=root.querySelector("head"),body=root.querySelector("body"),hh=head?head.innerHTML:"",bh=body?body.innerHTML:"",bs=body?(body.getAttribute("style")||""):"";
+var msg={craSim:1,canvases:data,w:innerWidth,h:innerHeight,sx:scrollX,sy:scrollY,t:Date.now()},key=hh+"|#|"+bh+"|#|"+bs;
+if(key!==lastKey){msg.head=hh;msg.body=bh;msg.bs=bs;lastKey=key;}return msg;}
+function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=false;return;}parent.postMessage(m,"*");}
+addEventListener("message",function(e){var m=e.data||{};if(e.source!==parent)return;
+if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;clearInterval(timer);timer=setInterval(tick,m.every||200);tick();}
+else if(m.craMirror==="stop"){on=false;clearInterval(timer);}
+else if(m.craAck){busy=false;if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;if(m.resend){last={};lastKey="";}}});})();<\/script>`;
+function withSimAgent(html) {
+  if (!html || html.includes("__craAgent")) return html;
+  const doctype = /^\s*<!doctype[^>]*>/i;
+  return doctype.test(html) ? html.replace(doctype, (m) => m + SIM_AGENT) : SIM_AGENT + html;
+}
+
 // 시뮬레이션(html) 칸. sandbox 로 격리해서 이 웹앱의 로그인 정보나 저장소에 손대지 못하게 한다.
 function simFrame(html, title) {
   const f = h("iframe", { class: "sim-frame", title: title || "시뮬레이션", loading: "lazy" });

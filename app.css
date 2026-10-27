@@ -263,3 +263,6 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .mirror-state { font-weight: 700; }
 .mirror-state.away { color: var(--bad, #b42318); }
 .screen-share-note { flex-wrap: wrap; }
+/* 선생님이 지금 보고 있을 때 학생 화면 알림을 눈에 띄게 */
+.screen-share-note.live { border-color: var(--bad); background: #fff5f4; }
+.sim-mirror { margin-top: .5rem; }
