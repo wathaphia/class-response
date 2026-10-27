@@ -715,53 +715,79 @@ function activityPreview(a) {
           a.kind === "quiz" && [].concat(q.answer ?? []).includes(o) ? h("strong", { class: "right-mark" }, " ✓정답") : null))) : null)));
 }
 
+// 오른쪽 활동 목록이 바뀌었는지 가리는 표시(시뮬레이션 html은 길이만 본다)
+const buildListKey = () => lesson.id + "|" + JSON.stringify(activities.map((a) => ({ ...a, html: (a.html || "").length })));
+
+// 활동 칸의 「수정/수정 중」 표시만 지금 편집 중인 활동에 맞춘다
+function markEditingRow(row, a) {
+  const on = !!(editing && editing.id === a.id);
+  row.classList.toggle("on", on);
+  const btn = row.querySelector(".act-edit");
+  if (btn) { btn.className = "act-edit " + (on ? "primary" : "ghost"); btn.textContent = on ? "수정 중" : "수정"; }
+}
+
 function drawBuild() {
   activities = sortActivities(activities);
   const ids = new Set(activities.map((a) => a.id));
   for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
-  const list = activities.length ? activities.map((a) => h("div", { class: "act-row" + (editing && editing.id === a.id ? " on" : "") },
-    h("div", { class: "act-head stack" },
-      // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
-      h("div", { class: "act-id" },
-        h("strong", { class: "act-page" }, whereText(a)),
-        h("div", { class: "act-name" },
-          h("p", { class: "muted small" }, activityName(a)),
-          h("h3", {}, a.title))),
-      h("div", { class: "act-btns" },
-        a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
-        h("button", { type: "button", class: editing && editing.id === a.id ? "primary" : "ghost",
-          onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } },
-          editing && editing.id === a.id ? "수정 중" : "수정"))),
-    h("div", { class: "act-body" }, activityPreview(a)))) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
-  const kindList = lesson.kind === "survey" ? { survey: "정답 없는 설문", quiz: "정답·자동 채점" } : { slide: "쪽 아래에 붙는 질문", survey: "정답 없는 설문", quiz: "정답·자동 채점" };
-  const kinds = h("div", { class: "kinds" }, Object.entries(kindList).map(([k, sub]) =>
-    h("button", {
-      type: "button", class: "kind",
-      onclick() {
-        editing = { kind: k, title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: true, named: false, shared: false, questions: [newQuestion(k === "survey" ? "long" : "choice")] };
-        drawBuild();
-      },
-    }, h("strong", {}, KIND_NAME[k]), h("span", {}, sub))),
+  const kinds = h("div", { class: "kinds" },
+    (lesson.kind === "survey" ? ["survey", "quiz"] : ["slide", "survey", "quiz"]).map((k) =>
+      h("button", {
+        type: "button", class: "kind",
+        onclick() {
+          editing = { kind: k, title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: true, named: false, shared: false, questions: [newQuestion(k === "survey" ? "long" : "choice")] };
+          drawBuild();
+        },
+      }, h("strong", {}, KIND_NAME[k]))),
     h("button", { type: "button", class: "kind", onclick() {
       editing = { kind: "survey", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: false, named: false, shared: false,
         questions: [{ id: newId(), type: "info", text: "" }] };
       drawBuild();
-    } }, h("strong", {}, "설명 카드"), h("span", {}, "글과 외부 링크만 표시")),
+    } }, h("strong", {}, "설명 카드")),
     h("button", { type: "button", class: "kind", onclick() {
       editing = { kind: "sim", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, sim_full: lesson.slide_count > 0, html: "", questions: [] };
       drawBuild();
-    } }, h("strong", {}, "시뮬레이션"), h("span", {}, "html 파일을 슬라이드 사이에")));
+    } }, h("strong", {}, "시뮬레이션")));
+  const asideKids = [h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds), editing ? editor() : null];
+  const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
+  const key = buildListKey();
+  const box = main.querySelector(".build");
+  // 활동 목록이 그대로면 왼쪽만 다시 그린다. 오른쪽을 다시 붙이면 시뮬레이션 칸(iframe)이 처음부터 다시 실행되어 깜빡인다.
+  if (box && box.dataset.list === key) {
+    const aside = box.querySelector(":scope > aside");
+    const y = aside.scrollTop;
+    aside.replaceChildren(...asideKids.filter(Boolean));
+    aside.scrollTop = y;
+    box.querySelector(".act-hint").replaceChildren(...[hint()].filter(Boolean));
+    box.querySelectorAll(".act-row").forEach((row, i) => markEditingRow(row, activities[i]));
+    return;
+  }
+  const list = activities.length ? activities.map((a) => {
+    const row = h("div", { class: "act-row" },
+      h("div", { class: "act-head stack" },
+        // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
+        h("div", { class: "act-id" },
+          h("strong", { class: "act-page" }, whereText(a)),
+          h("div", { class: "act-name" },
+            h("p", { class: "muted small" }, activityName(a)),
+            h("h3", {}, a.title))),
+        h("div", { class: "act-btns" },
+          a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
+          h("button", { type: "button", class: "act-edit",
+            onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } }))),
+      h("div", { class: "act-body" }, activityPreview(a)));
+    markEditingRow(row, a);
+    return row;
+  }) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
   // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
   const keep = [".build > aside", ".act-scroll"].map((q) => main.querySelector(q)?.scrollTop || 0);
   main.classList.add("build-page");
-  main.replaceChildren(h("div", { class: "build" },
-    h("aside", { class: "stack" },
-      h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds),
-      editing ? editor() : null),
+  main.replaceChildren(h("div", { class: "build", "data-list": key },
+    h("aside", { class: "stack" }, asideKids),
     h("div", { class: "build-main stack" },
       h("section", { class: "card stack act-list" },
         h("div", { class: "row between" }, h("h2", {}, "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "")),
-          editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.")),
+          h("div", { class: "act-hint" }, hint())),
         h("div", { class: "act-scroll" }, h("div", { class: "act-grid" }, list))))));
   [".build > aside", ".act-scroll"].forEach((q, i) => { const el = main.querySelector(q); if (el) el.scrollTop = keep[i]; });
   pinBuild();

@@ -223,8 +223,7 @@ main.lesson .slide { cursor: zoom-in; }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
 .kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .4rem; }
-.kind { display: grid; gap: .1rem; padding: .6rem .4rem; min-height: 64px; background: #fff; border: 1px solid var(--field); text-align: center; }
-.kind span { font-size: .78rem; color: var(--muted); }
+.kind { display: grid; gap: .1rem; padding: .6rem .4rem; min-height: 48px; background: #fff; border: 1px solid var(--field); text-align: center; }
 .kind:hover { border-color: var(--accent); }
 .q-edit { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
 
