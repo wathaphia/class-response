@@ -857,14 +857,18 @@ function paintSim(watch, k) {
 
 // 시뮬레이션 영상(WebRTC): 학생 시뮬레이션의 가장 큰 캔버스를 15~30 FPS 영상으로 받는다.
 // 연결되면 학생 쪽은 그 캔버스의 JPEG 전송을 멈추고, 연결되지 않으면(학교망이 막는 등) 그림 전송이 그대로 이어진다.
-const RTC_ICE = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
+async function teacherIce() {
+  const { data } = await sb.auth.getSession();
+  return iceServers({ headers: data.session ? { Authorization: "Bearer " + data.session.access_token } : {} });
+}
 async function simRtc(watch, m) {
   const send = (rtc, extra) => sendTeacherScreenSignal({ type: "sim-rtc", from: "teacher", to: m.from, k: m.k, rtc, ...extra });
   if (m.rtc === "offer" && m.sdp) {
-    watch.rtc.get(m.k)?.pc.close();
-    const pc = new RTCPeerConnection({ iceServers: RTC_ICE });
-    const r = { pc, queued: [] };
-    watch.rtc.set(m.k, r);
+    watch.rtc.get(m.k)?.pc?.close();
+    const r = { pc: null, queued: [] };
+    watch.rtc.set(m.k, r);   // 접속 정보를 받는 동안 온 연결 후보도 모아 둔다
+    const pc = new RTCPeerConnection({ iceServers: await teacherIce() });
+    r.pc = pc;
     pc.ontrack = (e) => {
       const s = watch.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };
       s.stream = e.streams[0] || new MediaStream([e.track]);
@@ -885,7 +889,7 @@ async function simRtc(watch, m) {
   } else if (m.rtc === "ice" && m.candidate) {
     const r = watch.rtc.get(m.k);
     if (!r) return;
-    if (r.pc.remoteDescription) await r.pc.addIceCandidate(m.candidate).catch(() => {});
+    if (r.pc && r.pc.remoteDescription) await r.pc.addIceCandidate(m.candidate).catch(() => {});
     else r.queued.push(m.candidate);
   }
 }
@@ -893,7 +897,7 @@ async function simRtc(watch, m) {
 // 영상의 실제 FPS와 지연(왕복 시간의 절반 + 재생 대기 시간)을 1초마다 WebRTC 통계에서 읽는다
 async function readRtcStats(watch) {
   for (const r of watch.rtc.values()) {
-    if (r.pc.connectionState !== "connected") continue;
+    if (!r.pc || r.pc.connectionState !== "connected") continue;
     let fps = 0, rtt = 0, jb = 0, relay = false;
     (await r.pc.getStats()).forEach((x) => {
       if (x.type === "inbound-rtp" && x.kind === "video") {
@@ -960,7 +964,7 @@ async function watchStudentScreen(s) {
       sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
       pc.close();
       clearInterval(watch.statsTimer);
-      for (const r of watch.rtc.values()) r.pc.close();
+      for (const r of watch.rtc.values()) r.pc?.close();
       screenWatchers.delete(s.id);
       screenWatchers.delete(screenKey(s));
     });
