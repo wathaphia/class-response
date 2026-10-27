@@ -272,3 +272,7 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .presence.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
 .presence.away { background: #e08a00; box-shadow: 0 0 0 3px #fff1db; }
 .chip.away { background: #fff1db; color: #a35f00; border-color: #f2c98a; font-weight: 700; }
+
+/* 수업 설정: 전환 효과 미리보기(작은 화면) */
+.fx-preview { max-width: 360px; overflow: hidden; border-radius: 12px; }
+.fx-box { padding: .75rem; border: 1px solid var(--line); border-radius: 12px; }
