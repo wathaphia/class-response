@@ -1,0 +1,22 @@
+# Supabase 무료 프로젝트는 1주일 동안 요청이 없으면 일시 정지된다. 매일 한 번 가볍게 물어봐서 깨워 둔다.
+# (config.js 의 공개 publishable 키만 쓴다. 저장소에 60일 동안 변화가 없으면 GitHub가 이 예약 작업을 멈추니, 그때는 Actions 탭에서 다시 켠다.)
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "17 21 * * *"   # 매일 한국 시간 오전 6시 17분
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Supabase에 요청 한 번 보내기
+        run: |
+          URL=$(sed -n 's/.*SUPABASE_URL *= *"\([^"]*\)".*/\1/p' config.js)
+          KEY=$(sed -n 's/.*SUPABASE_KEY *= *"\([^"]*\)".*/\1/p' config.js)
+          curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "$URL/rest/v1/lessons?select=id&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
