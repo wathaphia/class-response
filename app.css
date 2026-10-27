@@ -185,6 +185,8 @@ main.lesson .slide { cursor: zoom-in; }
 .build { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
 .build > aside { flex: 1 1 280px; min-width: 0; }
 .build > .build-main { flex: 999 1 560px; min-width: 0; }
+/* 칸 순서는 style.order로 바꾼다(칸을 옮기면 시뮬레이션이 다시 불러와짐) */
+.act-grid { display: flex; flex-direction: column; }
 .act-row { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); align-items: start; }
 .act-row.on { background: var(--accent-soft); border-radius: 12px; padding: 1rem; outline: 2px solid var(--accent); }
 .act-head { gap: .4rem; }
@@ -258,7 +260,9 @@ input.num.page-num { width: 3.9rem; padding: .5rem .4rem; text-align: center; }
 /* 설명·질문 칸: 위 줄은 「설명 n / 질문 n」과 오른쪽 위 「삭제」 */
 .info-edit { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
 .blk-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.blk-del { min-height: 34px; padding: 0 .75rem; font-size: .88rem; background: #fff; color: var(--bad); border: 1px solid var(--field); border-radius: 8px; }
+/* 질문 칸 위 줄의 제목 칸(비우면 「질문 n」) */
+.blk-top input.blk-title { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+.blk-del { flex-shrink: 0; white-space: nowrap; min-height: 34px; padding: 0 .75rem; font-size: .88rem; background: #fff; color: var(--bad); border: 1px solid var(--field); border-radius: 8px; }
 .blk-del:hover, .blk-del:focus-visible { background: var(--bad); color: #fff; border-color: var(--bad); }
 .anon-tog { min-height: 40px; padding: 0 .7rem; }
 .anon-tog.on { padding: 0 calc(.7rem - 1px); }
