@@ -381,35 +381,24 @@ async function drawManage() {
 }
 
 // ---------- 기타 관리 ----------
-// 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프로 보여 준다.
-// 탭을 열면 5분 넘게 지난 것만, 「동기화」를 누르면 모두 다시 받는다. 탭을 열어 두면 Supabase(접속 중 학생 등)는 30초마다 새로 받는다.
-// GitHub는 로그인 없이 묻기 때문에 이 PC에서 시간당 60번까지만 되므로 저절로 다시 받지 않는다.
+// 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프와 표로 보여 준다.
+// 받는 곳은 셋: Supabase 함수 resource_usage(DB 안 숫자), Worker /usage(Supabase 관리 API·Cloudflare 숫자), GitHub 공개 API.
+// 탭을 열면 5분 넘게 지난 것만, 「동기화」를 누르면 모두 다시 받는다. 탭을 열어 두면 DB 안 숫자(접속 중 학생 등)만 30초마다 새로 받는다
+// (Worker는 KV 목록 읽기 하루 1,000번, GitHub는 이 PC에서 시간당 60번 한도라 저절로 다시 받지 않는다).
 const GITHUB_REPO = "wathaphia/class-response";
 const MB = 1024 * 1024, GB = 1024 * MB;
 const ETC_POLL_MS = 30000;
 const USAGE_STALE_MS = 5 * 60 * 1000;
-let usage = {};            // 서비스 이름 → { items, facts, note, link, at } 또는 { error, at }
+let usage = {};            // 받는 곳 이름 → { data, at } 또는 { error, at }
 let usageBusy = false;
 let etcTimer = null;
 
-async function usageSupabase() {
-  const { data: d, error } = await sb.rpc("resource_usage");
+async function usageDb() {
+  const { data, error } = await sb.rpc("resource_usage");
   if (error) throw new Error(/resource_usage/.test(error.message) ? "Supabase SQL Editor에서 setup.sql을 한 번 더 실행하세요." : error.message);
-  return {
-    items: [
-      { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
-      { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일(슬라이드 그림·PPTX)" },
-      { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
-      { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
-      { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
-    ],
-    facts: ["학생 " + d.students + "명", "수업 " + d.lessons + "개", "응답 " + d.responses + "개"],
-    note: "데이터 전송량(월 5GB)과 실시간 메시지(월 200만 건)는 Supabase가 숫자를 내주지 않아 대시보드에서만 볼 수 있습니다.",
-    link: "https://supabase.com/dashboard/project/" + SUPABASE_URL.match(/\/\/([^.]+)/)[1],
-  };
+  return data;
 }
-
-async function usageCloudflare() {
+async function usageWorker() {
   const url = typeof TURN_URL === "string" ? TURN_URL.trim().replace(/\/$/, "") : "";
   if (!url) throw new Error("config.js에 TURN_URL이 없습니다.");
   const { data } = await sb.auth.getSession();
@@ -419,61 +408,31 @@ async function usageCloudflare() {
   if (!r.ok) throw new Error("Worker 응답 " + r.status);
   const d = await r.json();
   if (!d.turn) throw new Error("Worker를 새로 배포해야 합니다(PC에서 class-tools\\usage-setup.ps1 실행).");
-  const a = d.analytics;
-  const missing = a ? null : "분석 토큰 필요";
-  return {
-    items: [
-      { label: "중계(TURN) 접속 발급", used: d.turn.issued, limit: d.turn.limit, period: "이번 달", hint: "다 쓰면 직접 연결(STUN)만 씀" },
-      { label: "중계(TURN) 전송량", used: a && a.turnBytesMonth, limit: 1000 * GB, fmt: "bytes", period: "이번 달", missing },
-      { label: "Worker 요청", used: a && a.workerRequestsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
-      { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: "오늘", missing },
-      { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: "오늘", missing },
-    ],
-    note: a ? "" : "전송량·요청 수를 보려면 PC에서 class-tools\\usage-setup.ps1 로 Cloudflare 분석 토큰(읽기 전용)을 넣으세요."
-      + (d.analyticsError && d.analyticsError !== "no token" ? " (" + d.analyticsError + ")" : ""),
-    link: "https://dash.cloudflare.com/",
-  };
+  return d;
 }
-
 async function usageGithub() {
   const gh = async (path) => {
     const r = await fetch("https://api.github.com" + path, { headers: { Accept: "application/vnd.github+json" } });
-    if (!r.ok) throw new Error("GitHub 응답 " + r.status + (r.status === 403 ? "(시간당 60번 한도, 잠시 뒤 다시)" : ""));
+    if (!r.ok) throw new Error("GitHub 응답 " + r.status + (r.status === 403 ? "(이 PC 시간당 60번 한도, 잠시 뒤 다시)" : ""));
     return r.json();
   };
   const monthStart = new Date().toISOString().slice(0, 8) + "01";
-  const [repo, rate, runs, alive] = await Promise.all([
+  const [repo, rate, month, recent, alive] = await Promise.all([
     gh("/repos/" + GITHUB_REPO),
     gh("/rate_limit"),   // 이 요청은 한도에 세지 않는다
     gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=1&created=%3E%3D" + monthStart),
+    gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=6"),
     gh("/repos/" + GITHUB_REPO + "/actions/workflows/keep-alive.yml/runs?per_page=1"),
   ]);
-  const core = rate.resources.core;
-  const last = alive.workflow_runs[0];
-  // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
-  const idleDays = Math.floor((Date.now() - Date.parse(repo.pushed_at)) / 86400000);
-  return {
-    items: [
-      { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
-      { label: "keep-alive 멈춤까지", used: idleDays, limit: 60, fmt: "days", period: "실시간", hint: "마지막 변경 " + new Date(repo.pushed_at).toLocaleDateString() + " · 60일 지나면 멈춤" },
-      { label: "GitHub API(이 PC)", used: core.used, limit: core.limit, period: "1시간", hint: new Date(core.reset * 1000).toLocaleTimeString() + "에 초기화" },
-    ],
-    facts: [
-      "이번 달 Actions 실행 " + runs.total_count + "회(공개 저장소라 무료)",
-      last ? "keep-alive 마지막 실행 " + new Date(last.created_at).toLocaleString() + " · " + ({ success: "성공", failure: "실패" }[last.conclusion] || last.conclusion || last.status) : "keep-alive 실행 기록 없음",
-    ],
-    note: "GitHub Pages 전송량(월 100GB 권장)은 GitHub가 숫자를 내주지 않습니다.",
-    link: "https://github.com/" + GITHUB_REPO + "/actions",
-  };
+  return { repo, rate: rate.resources.core, runsThisMonth: month.total_count, recent: recent.workflow_runs, alive: alive.workflow_runs[0] };
 }
-
-const USAGE_SOURCES = [["supabase", "Supabase", "데이터베이스 · 파일 · 로그인", usageSupabase], ["cloudflare", "Cloudflare", "중계 서버(TURN) · Worker", usageCloudflare], ["github", "GitHub", "사이트 · 자동 실행", usageGithub]];
+const USAGE_SOURCES = { db: usageDb, worker: usageWorker, github: usageGithub };
 
 async function syncUsage(names) {
   usageBusy = true;
   if (tab === "etc") paintEtc();
-  await Promise.all(USAGE_SOURCES.filter(([k]) => names.includes(k)).map(async ([k, , , get]) => {
-    try { usage[k] = { ...(await get()), at: Date.now() }; }
+  await Promise.all(names.map(async (k) => {
+    try { usage[k] = { data: await USAGE_SOURCES[k](), at: Date.now() }; }
     catch (e) { usage[k] = { error: e.message || String(e), at: Date.now() }; }
   }));
   usageBusy = false;
@@ -482,26 +441,27 @@ async function syncUsage(names) {
 
 function drawEtc() {
   paintEtc();
-  const stale = USAGE_SOURCES.map(([k]) => k).filter((k) => !usage[k] || Date.now() - usage[k].at > USAGE_STALE_MS);
-  syncUsage(stale.includes("supabase") ? stale : ["supabase", ...stale]);
+  const stale = Object.keys(USAGE_SOURCES).filter((k) => !usage[k] || Date.now() - usage[k].at > USAGE_STALE_MS);
+  syncUsage(stale.includes("db") ? stale : ["db", ...stale]);
   etcTick();
 }
 function etcTick() {
   clearTimeout(etcTimer);
   etcTimer = setTimeout(async () => {
     if (tab !== "etc") return;
-    await syncUsage(["supabase"]);
+    await syncUsage(["db"]);
     etcTick();
   }, ETC_POLL_MS);
 }
 
 function usageAmount(n, fmt) {
   if (fmt === "days") return n + "일";
-  if (fmt !== "bytes") return n.toLocaleString();
+  if (fmt !== "bytes") return Number(n).toLocaleString();
   if (n < MB) return (n / 1024).toFixed(0) + "KB";
   if (n < GB) return (n / MB).toFixed(1) + "MB";
   return (n / GB).toFixed(2) + "GB";
 }
+const shortTime = (t) => new Date(t).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
 const USAGE_LEVEL = { ok: "여유", warn: "주의", bad: "위험" };
@@ -517,7 +477,7 @@ function usageRing(it) {
     + '<text x="50" y="50">' + pct + "</text></svg>";
   const amount = known ? usageAmount(it.used, it.fmt) + " / " + usageAmount(it.limit, it.fmt) : it.missing || "알 수 없음";
   const left = known ? "남음 " + usageAmount(Math.max(it.limit - it.used, 0), it.fmt) : "";
-  return h("figure", { class: "usage-item", title: it.label + " · " + it.period + "\n" + amount + (left ? " · " + left : "") + (it.hint ? "\n" + it.hint : "") },
+  return h("figure", { class: "usage-item" + (known ? "" : " unknown"), title: it.label + " · " + it.period + "\n" + amount + (left ? " · " + left : "") + (it.hint ? "\n" + it.hint : "") },
     ring,
     h("figcaption", {},
       h("strong", {}, it.label),
@@ -528,12 +488,110 @@ function usageRing(it) {
         known ? h("span", { class: "tag " + level }, (level === "ok" ? "● " : level === "warn" ? "▲ " : "■ ") + USAGE_LEVEL[level]) : null),
       it.hint ? h("span", { class: "muted small" }, it.hint) : null));
 }
+const usageTable = (head, rows) => h("div", { class: "table-wrap usage-table" },
+  h("table", {}, h("thead", {}, h("tr", {}, head.map((x) => h("th", {}, x)))), h("tbody", {}, rows.map((r) => h("tr", {}, r.map((x) => h("td", {}, x)))))));
+const usageBlock = (title, ...kids) => h("div", { class: "usage-block" }, h("h4", {}, title), ...kids);
+
+// Supabase: DB 안 숫자(db) + Worker가 관리 API로 모은 전송량·요청 수·서비스 상태(worker.supabase)
+function supabaseView() {
+  const d = usage.db && usage.db.data, w = usage.worker && usage.worker.data, s = w && w.supabase;
+  if (!d) return usage.db && usage.db.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + usage.db.error) : h("p", { class: "muted small" }, "불러오는 중…");
+  const noApi = !w ? "Worker 응답 없음" : !s ? "관리 토큰 필요" : null;
+  const m = s && s.egressMonth;
+  const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
+  const since = m && Date.parse(m.from) > monthStart.getTime() + 3600000 ? shortTime(m.from) + "부터 집계" : null;
+  // 무료 프로젝트는 7일 동안 요청이 없으면 잠든다: 최근 7일 요청 기록 중 마지막으로 요청이 있었던 날로 센다
+  const lastDay = s && s.apiCounts && [...s.apiCounts].reverse().find((x) => x.total_rest_requests + x.total_auth_requests + x.total_storage_requests + x.total_realtime_requests > 0);
+  const idle = lastDay ? Math.max(0, Math.floor((Date.now() - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
+  const items = [
+    { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
+    { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일(슬라이드 그림·PPTX)" },
+    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"), hint: since || "CDN 캐시를 거치지 않은 응답" },
+    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"), hint: (since ? since + " · " : "") + "CDN 캐시에서 나간 슬라이드 그림 등" },
+    { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
+    { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
+    { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
+    { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
+  ];
+  const KIND = { rest: "데이터", storage: "파일", auth: "로그인", realtime: "실시간", other: "기타" };
+  const HEALTH = { db: "데이터베이스", auth: "로그인", rest: "데이터 API", realtime: "실시간", storage: "파일 저장소" };
+  const e24 = s && s.egress24h;
+  return [
+    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    s && s.health ? h("div", { class: "usage-tags start" }, h("span", { class: "small" }, "서비스 상태"),
+      s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
+    h("div", { class: "usage-blocks" },
+      e24 ? usageBlock("최근 24시간 요청·전송량",
+        usageTable(["종류", "요청", "전송량"], Object.entries(e24.kinds).sort((a, b) => b[1].bytes - a[1].bytes)
+          .map(([k, v]) => [KIND[k] || k, v.requests.toLocaleString() + "건", usageAmount(v.bytes, "bytes")])
+          .concat([["합계", e24.requests.toLocaleString() + "건", usageAmount(e24.bytes + e24.cached, "bytes") + " (캐시 " + usageAmount(e24.cached, "bytes") + ")"]]))) : null,
+      s && s.apiCounts ? usageBlock("최근 7일 요청 수",
+        usageTable(["날짜", "데이터", "파일", "로그인", "실시간"], [...s.apiCounts].reverse().map((x) => [
+          new Date(x.timestamp + "Z").toLocaleDateString([], { month: "numeric", day: "numeric", weekday: "short" }),
+          x.total_rest_requests.toLocaleString(), x.total_storage_requests.toLocaleString(), x.total_auth_requests.toLocaleString(), x.total_realtime_requests.toLocaleString()]))) : null,
+      d.tables ? usageBlock("표별 크기",
+        usageTable(["표", "줄 수", "크기"], d.tables.map((t) => [t.name, Number(t.rows).toLocaleString(), usageAmount(t.bytes, "bytes")]))) : null),
+    h("p", { class: "small" }, "학생 " + d.students + "명 · 수업 " + d.lessons + "개 · 응답 " + d.responses + "개"),
+    h("p", { class: "muted small" }, (noApi === "관리 토큰 필요" ? "전송량·요청 수·서비스 상태는 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행). " : "")
+      + "전송량은 응답 크기가 적힌 것만 더해 실제보다 조금 적게 나옵니다. 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
+      + (s && s.errors && s.errors.length ? " (일부 못 받음: " + s.errors.join(", ") + ")" : "")),
+  ];
+}
+
+function cloudflareView() {
+  const u = usage.worker;
+  if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
+  if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
+  const d = u.data, a = d.analytics;
+  const missing = a ? null : "분석 토큰 필요";
+  const items = [
+    { label: "중계(TURN) 접속 발급", used: d.turn.issued, limit: d.turn.limit, period: "이번 달", hint: "오늘 " + (d.turn.today || 0) + "장 · 다 쓰면 직접 연결(STUN)만 씀" },
+    { label: "중계(TURN) 전송량", used: a && a.turnBytesMonth, limit: 1000 * GB, fmt: "bytes", period: "이번 달", missing },
+    { label: "Worker 요청", used: a && a.workerRequestsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
+    { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
+    { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
+  ];
+  const hist = (d.turn.history || []).slice().reverse();
+  return [
+    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    hist.length ? h("div", { class: "usage-blocks" }, usageBlock("달마다 중계 접속 발급",
+      usageTable(["달", "발급", "한도 대비"], hist.map((x) => [x.month, x.issued.toLocaleString() + "장", Math.round(x.issued / d.turn.limit * 100) + "%"])))) : null,
+    a ? null : h("p", { class: "muted small" }, "중계 전송량·Worker 요청·KV 사용량은 Cloudflare 읽기 전용 분석 토큰이 있어야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행)."
+      + (d.analyticsError && d.analyticsError !== "no token" ? " (" + d.analyticsError + ")" : "")),
+  ];
+}
+
+function githubView() {
+  const u = usage.github;
+  if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
+  if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
+  const { repo, rate, runsThisMonth, recent, alive } = u.data;
+  // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
+  const idleDays = Math.floor((Date.now() - Date.parse(repo.pushed_at)) / 86400000);
+  const RESULT = { success: "성공", failure: "실패", cancelled: "취소", skipped: "건너뜀" };
+  const items = [
+    { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
+    { label: "keep-alive 멈춤까지", used: idleDays, limit: 60, fmt: "days", period: "실시간", hint: "마지막 변경 " + shortTime(repo.pushed_at) + " · 60일 지나면 멈춤" },
+    { label: "GitHub API(이 PC)", used: rate.used, limit: rate.limit, period: "1시간", hint: new Date(rate.reset * 1000).toLocaleTimeString() + "에 초기화" },
+  ];
+  return [
+    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    h("div", { class: "usage-blocks" }, usageBlock("최근 자동 실행(Actions)",
+      usageTable(["작업", "시각", "결과"], recent.map((r) => [r.name, shortTime(r.created_at), RESULT[r.conclusion] || r.conclusion || (r.status === "in_progress" ? "실행 중" : r.status)])))),
+    h("p", { class: "small" }, "이번 달 Actions 실행 " + runsThisMonth + "회(공개 저장소라 무료) · "
+      + (alive ? "keep-alive 마지막 실행 " + shortTime(alive.created_at) + " " + (RESULT[alive.conclusion] || alive.conclusion || alive.status) : "keep-alive 실행 기록 없음")
+      + " · 기본 가지 " + repo.default_branch + " · 열린 PR·이슈 " + repo.open_issues_count + "개"),
+    h("p", { class: "muted small" }, "GitHub Pages 전송량(월 100GB 권장)은 GitHub가 어떤 API로도 내주지 않습니다."),
+  ];
+}
 
 function paintEtc() {
   if (tab !== "etc" || !main) return;
   const times = Object.values(usage).map((u) => u.at);
   const syncIcon = h("span", { class: "sync-icon" + (usageBusy ? " spin" : ""), "aria-hidden": "true" });
   syncIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
+  const section = (name, what, body) => h("section", { class: "card stack usage-card" },
+    h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)), body);
   main.replaceChildren(h("div", { class: "stack" },
     h("div", { class: "row between" },
       h("div", {},
@@ -541,22 +599,11 @@ function paintEtc() {
         h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상)")),
       h("div", { class: "row" },
         times.length ? h("span", { class: "muted small" }, "마지막 동기화 " + new Date(Math.max(...times)).toLocaleTimeString()) : null,
-        h("button", { class: "primary sync-btn", type: "button", disabled: usageBusy, onclick() { syncUsage(USAGE_SOURCES.map(([k]) => k)); } },
+        h("button", { class: "primary sync-btn", type: "button", disabled: usageBusy, onclick() { syncUsage(Object.keys(USAGE_SOURCES)); } },
           syncIcon, usageBusy ? "동기화 중…" : "동기화"))),
-    USAGE_SOURCES.map(([k, name, what]) => {
-      const u = usage[k];
-      return h("section", { class: "card stack usage-card" },
-        h("div", { class: "row between" },
-          h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)),
-          u && u.link ? h("a", { class: "small", href: u.link, target: "_blank", rel: "noopener" }, "대시보드 열기") : null),
-        !u ? h("p", { class: "muted small" }, "불러오는 중…")
-          : u.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error)
-          : [
-            h("div", { class: "usage-grid" }, u.items.map(usageRing)),
-            u.facts ? h("p", { class: "small" }, u.facts.join(" · ")) : null,
-            u.note ? h("p", { class: "muted small" }, u.note) : null,
-          ]);
-    })));
+    section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView()),
+    section("Cloudflare", "중계 서버(TURN) · Worker", cloudflareView()),
+    section("GitHub", "사이트 · 자동 실행", githubView())));
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.

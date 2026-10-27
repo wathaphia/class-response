@@ -434,7 +434,10 @@ begin
     'online', (select count(distinct student_id) from lesson_students where last_seen > now() - interval '20 seconds'),
     'students', (select count(*) from students),
     'lessons', (select count(*) from lessons),
-    'responses', (select count(*) from responses));
+    'responses', (select count(*) from responses),
+    'tables', (select jsonb_agg(jsonb_build_object('name', relname, 'rows', n_live_tup, 'bytes', pg_total_relation_size(relid))
+                                order by pg_total_relation_size(relid) desc)
+               from pg_stat_user_tables where schemaname = 'public'));
 end $$;
 revoke all on function resource_usage() from public;
 grant execute on function resource_usage() to authenticated;

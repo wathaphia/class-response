@@ -450,6 +450,13 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .ring-bar.bad { stroke: #d03b3b; }
 .ring text { fill: var(--ink); font-size: 19px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
 .sync-btn { display: inline-flex; align-items: center; gap: .4rem; }
+.usage-item.unknown .ring text { fill: var(--muted); }
+.usage-tags.start { justify-content: flex-start; align-items: center; }
+.usage-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; align-items: start; }
+.usage-block { display: grid; gap: .4rem; min-width: 0; }
+.usage-block h4 { margin: 0; font-size: .92rem; }
+.usage-table table { font-size: .88rem; }
+.usage-table th, .usage-table td { padding: .4rem .7rem; white-space: nowrap; }
 .sync-icon.spin svg { animation: sync-spin 1s linear infinite; }
 @keyframes sync-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ring-bar, .sync-icon.spin svg { transition: none; animation: none; } }
