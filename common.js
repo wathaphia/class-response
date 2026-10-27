@@ -103,6 +103,26 @@ function deckUrl(lesson) {
   return /[?&]deck=1/.test(lesson.slide_dir || "") ? lesson.slide_dir.split("?")[0].replace(/\{n\}\.jpg$/, "deck.pptx") : null;
 }
 
+// WebRTC 연결 주소 후보. 학교망처럼 직접 연결이 막힌 곳을 위해 config.js 의 TURN_URL(Cloudflare Worker)에서
+// 중계 서버(TURN) 접속 정보를 받는다(로그인한 교사나 수업에 들어온 학생만 받을 수 있음). 없거나 실패하면 무료 STUN만 쓴다.
+const STUN_ONLY = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
+let iceCache = null;
+async function iceServers(auth) {
+  const url = typeof TURN_URL === "string" ? TURN_URL.trim() : "";
+  if (!url) return STUN_ONLY;
+  if (iceCache && iceCache.until > Date.now()) return iceCache.list;
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...(auth.headers || {}) }, body: JSON.stringify(auth.body || {}) });
+    if (!r.ok) throw new Error("turn " + r.status);
+    const d = await r.json();
+    const list = d.iceServers ? [].concat(d.iceServers) : STUN_ONLY;
+    iceCache = { list, until: Date.now() + 50 * 60 * 1000 };   // 접속 정보는 1시간짜리라 50분 동안 다시 쓴다
+    return list;
+  } catch {
+    return STUN_ONLY;
+  }
+}
+
 // 시뮬레이션 화면 촬영기: 학생 화면의 시뮬레이션 안에 넣는다. 부모(학생 화면)가 start 를 보내면
 // 바뀐 화면 구조(head·body)와 캔버스 그림(JPEG)만 보내고, 부모가 다 보냈다고 답(ack)해야 다음 장면을 찍는다.
 // 밀린 장면이 쌓이지 않아 지연이 늘지 않는다(최신 장면만 보냄).
@@ -110,8 +130,8 @@ const SIM_AGENT = `<script>(function(){if(window.__craAgent)return;window.__craA
 var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0,pc=null,vidIdx=-1,vidOk=false;
 function bigCanvas(){var cs=document.querySelectorAll("canvas"),b=-1,a=0;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),s=r.width*r.height;if(s>a){a=s;b=i;}}return b;}
 function rtcStop(){vidOk=false;if(pc){try{pc.close();}catch(e){}pc=null;}}
-function rtcStart(){rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
-try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}]});
+function rtcStart(ice){rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
+try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:ice&&ice.length?ice:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}]});
 st.getTracks().forEach(function(t){pc.addTrack(t,st);});
 pc.onicecandidate=function(e){if(e.candidate)parent.postMessage({craRtc:"ice",candidate:e.candidate.toJSON()},"*");};
 pc.createOffer().then(function(o){return pc.setLocalDescription(o);}).then(function(){
@@ -137,7 +157,7 @@ function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=
 addEventListener("message",function(e){var m=e.data||{};if(e.source!==parent)return;
 if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;clearInterval(timer);timer=setInterval(tick,m.every||200);tick();}
 else if(m.craMirror==="stop"){on=false;clearInterval(timer);rtcStop();}
-else if(m.craRtc==="start"){rtcStart();}
+else if(m.craRtc==="start"){rtcStart(m.ice);}
 else if(m.craRtc==="answer"&&pc){pc.setRemoteDescription(m.sdp).catch(function(){});}
 else if(m.craRtc==="ice"&&pc&&m.candidate){pc.addIceCandidate(m.candidate).catch(function(){});}
 else if(m.craRtc==="ok"){vidOk=true;}
