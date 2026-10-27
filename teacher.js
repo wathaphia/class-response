@@ -150,8 +150,11 @@ async function loadLesson() {
   draw();
 }
 
+// 쪽 오름차순(같은 쪽이면 끝 쪽이 앞선 것 → 만든 순서), 「언제든」은 맨 뒤
 function sortActivities(list) {
-  return list.slice().sort((x, y) => (x.page ?? 1e9) - (y.page ?? 1e9) || x.sort - y.sort || x.created_at.localeCompare(y.created_at));
+  const pg = (v) => (v == null || v === "" ? 1e9 : Number(v));
+  return list.slice().sort((x, y) => pg(x.page) - pg(y.page) || pg(x.page_to ?? x.page) - pg(y.page_to ?? y.page) ||
+    (x.sort ?? 0) - (y.sort ?? 0) || String(x.created_at || "").localeCompare(String(y.created_at || "")));
 }
 
 async function loadResponses() {
@@ -713,6 +716,7 @@ function activityPreview(a) {
 }
 
 function drawBuild() {
+  activities = sortActivities(activities);
   const ids = new Set(activities.map((a) => a.id));
   for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
   const list = activities.length ? activities.map((a) => h("div", { class: "act-row" + (editing && editing.id === a.id ? " on" : "") },
@@ -747,14 +751,45 @@ function drawBuild() {
       editing = { kind: "sim", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, sim_full: lesson.slide_count > 0, html: "", questions: [] };
       drawBuild();
     } }, h("strong", {}, "시뮬레이션"), h("span", {}, "html 파일을 슬라이드 사이에")));
+  // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
+  const keep = [".build > aside", ".act-scroll"].map((q) => main.querySelector(q)?.scrollTop || 0);
+  main.classList.add("build-page");
   main.replaceChildren(h("div", { class: "build" },
     h("aside", { class: "stack" },
-      h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds)),
+      h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds),
+      editing ? editor() : null),
     h("div", { class: "build-main stack" },
-      editing ? editor() : null,
-      h("section", { class: "card stack" }, h("h2", {}, "이 수업의 활동"),
-        editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 아래 활동의 「수정」을 누르세요."),
-        list))));
+      h("section", { class: "card stack act-list" },
+        h("div", { class: "row between" }, h("h2", {}, "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "")),
+          editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.")),
+        h("div", { class: "act-scroll" }, h("div", { class: "act-grid" }, list))))));
+  [".build > aside", ".act-scroll"].forEach((q, i) => { const el = main.querySelector(q); if (el) el.scrollTop = keep[i]; });
+  pinBuild();
+}
+
+// 만들기 탭을 넓은 화면에서 창 높이에 맞춘다: 페이지는 스크롤되지 않고, 왼쪽(새로 만들기·편집기)과
+// 오른쪽 활동 목록(한 화면에 2×2 네 칸)만 안에서 스크롤한다.
+let buildPin = null;
+function pinBuild() {
+  if (buildPin) { buildPin.ro.disconnect(); removeEventListener("resize", buildPin.fit); buildPin = null; }
+  const box = main.querySelector(".build");
+  if (!box) return;
+  const head = app.querySelector(".top");
+  const credit = document.querySelector(".credit");
+  const fit = () => {
+    if (!box.isConnected) return;
+    if (!matchMedia("(min-width: 1100px)").matches) { box.classList.remove("pinned"); box.style.height = ""; return; }
+    box.classList.add("pinned");
+    // 머리말, main 위쪽 여백(1rem), 맨 아래 만든 사람 줄을 뺀 나머지
+    const used = (head ? head.getBoundingClientRect().height : 0) + 16 + (credit ? credit.getBoundingClientRect().height : 0);
+    box.style.height = Math.max(420, Math.floor(innerHeight - used)) + "px";
+  };
+  const ro = new ResizeObserver(fit);
+  if (head) ro.observe(head);
+  if (credit) ro.observe(credit);
+  addEventListener("resize", fit);
+  buildPin = { ro, fit };
+  fit();
 }
 
 function simEditor() {
