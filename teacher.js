@@ -975,7 +975,7 @@ function simEditor() {
     h("p", { class: "muted small" }, "시뮬레이션은 격리된 칸에서 실행되어 이 웹앱의 로그인 정보에 접근할 수 없습니다. 학생은 이 카드에 답을 입력하지 않습니다."),
     msg,
     editorButtons(saveSim, msg, "「" + e.title + "」 시뮬레이션을 지울까요?",
-      h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기")));
+      h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html, { autoplay: true }); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기")));
 }
 
 // 편집기 맨 아래 버튼: [닫기] [저장] [삭제]. 삭제는 저장한 활동에만 있다(학생 응답도 함께 지워짐)

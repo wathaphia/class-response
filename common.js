@@ -365,13 +365,14 @@ function closeFloatingSim() {
 }
 
 // 시뮬레이션을 화면 가득 띄운다. 닫기 버튼이나 Esc로 닫는다.
-function openSimFull(title, html) {
+// autoplay: 바로 실행하고 재생/일시정지 버튼을 두지 않는다(편집기의 「미리보기」)
+function openSimFull(title, html, { autoplay = false } = {}) {
   const close = () => { box.remove(); document.removeEventListener("keydown", esc); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
   const esc = (e) => { if (e.key === "Escape") close(); };
-  const frame = simFrame(withSimPause(html), title);
+  const frame = simFrame(autoplay ? html : withSimPause(html), title);
   const box = h("div", { class: "sim-full" },
     h("div", { class: "sim-full-head" }, h("strong", {}, title || "시뮬레이션"),
-      h("div", { class: "row" }, simPlayButton(frame), h("button", { class: "ghost", type: "button", onclick: close }, "닫기"))),
+      h("div", { class: "row" }, autoplay ? null : simPlayButton(frame), h("button", { class: "ghost", type: "button", onclick: close }, "닫기"))),
     frame);
   document.addEventListener("keydown", esc);
   document.body.append(box);
