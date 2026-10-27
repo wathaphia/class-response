@@ -230,11 +230,25 @@ main.lesson .slide { cursor: zoom-in; }
 .field-name { font-weight: 500; font-size: .95rem; }
 .place { display: grid; gap: .35rem; }
 .place-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; white-space: nowrap; }
-.place-row label.check { margin-right: .3rem; }
 .place-row span { font-size: .92rem; }
 input.num.page-num { width: 3.9rem; padding: .5rem .4rem; text-align: center; }
-.q-head { display: flex; align-items: center; gap: .5rem; }
-.q-head > strong { white-space: nowrap; }
+/* 켜고 끄는 상자 버튼(모든 페이지·익명·복수 선택 등) */
+.tog { background: #fff; color: var(--ink); border: 1px solid var(--field); padding: 0 .9rem; white-space: nowrap; }
+.tog::before { content: "✓ "; opacity: .25; }
+.tog.on { background: var(--accent-soft); border: 2px solid var(--accent); color: var(--accent); font-weight: 700; padding: 0 calc(.9rem - 1px); }
+.tog.on::before { opacity: 1; }
+.tog:hover:not(:disabled) { border-color: var(--accent); }
+.place-row .tog { margin-right: .3rem; }
+.q-head { display: grid; grid-template-columns: auto 1fr auto; align-items: end; gap: .5rem; }
+.q-num { display: grid; gap: .3rem; justify-items: start; }
+.q-num > strong { white-space: nowrap; }
+.anon-tog { min-height: 40px; padding: 0 .7rem; }
+.anon-tog.on { padding: 0 calc(.7rem - 1px); }
+textarea.q-long { height: 244px; resize: none; }
+.add-box { min-height: 52px; background: #fff; color: var(--accent); border: 2px dashed var(--field); font-weight: 700; }
+.add-box:hover { border-color: var(--accent); background: var(--accent-soft); }
+.intro-box { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
+.show-ans { align-self: flex-start; }
 .seg { flex: 1; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--field); border-radius: 10px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; background: #fff; color: var(--ink); padding: 0 .4rem; }
 .seg button + button { border-left: 1px solid var(--field); }
@@ -245,7 +259,8 @@ input.num.page-num { width: 3.9rem; padding: .5rem .4rem; text-align: center; }
 .opt-row { display: flex; align-items: center; gap: .4rem; }
 .opt-row input[type=text] { flex: 1; min-width: 0; }
 .ans-pick { min-height: 0; font-size: .85rem; white-space: nowrap; gap: .25rem; }
-.opt-del { font-size: 1.2rem; min-width: 36px; padding: 0; }
+.opt-del { flex: 0 0 auto; width: 38px; min-height: 38px; padding: 0; font-size: 1.3rem; line-height: 1; background: none; color: var(--bad); border: 1px solid transparent; border-radius: 8px; }
+.opt-del:hover:not(:disabled), .opt-del:focus-visible { background: var(--bad); color: #fff; border-color: var(--bad); }
 .add-q { align-self: flex-start; }
 .row.end { justify-content: flex-end; }
 
