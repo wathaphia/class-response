@@ -192,6 +192,21 @@ main.lesson .slide { cursor: zoom-in; }
 .act-head button { align-self: flex-start; }
 .act-id { display: grid; grid-template-columns: auto minmax(0, 1fr); border: 1px solid #e3e3e3; border-radius: 8px; }
 .act-page { display: flex; align-items: center; justify-content: center; padding: .4rem .7rem; font-size: 1.5rem; font-weight: 800; white-space: nowrap; border-right: 1px solid #e3e3e3; }
+/* 쪽 칸: [▲ 숫자 ▼ | 쪽]. 숫자는 눌러서 바로 고칠 수 있다 */
+.act-page.split { padding: 0; align-items: stretch; }
+.act-spin { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: .1rem .15rem; }
+.act-head .act-step { align-self: auto; min-height: 0; height: 1.15rem; width: 1.7rem; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: .7rem; line-height: 1; }
+.act-step:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.act-step:disabled { opacity: .3; }
+input[type=text].act-num { width: 1.9em; min-height: 0; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; text-align: center; font: inherit; color: inherit; cursor: text; }
+input[type=text].act-num:hover { border-color: var(--field); }
+input[type=text].act-num:focus { background: #fff; }
+.act-unit { display: flex; align-items: center; padding: 0 .4rem; border-left: 1px solid #e3e3e3; font-size: 1rem; font-weight: 700; }
+/* 끌어서 순서 바꾸기 */
+.act-row { cursor: grab; }
+.act-row.dragging { opacity: .45; }
+.act-row.drop-before { box-shadow: -5px 0 0 0 var(--accent); }
+.act-row.drop-after { box-shadow: 5px 0 0 0 var(--accent); }
 .act-name { min-width: 0; display: flex; flex-direction: column; }
 .act-name > p { margin: 0; padding: .3rem .6rem; border-bottom: 1px solid #e3e3e3; }
 .act-name > h3 { padding: .3rem .6rem; }
@@ -239,15 +254,17 @@ input.num.page-num { width: 3.9rem; padding: .5rem .4rem; text-align: center; }
 .tog.on::before { opacity: 1; }
 .tog:hover:not(:disabled) { border-color: var(--accent); }
 .place-row .tog { margin-right: .3rem; }
-.q-head { display: grid; grid-template-columns: auto 1fr auto; align-items: end; gap: .5rem; }
-.q-num { display: grid; gap: .3rem; justify-items: start; }
-.q-num > strong { white-space: nowrap; }
+.q-head { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem; }
+/* 설명·질문 칸: 위 줄은 「설명 n / 질문 n」과 오른쪽 위 「삭제」 */
+.info-edit { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
+.blk-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.blk-del { min-height: 34px; padding: 0 .75rem; font-size: .88rem; background: #fff; color: var(--bad); border: 1px solid var(--field); border-radius: 8px; }
+.blk-del:hover, .blk-del:focus-visible { background: var(--bad); color: #fff; border-color: var(--bad); }
 .anon-tog { min-height: 40px; padding: 0 .7rem; }
 .anon-tog.on { padding: 0 calc(.7rem - 1px); }
 textarea.q-long { height: 244px; resize: none; }
 .add-box { min-height: 52px; background: #fff; color: var(--accent); border: 2px dashed var(--field); font-weight: 700; }
 .add-box:hover { border-color: var(--accent); background: var(--accent-soft); }
-.intro-box { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
 .show-ans { align-self: flex-start; }
 .seg { flex: 1; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--field); border-radius: 10px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; background: #fff; color: var(--ink); padding: 0 .4rem; }
@@ -259,9 +276,10 @@ textarea.q-long { height: 244px; resize: none; }
 .opt-row { display: flex; align-items: center; gap: .4rem; }
 .opt-row input[type=text] { flex: 1; min-width: 0; }
 .ans-pick { min-height: 0; font-size: .85rem; white-space: nowrap; gap: .25rem; }
-.opt-del { flex: 0 0 auto; width: 38px; min-height: 38px; padding: 0; font-size: 1.3rem; line-height: 1; background: none; color: var(--bad); border: 1px solid transparent; border-radius: 8px; }
+.opt-del { flex: 0 0 auto; width: 40px; min-height: 40px; padding: 0; font-size: 1.3rem; line-height: 1; background: #fff; color: var(--bad); border: 1px solid var(--field); border-radius: 8px; }
 .opt-del:hover:not(:disabled), .opt-del:focus-visible { background: var(--bad); color: #fff; border-color: var(--bad); }
-.add-q { align-self: flex-start; }
+/* 항목이 두 개뿐이라 지울 수 없을 때: 연한 회색 상자 */
+.opt-del:disabled { opacity: 1; background: #f1f3f6; color: #c3c8d1; border-color: #e3e6eb; cursor: not-allowed; }
 .row.end { justify-content: flex-end; }
 
 /* 슬라이드 미리보기 */

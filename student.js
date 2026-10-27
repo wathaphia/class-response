@@ -603,10 +603,10 @@ function render(pageChanged) {
   const acts = state.activities;
   // 큰 화면에서는 슬라이드와 질문을 나란히(split), 슬라이드가 없으면 가운데 한 줄(single)
   shell.slideBox.parentNode.className = "lesson " + (hasSlides ? "split" : "single");
-  let here = hasSlides ? acts.filter((a) => onPage(a, slideNo(L, viewing))) : acts;
-  const anytime = hasSlides ? acts.filter((a) => a.page == null) : [];
+  let here = hasSlides ? acts.filter((a) => simOnSlide(a, slideNo(L, viewing))) : acts;
+  const anytime = hasSlides ? acts.filter((a) => a.page == null && !allPagesSim(a)) : [];
   // 「슬라이드 자리에 띄우기」 시뮬레이션은 슬라이드 그림 대신 위쪽에 크게 보인다
-  const stageSim = hasSlides ? here.find((a) => a.kind === "sim" && a.sim_full) : null;
+  const stageSim = hasSlides ? here.find((a) => a.kind === "sim" && a.sim_full && a.page != null) || here.find((a) => a.kind === "sim" && a.sim_full) || null : null;
   showStageSim(stageSim);
   if (stageSim) here = here.filter((a) => a !== stageSim);
   // 슬라이드 위에 얹는 시뮬레이션: 선생님이 정한 자리에 테두리 없이 놓는다(카드로는 보이지 않음)
