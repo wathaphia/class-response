@@ -685,11 +685,39 @@ function showJoin() {
 const newId = () => Math.random().toString(36).slice(2, 8);
 const newQuestion = (type) => ({ id: newId(), type: type || "choice", text: "", options: ["", ""] });
 
+// 만들기 탭의 시뮬레이션 미리보기 칸. 다시 그려도 같은 칸을 다시 써서 시뮬레이션이 처음부터 다시 시작하지 않게 한다
+const buildSimFrames = new Map();
+function buildSimFrame(a) {
+  const key = a.id + ":" + (a.html || "").length;
+  let f = buildSimFrames.get(a.id);
+  if (!f || f.dataset.key !== key) { f = simFrame(a.html || "", a.title); f.dataset.key = key; buildSimFrames.set(a.id, f); }
+  return f;
+}
+
+// 활동 내용 미리보기: 시뮬레이션은 실행 화면, 설명 카드는 글, 질문은 질문과 보기
+function activityPreview(a) {
+  if (a.kind === "sim") return a.html ? buildSimFrame(a) : h("p", { class: "muted small" }, "html이 없습니다.");
+  if (isInfoActivity(a)) return linkedDescription(a.questions[0].text);
+  const intro = activityDescription(a);
+  return h("div", { class: "stack" }, intro ? linkedDescription(intro) : null,
+    (a.questions || []).map((q, i) => h("div", { class: "sum-block" },
+      h("p", { class: "sum-q" }, (i + 1) + ". " + q.text, h("span", { class: "muted small" }, " · " + (TYPE_NAME[q.type] || q.type))),
+      (q.type === "choice" || q.type === "multi") ? h("ul", { class: "preview-options" }, (q.options || []).filter(Boolean).map((o) =>
+        h("li", { class: a.kind === "quiz" && [].concat(q.answer ?? []).includes(o) ? "right" : "" }, o,
+          a.kind === "quiz" && [].concat(q.answer ?? []).includes(o) ? h("strong", { class: "right-mark" }, " ✓정답") : null))) : null)));
+}
+
 function drawBuild() {
-  const list = h("div", { class: "stack" }, activities.length ? activities.map((a) => h("button", {
-    type: "button", class: "act-item" + (editing && editing.id === a.id ? " on" : ""),
-    onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); },
-  }, h("span", { class: "muted small" }, activityName(a) + " · " + whereText(a)), h("span", {}, a.title))) : h("p", { class: "muted small" }, "아직 활동이 없습니다."));
+  const ids = new Set(activities.map((a) => a.id));
+  for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
+  const list = activities.length ? activities.map((a) => h("div", { class: "act-row" + (editing && editing.id === a.id ? " on" : "") },
+    h("div", { class: "act-head stack" },
+      h("p", { class: "muted small" }, activityName(a) + " · " + whereText(a)),
+      h("h3", {}, a.title),
+      h("button", { type: "button", class: editing && editing.id === a.id ? "primary" : "ghost",
+        onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } },
+        editing && editing.id === a.id ? "고치는 중" : "고치기")),
+    h("div", { class: "act-body" }, activityPreview(a)))) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
   const kindList = lesson.kind === "survey" ? { survey: "정답 없는 설문", quiz: "정답·자동 채점" } : { slide: "쪽 아래에 붙는 질문", survey: "정답 없는 설문", quiz: "정답·자동 채점" };
   const kinds = h("div", { class: "kinds" }, Object.entries(kindList).map(([k, sub]) =>
     h("button", {
@@ -710,9 +738,12 @@ function drawBuild() {
     } }, h("strong", {}, "시뮬레이션"), h("span", {}, "html 파일을 슬라이드 사이에")));
   main.replaceChildren(h("div", { class: "build" },
     h("aside", { class: "stack" },
-      h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds),
-      h("section", { class: "card stack" }, h("h2", {}, "이 수업의 활동"), list)),
-    editing ? editor() : h("section", { class: "card muted" }, "왼쪽에서 새로 만들거나, 고칠 활동을 고르세요.")));
+      h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds)),
+    h("div", { class: "build-main stack" },
+      editing ? editor() : null,
+      h("section", { class: "card stack" }, h("h2", {}, "이 수업의 활동"),
+        editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 아래 활동의 「고치기」를 누르세요."),
+        list))));
 }
 
 function simEditor() {
