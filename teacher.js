@@ -235,8 +235,13 @@ let run = null;
 function drawRun() {
   const img = h("img", { class: "slide", alt: "" });
   const where = h("span", { class: "where" });
-  const prev = h("button", { class: "ghost", type: "button", onclick() { setPage(lesson.page - 1); } }, "◀ 이전");
-  const next = h("button", { class: "primary", type: "button", onclick() { setPage(lesson.page + 1); } }, "다음 ▶");
+  const prev = h("button", { class: "ghost", type: "button", onclick() { goSlide(-1); } }, "◀ 이전");
+  const next = h("button", { class: "primary", type: "button", onclick() { goSlide(1); } }, "다음 ▶");
+  // 애니메이션 단계 그림이 있는 수업에서만: 클릭 한 번만큼 앞뒤로
+  const animPrev = h("button", { class: "ghost", type: "button", onclick() { setPage(lesson.page - 1); } }, "◁ 애니메이션");
+  const animNext = h("button", { class: "ghost", type: "button", onclick() { setPage(lesson.page + 1); } }, "애니메이션 ▷");
+  const deckBtn = h("button", { class: "ghost", type: "button", title: "Office 온라인 뷰어로 원본 애니메이션을 재생합니다(학생 화면은 따라오지 않음)",
+    onclick() { openPptxFull({ slide_dir: "pptx:" + deckUrl(lesson), slide_count: slideTotal(lesson) }, slideNo(lesson, lesson.page)); } }, "원본 애니메이션 보기");
   const openBtn = h("button", { type: "button", onclick() { setLesson({ open: !lesson.open }); } });
   const openText = h("span", {});
   const simStage = h("div", { class: "sim-stage", hidden: true });
@@ -247,17 +252,19 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }),
+      hasSlides ? h("nav", { class: "pager" }, prev, where, next, animPrev, animNext, h("span", { class: "spacer" }), deckBtn,
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       h("div", { class: "row" },
         h("button", { class: "ghost", type: "button", onclick: showJoin }, "학생 접속 주소·QR"),
         h("button", { class: "ghost", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV")),
-      hasSlides ? h("p", { class: "muted small" }, "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null),
+      hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
+        ? "학생 화면은 여기서 띄운 쪽과 애니메이션 단계를 따라갑니다. 키보드 ← → 는 PowerPoint처럼 애니메이션을 하나씩 넘깁니다."
+        : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null),
     h("aside", { class: "run-right stack" },
       h("section", { class: "card row between" }, openText, openBtn),
       roster,
       panel)));
-  run = { img, stage, simStage, simKey: "", pptKey: "", where, prev, next, openBtn, openText, panel, roster, blocks: new Map() };
+  run = { img, stage, simStage, simKey: "", pptKey: "", where, prev, next, animPrev, animNext, deckBtn, openBtn, openText, panel, roster, blocks: new Map() };
   refreshRun();
 }
 
@@ -280,9 +287,15 @@ function refreshRun() {
       run.img.src = slideSrc(L, L.page);
       run.img.alt = "슬라이드 " + L.page;
     }
-    run.where.textContent = L.page + " / " + L.slide_count;
-    run.prev.disabled = L.page <= 1;
-    run.next.disabled = L.page >= L.slide_count;
+    const pos = slidePos(L, L.page);
+    const anim = !!slideSteps(L);
+    run.where.textContent = slideLabel(L, L.page);
+    run.prev.disabled = pos.slide <= 1;
+    run.next.disabled = pos.slide >= pos.total;
+    run.animPrev.hidden = run.animNext.hidden = !anim;
+    run.animPrev.disabled = L.page <= 1;
+    run.animNext.disabled = L.page >= L.slide_count;
+    run.deckBtn.hidden = !deckUrl(L);
     if (L.page < L.slide_count) new Image().src = slideSrc(L, L.page + 1);
   }
   run.openText.replaceChildren(h("strong", {}, L.open ? "제출 받는 중" : "제출 닫힘"),
@@ -290,9 +303,10 @@ function refreshRun() {
   run.openBtn.className = L.open ? "ghost" : "primary";
   run.openBtn.textContent = L.open ? "제출 마감" : "제출 열기";
 
-  const shown = activities.filter((a) => L.slide_count === 0 || onPage(a, L.page) || a.page == null);
+  const sn = slideNo(L, L.page);
+  const shown = activities.filter((a) => L.slide_count === 0 || onPage(a, sn) || a.page == null);
   // 「슬라이드 자리에 띄우기」 시뮬레이션: 교사 화면에서도 슬라이드 대신 띄운다(다시 그릴 때마다 새로 띄우지 않게 key로 확인)
-  const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, L.page)) : null;
+  const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, sn)) : null;
   const simKey = stageSim ? stageSim.id + ":" + (stageSim.html || "").length + ":" + stageSim.title : "";
   if (!isPptx(L)) run.img.hidden = !!stageSim;
   const pptFrame = run.stage.querySelector(".pptx-frame");
@@ -304,7 +318,7 @@ function refreshRun() {
   }
   drawRoster(shown.filter((a) => a.kind !== "sim"));
   run.panel.replaceChildren(...(shown.length ? shown.map(runBlock)
-    : [h("p", { class: "card muted" }, L.page + "쪽에는 활동이 없습니다. 「질문·설문 만들기」에서 추가하세요.")]));
+    : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「질문·설문 만들기」에서 추가하세요.")]));
 }
 
 // 접속한 학생: 초록 = 지금 화면을 열어 둔 학생(20초 안에 서버에 물어봄), ✓ = 이 쪽 활동에 답함
@@ -377,6 +391,12 @@ function responseTable(a) {
     }))));
 }
 
+// 슬라이드 단위로 넘기기(애니메이션 단계 그림이 있으면 앞뒤 슬라이드의 첫 단계로)
+function goSlide(d) {
+  const s = slideNo(lesson, lesson.page) + d;
+  if (s >= 1 && s <= slideTotal(lesson)) setPage(pageOfSlide(lesson, s));
+}
+
 async function setPage(n) {
   n = Math.min(Math.max(n, 1), Math.max(lesson.slide_count, 1));
   if (n === lesson.page) return;
@@ -427,17 +447,17 @@ function drawBuild() {
     h("button", {
       type: "button", class: "kind",
       onclick() {
-        editing = { kind: k, title: "", page: lesson.slide_count ? lesson.page : null, show_answer: true, named: false, shared: false, questions: [newQuestion(k === "survey" ? "long" : "choice")] };
+        editing = { kind: k, title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: true, named: false, shared: false, questions: [newQuestion(k === "survey" ? "long" : "choice")] };
         drawBuild();
       },
     }, h("strong", {}, KIND_NAME[k]), h("span", {}, sub))),
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "survey", title: "", page: lesson.slide_count ? lesson.page : null, show_answer: false, named: false, shared: false,
+      editing = { kind: "survey", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: false, named: false, shared: false,
         questions: [{ id: newId(), type: "info", text: "" }] };
       drawBuild();
     } }, h("strong", {}, "설명 카드"), h("span", {}, "글과 외부 링크만 표시")),
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "sim", title: "", page: lesson.slide_count ? lesson.page : null, sim_full: lesson.slide_count > 0, html: "", questions: [] };
+      editing = { kind: "sim", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, sim_full: lesson.slide_count > 0, html: "", questions: [] };
       drawBuild();
     } }, h("strong", {}, "시뮬레이션"), h("span", {}, "html 파일을 슬라이드 사이에")));
   main.replaceChildren(h("div", { class: "build" },
@@ -464,15 +484,15 @@ function simEditor() {
     if (!e.title.trim()) { e.title = f.name.replace(/\.html?$/i, ""); title.value = e.title; }
     msg.textContent = "";
   } });
-  const pageIn = h("input", { type: "number", min: 1, max: Math.max(lesson.slide_count, 1), value: e.page ?? lesson.page, class: "num", "aria-label": "시작 쪽", oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
-  const pageToIn = h("input", { type: "number", min: 1, max: Math.max(lesson.slide_count, 1), value: e.page_to > e.page ? e.page_to : "", placeholder: "(한 쪽만)", class: "num", "aria-label": "끝 쪽", oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
+  const pageIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page ?? slideNo(lesson, lesson.page), class: "num", "aria-label": "시작 쪽", oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
+  const pageToIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page_to > e.page ? e.page_to : "", placeholder: "(한 쪽만)", class: "num", "aria-label": "끝 쪽", oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
   async function saveSim() {
     e.title = e.title.trim();
     if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
     if (!(e.html || "").trim()) { msg.textContent = "html 파일을 고르거나 코드를 붙여넣으세요."; return; }
     if (e.html.length > 500000) { msg.textContent = "코드가 너무 깁니다(최대 50만 자)."; return; }
     const row = { kind: "sim", title: e.title, page: lesson.slide_count ? e.page : null, html: e.html, sim_full: !!e.sim_full && lesson.slide_count > 0, show_answer: false, named: false, questions: [] };
-    const to = row.page != null && e.page_to > row.page ? Math.min(e.page_to, lesson.slide_count) : null;
+    const to = row.page != null && e.page_to > row.page ? Math.min(e.page_to, slideTotal(lesson)) : null;
     if (to != null || activities.some((x) => "page_to" in x)) row.page_to = to;
     if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
     const saved = await save("activities", row, e.id);
@@ -546,9 +566,9 @@ function editor() {
 
   const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 예상해 보기", oninput() { e.title = title.value; } });
   const description = h("textarea", { rows: 5, maxlength: 2000, placeholder: "설문 전체에 대한 설명을 입력하세요. 웹 주소는 학생 화면에서 링크가 됩니다.", oninput() { e.description = description.value; } }, e.description || "");
-  const pageIn = h("input", { type: "number", min: 1, max: Math.max(lesson.slide_count, 1), value: e.page ?? lesson.page, class: "num", "aria-label": "시작 쪽", oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
+  const pageIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page ?? slideNo(lesson, lesson.page), class: "num", "aria-label": "시작 쪽", oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
   // 여러 쪽에 걸쳐 같은 질문을 띄울 때 끝 쪽. 비우면 시작 쪽 한 쪽에만 보인다
-  const pageToIn = h("input", { type: "number", min: 1, max: Math.max(lesson.slide_count, 1), value: e.page_to > e.page ? e.page_to : "", placeholder: "(한 쪽만)", class: "num", "aria-label": "끝 쪽", oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
+  const pageToIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page_to > e.page ? e.page_to : "", placeholder: "(한 쪽만)", class: "num", "aria-label": "끝 쪽", oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
   const placeSel = h("select", {
     onchange() { e.page = placeSel.value === "page" ? (parseInt(pageIn.value, 10) || 1) : null; redraw(); },
   }, h("option", { value: "page", selected: e.page != null }, "슬라이드 쪽 아래"), h("option", { value: "any", selected: e.page == null }, "언제든 (모든 쪽 아래 목록)"));
@@ -616,7 +636,7 @@ function editor() {
     if (e.questions.length && e.description.trim()) e.questions[0].intro = e.description.trim();
     const row = { kind: e.kind, title: e.title, page: e.page, show_answer: e.show_answer, named: e.named, questions: e.questions };
     // 끝 쪽: 시작 쪽보다 뒤일 때만 쓴다. (page_to 칸이 없는 예전 데이터베이스에서도 한 쪽짜리는 저장되도록 필요할 때만 보낸다)
-    const to = e.page != null && e.page_to > e.page ? Math.min(e.page_to, Math.max(lesson.slide_count, e.page)) : null;
+    const to = e.page != null && e.page_to > e.page ? Math.min(e.page_to, Math.max(slideTotal(lesson), e.page)) : null;
     // 데이터베이스에 page_to 칸이 있을 때만(불러온 활동에 그 칸이 보일 때만) 보낸다
     const hasPageTo = activities.some((x) => "page_to" in x);
     if (to != null && activities.length && !hasPageTo) {
@@ -929,12 +949,14 @@ function slidesCard() {
         h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], status); } }, "삭제")));
     thumbs.append(figure);
   }
-  const ppt = isPptx(lesson);
+  const anim = !!slideSteps(lesson);
+  const ppt = isPptx(lesson) || anim;   // 쪽 미리보기·삭제를 쓰지 않는 자료
   return h("section", { class: "card stack" },
-    h("h2", {}, "슬라이드 " + (lesson.slide_count ? lesson.slide_count + "장" : "없음")),
+    h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
     h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), bar, status,
-    ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
+    anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 다시 올리세요.") : null,
+    ppt && !anim ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
     lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
       h("span", { class: "muted small grow" }, "미리보기에 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
