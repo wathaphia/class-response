@@ -717,12 +717,17 @@ function drawBuild() {
   for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
   const list = activities.length ? activities.map((a) => h("div", { class: "act-row" + (editing && editing.id === a.id ? " on" : "") },
     h("div", { class: "act-head stack" },
-      h("p", { class: "muted small" }, activityName(a) + " · " + whereText(a)),
-      h("h3", {}, a.title),
-      a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
-      h("button", { type: "button", class: editing && editing.id === a.id ? "primary" : "ghost",
-        onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } },
-        editing && editing.id === a.id ? "고치는 중" : "고치기")),
+      // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
+      h("div", { class: "act-id" },
+        h("strong", { class: "act-page" }, whereText(a)),
+        h("div", { class: "act-name" },
+          h("p", { class: "muted small" }, activityName(a)),
+          h("h3", {}, a.title))),
+      h("div", { class: "act-btns" },
+        a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
+        h("button", { type: "button", class: editing && editing.id === a.id ? "primary" : "ghost",
+          onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } },
+          editing && editing.id === a.id ? "수정 중" : "수정"))),
     h("div", { class: "act-body" }, activityPreview(a)))) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
   const kindList = lesson.kind === "survey" ? { survey: "정답 없는 설문", quiz: "정답·자동 채점" } : { slide: "쪽 아래에 붙는 질문", survey: "정답 없는 설문", quiz: "정답·자동 채점" };
   const kinds = h("div", { class: "kinds" }, Object.entries(kindList).map(([k, sub]) =>
@@ -748,7 +753,7 @@ function drawBuild() {
     h("div", { class: "build-main stack" },
       editing ? editor() : null,
       h("section", { class: "card stack" }, h("h2", {}, "이 수업의 활동"),
-        editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 아래 활동의 「고치기」를 누르세요."),
+        editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 아래 활동의 「수정」을 누르세요."),
         list))));
 }
 
