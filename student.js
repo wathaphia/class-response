@@ -415,7 +415,7 @@ function mirrorSnapshot() {
     else if (el.tagName === "SELECT") [...c.options].forEach((o, j) => o.toggleAttribute("selected", j === el.selectedIndex));
     else if (el.type !== "password") c.setAttribute("value", el.value);
   });
-  clone.querySelectorAll(".screen-share-note").forEach((el) => el.remove());
+  clone.querySelectorAll(".screen-share-note, .slide-under").forEach((el) => el.remove());
   clone.querySelectorAll(".slide").forEach((el) => el.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"));   // 갱신마다 전환 효과가 다시 돌지 않게
   // 시뮬레이션 자리는 번호만 남긴다. 교사 화면이 그 자리에 시뮬레이션 장면을 그린다.
   const all = simFrames();

@@ -87,9 +87,22 @@ function swapSlide(img, src, fx, dir) {
   img.dataset.want = src;
   const show = () => {
     if (img.dataset.want !== src) return;
+    const prev = img.getAttribute("src");
+    const cls = dir === 0 ? "fx-step" : fx === "none" ? "" : fx === "push" ? (dir > 0 ? "fx-push-next" : "fx-push-prev") : "fx-" + fx;
+    // 이전 장면을 바로 아래에 남겨 두고 새 장면이 그 위로 들어오게 한다(효과 도중 흰 바탕이 비쳐 깜빡이지 않게)
+    if (prev && cls && img.parentNode && img.offsetWidth) {
+      const box = img.parentNode;
+      if (getComputedStyle(box).position === "static") box.style.position = "relative";
+      box.querySelectorAll(":scope > .slide-under").forEach((u) => u.remove());
+      const under = h("img", { class: "slide slide-under", src: prev, alt: "", "aria-hidden": "true" });
+      under.style.cssText = "left:" + img.offsetLeft + "px;top:" + img.offsetTop + "px;width:" + img.offsetWidth + "px;height:" + img.offsetHeight + "px";
+      box.insertBefore(under, img);
+      const drop = () => under.remove();
+      img.addEventListener("animationend", drop, { once: true });
+      setTimeout(drop, 1000);
+    }
     img.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev");
     img.src = src;
-    const cls = dir === 0 ? "fx-step" : fx === "none" ? "" : fx === "push" ? (dir > 0 ? "fx-push-next" : "fx-push-prev") : "fx-" + fx;
     if (cls) { void img.offsetWidth; img.classList.add(cls); }
   };
   if (!img.getAttribute("src")) return show();
