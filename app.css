@@ -175,6 +175,7 @@ main.lesson .slide { cursor: zoom-in; }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tab.on { background: var(--accent); color: #fff; font-weight: 700; }
 .tab.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
+.tab.on:hover .tab-icon { background: rgba(255, 255, 255, .2); }
 @media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon { transition: none; } }
 .teacher .top-title select { min-height: 40px; padding: .3rem .6rem; font-weight: 700; max-width: 70vw; }
 
@@ -433,6 +434,25 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .picked-bar { padding: .6rem .8rem; border-radius: 10px; background: #f2f6ff; }
 .manage .folder-add { display: flex; flex-wrap: nowrap; align-items: center; gap: .5rem; }
 .manage .folder-add input { width: 16rem; max-width: 52vw; }
+
+/* 기타 관리: 바깥 서비스 사용량 원 띠 그래프(색 = 여유 초록 / 주의 주황 / 위험 빨강, 글자 상태 표시와 함께) */
+.tag.bad { color: var(--bad); background: #fde7e5; }
+.usage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .75rem; }
+.usage-item { margin: 0; display: grid; align-content: start; justify-items: center; gap: .4rem; padding: .8rem .6rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: center; }
+.usage-item figcaption { display: grid; justify-items: center; gap: .15rem; }
+.usage-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem; margin-top: .15rem; }
+.ring svg { display: block; width: 112px; height: 112px; }
+.ring circle { fill: none; stroke-width: 10; }
+.ring-track { stroke: #e8ebf1; }
+.ring-bar { stroke-linecap: round; transition: stroke-dasharray .6s ease; }
+.ring-bar.ok { stroke: #0ca30c; }
+.ring-bar.warn { stroke: #fab219; }
+.ring-bar.bad { stroke: #d03b3b; }
+.ring text { fill: var(--ink); font-size: 19px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.sync-btn { display: inline-flex; align-items: center; gap: .4rem; }
+.sync-icon.spin svg { animation: sync-spin 1s linear infinite; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ring-bar, .sync-icon.spin svg { transition: none; animation: none; } }
 
 /* 수업 설정: 왼쪽(설정·올리기·전환 효과 미리보기) / 오른쪽(전체 슬라이드·다중 선택 삭제)을 함께 본다 */
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
