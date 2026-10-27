@@ -812,7 +812,7 @@ function drawSettings() {
   const msg = h("p", { class: "error" });
   let kind = "lesson";
   const kindPick = h("fieldset", { class: "options" }, h("legend", {}, "무엇을 만들까요?"),
-    [["lesson", "슬라이드 수업", "PDF 슬라이드를 띄우며 쪽마다 질문"], ["survey", "설문만", "슬라이드 없이 설문·퀴즈 링크 하나"]].map(([k, name, sub]) =>
+    [["lesson", "슬라이드 수업", "PPTX·PDF 슬라이드를 띄우며 쪽마다 질문"], ["survey", "설문만", "슬라이드 없이 설문·퀴즈 링크 하나"]].map(([k, name, sub]) =>
       h("label", { class: "option" }, h("input", { type: "radio", name: "lesson-kind", checked: k === kind, onchange() { kind = k; } }),
         h("span", {}, h("strong", {}, name), " · ", h("span", { class: "muted small" }, sub)))));
 
@@ -878,14 +878,14 @@ function drawSettings() {
         h("button", { class: "ghost danger", type: "button", onclick: remove }, "수업 지우기"))) : null));
 }
 
-// 슬라이드 올리기: PDF 한 개 또는 그림 여러 장 → 쪽마다 JPG로 바꿔 Storage에 올린다.
+// 슬라이드 올리기: PPTX 한 개는 그대로, PDF 한 개 또는 그림 여러 장은 쪽마다 JPG로 바꿔 Storage에 올린다.
 function slidesCard() {
   const file = h("input", { type: "file", accept: ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg", multiple: true });
   const bar = h("progress", { max: 1, value: 0, hidden: true });
   const status = h("p", { class: "msg" });
   const btn = h("button", { class: "primary", type: "button" }, lesson.slide_count ? "다시 올리기 (기존 슬라이드를 바꿈)" : "올리기");
   btn.addEventListener("click", async () => {
-    if (!file.files.length) { status.textContent = "PDF, PPTX 또는 그림 파일을 먼저 고르세요."; return; }
+    if (!file.files.length) { status.textContent = "PPTX, PDF 또는 그림 파일을 먼저 고르세요."; return; }
     btn.disabled = true;
     bar.hidden = false;
     try {
@@ -932,9 +932,9 @@ function slidesCard() {
   const ppt = isPptx(lesson);
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? lesson.slide_count + "장" : "없음")),
-    h("p", { class: "muted small" }, "PDF 파일, 그림 파일(PNG·JPG), PowerPoint 파일(PPTX)을 업로드할 수 있습니다. PPTX는 원본 애니메이션을 보존해 표시합니다. 그림은 여러 장을 한 번에 선택할 수 있습니다."),
+    h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), bar, status,
-    ppt ? h("p", { class: "muted small" }, "현재 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF 자료에서 사용할 수 있습니다.") : null,
+    ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
     lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
       h("span", { class: "muted small grow" }, "미리보기에 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
@@ -1012,7 +1012,7 @@ async function toSlideImages(files, progress) {
     return out;
   }
   const imgs = files.filter((f) => /^image\/(png|jpeg)$/.test(f.type)).sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
-  if (!imgs.length) throw new Error("PDF나 PNG·JPG 파일을 고르세요.");
+  if (!imgs.length) throw new Error("PPTX, PDF 또는 PNG·JPG 파일을 고르세요.");
   if (imgs.length > 100) throw new Error("100장이 넘습니다.");
   for (const [i, f] of imgs.entries()) {
     progress(i, imgs.length, "그림 줄이는 중");
@@ -1067,7 +1067,7 @@ async function deleteSlide(target, status) {
   if (!folder) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
   const base = lesson.slide_dir.split("?")[0];
   if (folder !== slideFolder(lesson) || lessons.some((x) => x.id !== lesson.id && (x.slide_dir || "").split("?")[0] === base)) {
-    return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n이 수업에서 PDF를 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
+    return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n이 수업에서 슬라이드 파일을 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
   }
   if (targets.length) {
     if (!confirm(targets.length + "장의 슬라이드를 지울까요? 남은 슬라이드와 질문 쪽 번호를 맞춥니다.")) return;
@@ -1127,6 +1127,7 @@ async function deleteSlide(target, status) {
 }
 
 async function uploadSlides(files, progress) {
+  if (files.some((f) => /\.ppt$/i.test(f.name))) throw new Error("예전 PowerPoint 형식(PPT)은 올릴 수 없습니다. PowerPoint에서 파일 → 다른 이름으로 저장 → PPTX로 저장해 올리세요.");
   const pptx = files.filter((f) => /\.pptx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   if (pptx.length) {
     if (pptx.length !== 1 || files.length !== 1) throw new Error("PPTX는 한 번에 하나만 올릴 수 있습니다.");

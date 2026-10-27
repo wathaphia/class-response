@@ -352,7 +352,7 @@ grant execute on function create_lesson(text, text) to authenticated;
 grant execute on function is_teacher() to authenticated;
 
 -- ------------------------------------------------------------
--- 슬라이드 그림 저장소: 누구나 주소로 볼 수 있고(학생 화면), 교사만 올리고 지운다.
+-- 슬라이드 저장소(그림·PPTX): 누구나 주소로 볼 수 있고(학생 화면), 교사만 올리고 지운다.
 -- ------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
   values ('slides', 'slides', true, 52428800, array['image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'])
