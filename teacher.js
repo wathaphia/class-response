@@ -709,7 +709,7 @@ function activityPreview(a) {
   const intro = activityDescription(a);
   return h("div", { class: "stack" }, intro ? linkedDescription(intro) : null,
     (a.questions || []).map((q, i) => h("div", { class: "sum-block" },
-      h("p", { class: "sum-q" }, (i + 1) + ". " + q.text, h("span", { class: "muted small" }, " · " + (TYPE_NAME[q.type] || q.type))),
+      h("p", { class: "sum-q" }, (i + 1) + ". " + q.text, h("span", { class: "muted small" }, " · " + (isChoice(q) ? "객관식" : "서술형"))),
       (q.type === "choice" || q.type === "multi") ? h("ul", { class: "preview-options" }, (q.options || []).filter(Boolean).map((o) =>
         h("li", { class: a.kind === "quiz" && [].concat(q.answer ?? []).includes(o) ? "right" : "" }, o,
           a.kind === "quiz" && [].concat(q.answer ?? []).includes(o) ? h("strong", { class: "right-mark" }, " ✓정답") : null))) : null)));
@@ -730,24 +730,22 @@ function drawBuild() {
   activities = sortActivities(activities);
   const ids = new Set(activities.map((a) => a.id));
   for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
+  const startPage = lesson.slide_count ? slideNo(lesson, lesson.page) : null;
   const kinds = h("div", { class: "kinds" },
-    (lesson.kind === "survey" ? ["survey", "quiz"] : ["slide", "survey", "quiz"]).map((k) =>
-      h("button", {
-        type: "button", class: "kind",
-        onclick() {
-          editing = { kind: k, title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: true, named: false, shared: false, questions: [newQuestion(k === "survey" ? "long" : "choice")] };
-          drawBuild();
-        },
-      }, h("strong", {}, KIND_NAME[k]))),
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "survey", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, show_answer: false, named: false, shared: false,
+      editing = { kind: "sim", title: "", page: startPage, sim_full: lesson.slide_count > 0, html: "", questions: [] };
+      drawBuild();
+    } }, h("strong", {}, "시뮬레이션")),
+    h("button", { type: "button", class: "kind", onclick() {
+      editing = { kind: "survey", title: "", page: startPage, show_answer: false, named: false, shared: false,
         questions: [{ id: newId(), type: "info", text: "" }] };
       drawBuild();
-    } }, h("strong", {}, "설명 카드")),
+    } }, h("strong", {}, "설명")),
+    // 질문: 예전의 슬라이드 질문·설문·퀴즈를 하나로. 질문마다 「퀴즈」를 켜면 저장할 때 퀴즈(자동 채점)가 된다
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "sim", title: "", page: lesson.slide_count ? slideNo(lesson, lesson.page) : null, sim_full: lesson.slide_count > 0, html: "", questions: [] };
+      editing = { kind: "survey", title: "", page: startPage, show_answer: true, named: false, shared: false, questions: [newQuestion("choice")] };
       drawBuild();
-    } }, h("strong", {}, "시뮬레이션")));
+    } }, h("strong", {}, "질문")));
   const asideKids = [h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds), editing ? editor() : null];
   const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
   const key = buildListKey();
@@ -876,17 +874,46 @@ function simEditor() {
     lesson.slide_count ? h("p", { class: "muted small" }, "슬라이드 사이에 따로 넣으려면 PPT에 「시뮬레이션」 같은 빈 슬라이드를 한 장 끼워 두고, 그 쪽에 「슬라이드 자리에 크게」로 넣으세요.") : null,
     h("p", { class: "muted small" }, "시뮬레이션은 격리된 칸에서 실행되어 이 웹앱의 로그인 정보에 접근할 수 없습니다. 학생은 이 카드에 답을 입력하지 않습니다."),
     msg,
-    h("div", { class: "row between" },
-      e.id ? h("button", { class: "ghost danger", type: "button", async onclick() {
-        if (!confirm("「" + e.title + "」 시뮬레이션을 지울까요?")) return;
-        const { error } = await sb.from("activities").delete().eq("id", e.id);
-        if (error) { msg.textContent = error.message; return; }
-        activities = activities.filter((a) => a.id !== e.id); editing = null; drawBuild();
-      } }, "지우기") : h("span", {}),
-      h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기"),
-        h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
-        h("button", { class: "primary", type: "button", onclick: saveSim }, "저장"))));
+    editorButtons(saveSim, msg, "「" + e.title + "」 시뮬레이션을 지울까요?",
+      h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기")));
+}
+
+// 편집기 맨 아래 버튼: [닫기] [저장] [삭제]. 삭제는 저장한 활동에만 있다(학생 응답도 함께 지워짐)
+function editorButtons(onSave, msg, askText, ...extra) {
+  const e = editing;
+  return h("div", { class: "row end" }, extra,
+    h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
+    h("button", { class: "primary", type: "button", onclick: onSave }, "저장"),
+    e.id ? h("button", { class: "ghost danger", type: "button", async onclick() {
+      if (!confirm(askText)) return;
+      const { error } = await sb.from("activities").delete().eq("id", e.id);
+      if (error) { msg.textContent = error.message; return; }
+      activities = activities.filter((a) => a.id !== e.id); editing = null; drawBuild();
+    } }, "삭제") : null);
+}
+
+// 표시 위치: 「모든 페이지」를 켜면 쪽과 상관없이 늘 보이고(학생 화면의 「언제든 할 수 있는 활동」), 끄면 n쪽부터 n쪽까지
+function placeField(e) {
+  if (!lesson.slide_count) return null;
+  const max = Math.max(slideTotal(lesson), 1);
+  const pageIn = h("input", { type: "number", min: 1, max, value: e.page ?? slideNo(lesson, lesson.page), class: "num page-num", "aria-label": "시작 쪽",
+    oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
+  // 여러 쪽에 걸쳐 같은 활동을 띄울 때 끝 쪽. 비우면 시작 쪽 한 쪽에만 보인다
+  const pageToIn = h("input", { type: "number", min: 1, max, value: e.page_to > e.page ? e.page_to : "", class: "num page-num", "aria-label": "끝 쪽",
+    oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
+  const hint = h("p", { class: "muted small" });
+  const all = h("input", { type: "checkbox", checked: e.page == null, onchange() { e.page = all.checked ? null : parseInt(pageIn.value, 10) || 1; sync(); } });
+  const sync = () => {
+    pageIn.disabled = pageToIn.disabled = all.checked;
+    hint.textContent = all.checked ? "모든 쪽 아래 「언제든 할 수 있는 활동」에 보입니다."
+      : "끝 쪽을 적으면 그 사이 쪽마다 같은 활동이 보이고, 학생이 쓴 답도 이어서 보입니다. 비우면 시작 쪽에만 보입니다.";
+  };
+  sync();
+  return h("div", { class: "place" },
+    h("span", { class: "field-name" }, "표시 위치"),
+    h("div", { class: "place-row" }, h("label", { class: "check" }, all, "모든 페이지"),
+      pageIn, h("span", {}, "쪽부터"), pageToIn, h("span", {}, "쪽까지")),
+    hint);
 }
 
 function editor() {
@@ -897,114 +924,133 @@ function editor() {
     const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 활동 안내", oninput() { e.title = title.value; } });
     const body = h("textarea", { rows: 10, maxlength: 5000, placeholder: "설명과 링크를 입력하세요. https:// 주소는 학생 화면에서 클릭할 수 있습니다.", oninput() { e.questions[0].text = body.value; } }, e.questions[0].text || "");
     return h("section", { class: "card stack editor" },
-      h("h2", {}, e.id ? "설명 카드 고치기" : "설명 카드 만들기"),
+      h("h2", {}, e.id ? "설명 고치기" : "설명 만들기"),
+      placeField(e),
       h("label", {}, "제목", title), h("label", {}, "설명문", body),
       h("p", { class: "muted small" }, "학생은 이 카드에 답을 입력하지 않습니다."), msg,
-      h("div", { class: "row between" },
-        e.id ? h("button", { class: "ghost danger", type: "button", async onclick() {
-          if (!confirm("설명 카드를 지울까요?")) return;
-          const { error } = await sb.from("activities").delete().eq("id", e.id);
-          if (error) { msg.textContent = error.message; return; }
-          activities = activities.filter((a) => a.id !== e.id); editing = null; drawBuild();
-        } }, "카드 지우기") : h("span", {}),
-        h("div", { class: "row" },
-          h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
-          h("button", { class: "primary", type: "button", async onclick() {
-            e.title = e.title.trim(); e.questions[0].text = e.questions[0].text.trim();
-            if (!e.title || !e.questions[0].text) { msg.textContent = "제목과 설명문을 입력하세요."; return; }
-            const row = { kind: "survey", title: e.title, page: e.page, show_answer: false, named: false, questions: e.questions };
-            if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
-            const saved = await save("activities", row, e.id);
-            if (!saved) return;
-            const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
-            activities = sortActivities(data || []); editing = JSON.parse(JSON.stringify(saved)); drawBuild(); flash("저장했습니다.");
-          } }, "저장"))));
+      editorButtons(async () => {
+        e.title = e.title.trim(); e.questions[0].text = e.questions[0].text.trim();
+        if (!e.title || !e.questions[0].text) { msg.textContent = "제목과 설명문을 입력하세요."; return; }
+        const row = { kind: "survey", title: e.title, page: e.page, show_answer: false, named: false, questions: e.questions };
+        const to = pageTo(e);
+        if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
+        if (to !== undefined) row.page_to = to;
+        if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
+        const saved = await save("activities", row, e.id);
+        if (!saved) return;
+        const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
+        activities = sortActivities(data || []); editing = JSON.parse(JSON.stringify(saved)); drawBuild(); flash("저장했습니다.");
+      }, msg, "설명 카드를 지울까요?"));
   }
   if (e.description === undefined) e.description = activityDescription(e);
+  // 예전 퀴즈는 정답이 있는 질문을 퀴즈로 본다(q.quiz는 편집할 때만 쓰고 저장하지 않는다)
+  for (const q of e.questions) if (q.quiz === undefined) q.quiz = e.kind === "quiz" && q.answer != null;
   const hasResponses = e.id && responses.some((r) => r.activity_id === e.id);
   const msg = h("p", { class: "error" });
-  const redraw = () => { const y = scrollY; drawBuild(); scrollTo(0, y); };
+  const redraw = (focus) => { const y = scrollY; drawBuild(); scrollTo(0, y); if (focus) main.querySelector('.editor [data-opt="' + focus + '"]')?.focus(); };
 
   const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 예상해 보기", oninput() { e.title = title.value; } });
-  const description = h("textarea", { rows: 5, maxlength: 2000, placeholder: "설문 전체에 대한 설명을 입력하세요. 웹 주소는 학생 화면에서 링크가 됩니다.", oninput() { e.description = description.value; } }, e.description || "");
-  const pageIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page ?? slideNo(lesson, lesson.page), class: "num", "aria-label": "시작 쪽", oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
-  // 여러 쪽에 걸쳐 같은 질문을 띄울 때 끝 쪽. 비우면 시작 쪽 한 쪽에만 보인다
-  const pageToIn = h("input", { type: "number", min: 1, max: Math.max(slideTotal(lesson), 1), value: e.page_to > e.page ? e.page_to : "", placeholder: "(한 쪽만)", class: "num", "aria-label": "끝 쪽", oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
-  const placeSel = h("select", {
-    onchange() { e.page = placeSel.value === "page" ? (parseInt(pageIn.value, 10) || 1) : null; redraw(); },
-  }, h("option", { value: "page", selected: e.page != null }, "슬라이드 쪽 아래"), h("option", { value: "any", selected: e.page == null }, "언제든 (모든 쪽 아래 목록)"));
+  const description = h("textarea", { rows: 4, maxlength: 2000, placeholder: "질문 전체에 대한 설명을 입력하세요. 웹 주소는 학생 화면에서 링크가 됩니다.", oninput() { e.description = description.value; } }, e.description || "");
 
   const qs = e.questions.map((q, i) => {
-    const typeSel = h("select", {
-      "aria-label": "질문 종류",
-      onchange() { q.type = typeSel.value; if (q.type === "choice" || q.type === "multi") { q.options = q.options && q.options.length ? q.options : ["", ""]; } delete q.answer; redraw(); },
-    }, Object.entries(TYPE_NAME).map(([k, v]) => h("option", { value: k, selected: q.type === k }, v)));
-    const move = (d) => { const j = i + d; if (j < 0 || j >= e.questions.length) return; [e.questions[i], e.questions[j]] = [e.questions[j], e.questions[i]]; redraw(); };
+    const choice = isChoice(q);
+    // 객관식 ↔ 서술형. 서술형은 자동 채점하지 않으므로 퀴즈도 꺼진다
+    const setType = (toChoice) => {
+      if (toChoice === choice) return;
+      q.type = toChoice ? "choice" : "long";
+      if (toChoice) q.options = q.options && q.options.length ? q.options : ["", ""];
+      else { q.quiz = false; delete q.explain; }
+      delete q.answer;
+      redraw();
+    };
+    const seg = h("div", { class: "seg", role: "group", "aria-label": "질문 종류" },
+      h("button", { type: "button", class: choice ? "on" : "", "aria-pressed": String(choice), onclick() { setType(true); } }, "객관식"),
+      h("button", { type: "button", class: choice ? "" : "on", "aria-pressed": String(!choice), onclick() { setType(false); } }, "서술형"));
+    const quizBtn = h("button", {
+      type: "button", class: "quiz-toggle" + (q.quiz ? " on" : ""), "aria-pressed": String(!!q.quiz), disabled: !choice,
+      title: choice ? "정답을 정하면 학생이 제출할 때 자동으로 채점합니다." : "객관식 질문만 퀴즈로 채점할 수 있습니다.",
+      onclick() { q.quiz = !q.quiz; if (!q.quiz) { delete q.answer; delete q.explain; } redraw(); },
+    }, "퀴즈");
     const text = h("input", { type: "text", maxlength: 300, value: q.text, placeholder: "질문을 입력하세요", oninput() { q.text = text.value; } });
-    const choice = q.type === "choice" || q.type === "multi";
-    const opts = choice ? h("textarea", {
-      rows: Math.max(3, q.options.length + 1),
-      onchange() {
-        q.options = opts.value.split("\n").map((x) => x.trim()).filter(Boolean);
-        if (q.answer != null) {
-          q.answer = q.type === "choice" ? (q.options.includes(q.answer) ? q.answer : undefined) : [].concat(q.answer).filter((x) => q.options.includes(x));
-          if (q.answer === undefined || (Array.isArray(q.answer) && !q.answer.length)) delete q.answer;
-        }
-        redraw();
-      },
-    }, q.options.filter(Boolean).join("\n")) : null;
-    const answerPick = e.kind === "quiz" && choice && q.options.filter(Boolean).length ? h("fieldset", { class: "options" },
-      h("legend", {}, "정답 표시" + (q.type === "multi" ? " (모두 고르기)" : "")),
-      q.options.filter(Boolean).map((o) => h("label", { class: "option" + ([].concat(q.answer ?? []).includes(o) ? " right" : "") },
+    const answers = () => [].concat(q.answer ?? []);
+    const optRows = choice ? q.options.map((o, j) => {
+      const input = h("input", { type: "text", maxlength: 200, value: o, placeholder: "항목 " + (j + 1), "data-opt": q.id + "-" + j, "aria-label": (j + 1) + "번 항목",
+        oninput() {
+          // 정답으로 고른 항목의 글을 고치면 정답도 따라 바뀐다
+          const old = q.options[j];
+          q.options[j] = input.value;
+          if (q.answer != null) q.answer = Array.isArray(q.answer) ? q.answer.map((x) => (x === old ? input.value : x)) : q.answer === old ? input.value : q.answer;
+        } });
+      const pick = q.quiz ? h("label", { class: "check ans-pick" },
         h("input", {
-          type: q.type === "choice" ? "radio" : "checkbox", name: "ans-" + q.id, checked: [].concat(q.answer ?? []).includes(o),
+          type: q.type === "multi" ? "checkbox" : "radio", name: "ans-" + q.id, checked: o !== "" && answers().includes(o),
           onchange(ev) {
-            if (q.type === "choice") q.answer = o;
-            else {
-              const now = q.options.filter((x) => (x === o ? ev.target.checked : [].concat(q.answer ?? []).includes(x)));
-              if (now.length) q.answer = now; else delete q.answer;
-            }
-            redraw();
+            const v = q.options[j];
+            if (q.type !== "multi") { q.answer = v; return; }
+            const now = new Set(answers());
+            if (ev.target.checked) now.add(v); else now.delete(v);
+            const list = q.options.filter((x) => now.has(x));
+            if (list.length) q.answer = list; else delete q.answer;
           },
-        }), h("span", {}, o)))) : null;
-    const explain = e.kind === "quiz" ? h("input", { type: "text", maxlength: 300, value: q.explain || "", placeholder: "해설 (선택)", oninput() { q.explain = explain.value.trim() || undefined; } }) : null;
+        }), "정답") : null;
+      const del = h("button", { type: "button", class: "link danger opt-del", "aria-label": (j + 1) + "번 항목 지우기", disabled: q.options.length <= 2,
+        onclick() {
+          const [gone] = q.options.splice(j, 1);
+          if (q.answer != null) {
+            const left = answers().filter((x) => x !== gone);
+            if (!left.length) delete q.answer; else q.answer = q.type === "multi" ? left : left[0];
+          }
+          redraw();
+        } }, "×");
+      return h("div", { class: "opt-row" }, pick, input, del);
+    }) : null;
+    const multi = choice ? h("label", { class: "check" }, h("input", { type: "checkbox", checked: q.type === "multi", onchange(ev) {
+      q.type = ev.target.checked ? "multi" : "choice";
+      if (q.answer != null) q.answer = q.type === "multi" ? answers() : answers()[0];
+      redraw();
+    } }), "여러 개 골라도 됨") : null;
+    const explain = q.quiz ? h("input", { type: "text", maxlength: 300, value: q.explain || "", placeholder: "해설 (선택)", oninput() { q.explain = explain.value.trim() || undefined; } }) : null;
     return h("article", { class: "q-edit stack" },
-      h("div", { class: "row" }, h("strong", {}, "질문 " + (i + 1)), typeSel, h("span", { class: "spacer" }),
-        h("button", { class: "link", type: "button", onclick() { move(-1); } }, "위로"),
-        h("button", { class: "link", type: "button", onclick() { move(1); } }, "아래로"),
-        h("button", { class: "link danger", type: "button", onclick() { if (e.questions.length > 1) { e.questions.splice(i, 1); redraw(); } } }, "삭제")),
+      h("div", { class: "q-head" }, h("strong", {}, "질문 " + (i + 1)), seg, quizBtn),
       h("label", {}, "질문", text),
-      choice ? h("label", {}, "보기 (한 줄에 하나씩)", opts) : null,
-      answerPick,
-      explain ? h("label", {}, "해설", explain) : null,
-      e.kind === "quiz" && !choice ? h("p", { class: "muted small" }, "글로 답하는 질문은 자동 채점하지 않습니다.") : null);
+      choice ? h("div", { class: "opt-list" }, h("span", { class: "field-name" }, "항목" + (q.quiz ? " (정답을 고르세요)" : "")), optRows,
+        h("div", { class: "row between" }, multi,
+          h("button", { class: "ghost", type: "button", onclick() { q.options.push(""); redraw(q.id + "-" + (q.options.length - 1)); } }, "+ 항목 추가"))) : null,
+      explain ? h("label", {}, "해설", explain) : null);
   });
 
   async function saveActivity() {
     e.title = e.title.trim();
     if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
+    // 아무것도 적지 않은 질문은 저장할 때 뺀다(번호는 화면에 보이는 번호 그대로 알린다)
+    const blank = (q) => !(q.text || "").trim() && !(isChoice(q) && q.options.some((x) => x.trim()));
+    if (e.questions.every(blank)) { msg.textContent = "질문을 입력하세요."; return; }
     for (const [i, q] of e.questions.entries()) {
+      if (blank(q)) continue;
       q.text = (q.text || "").trim();
       delete q.description;
       delete q.intro;
       if (!q.text) { msg.textContent = (i + 1) + "번 질문을 입력하세요."; return; }
-      if (q.type === "choice" || q.type === "multi") {
-        q.options = q.options.map((x) => x.trim()).filter(Boolean);
-        if (q.options.length < 2) { msg.textContent = (i + 1) + "번 질문의 보기를 두 개 이상 적으세요."; return; }
-        if (new Set(q.options).size !== q.options.length) { msg.textContent = (i + 1) + "번 질문에 같은 보기가 두 번 있습니다."; return; }
-      } else { delete q.options; delete q.answer; }
+      if (isChoice(q)) {
+        const opts = q.options.map((x) => x.trim()).filter(Boolean);
+        if (opts.length < 2) { msg.textContent = (i + 1) + "번 질문의 항목을 두 개 이상 적으세요."; return; }
+        if (new Set(opts).size !== opts.length) { msg.textContent = (i + 1) + "번 질문에 같은 항목이 두 번 있습니다."; return; }
+        const right = [].concat(q.answer ?? []).map((x) => String(x).trim()).filter((x) => opts.includes(x));
+        if (q.quiz && !right.length) { msg.textContent = (i + 1) + "번 질문(퀴즈)의 정답을 고르세요."; return; }
+        q.options = opts;
+        if (q.quiz) q.answer = q.type === "multi" ? right : right[0];
+        else { delete q.answer; delete q.explain; }
+      } else { delete q.options; delete q.answer; delete q.explain; q.quiz = false; }
     }
-    if (e.questions.length && e.description.trim()) e.questions[0].intro = e.description.trim();
-    const row = { kind: e.kind, title: e.title, page: e.page, show_answer: e.show_answer, named: e.named, questions: e.questions };
-    // 끝 쪽: 시작 쪽보다 뒤일 때만 쓴다. (page_to 칸이 없는 예전 데이터베이스에서도 한 쪽짜리는 저장되도록 필요할 때만 보낸다)
-    const to = e.page != null && e.page_to > e.page ? Math.min(e.page_to, Math.max(slideTotal(lesson), e.page)) : null;
-    // 데이터베이스에 page_to 칸이 있을 때만(불러온 활동에 그 칸이 보일 때만) 보낸다
-    const hasPageTo = activities.some((x) => "page_to" in x);
-    if (to != null && activities.length && !hasPageTo) {
-      msg.textContent = "여러 쪽에 걸친 질문을 쓰려면 먼저 Supabase에서 setup.sql을 한 번 실행해야 합니다. 끝 쪽 칸을 비우면 지금도 저장할 수 있습니다.";
-      return;
-    }
-    if (to != null || hasPageTo) row.page_to = to;
+    e.questions = e.questions.filter((q) => !blank(q));
+    if (e.description.trim()) e.questions[0].intro = e.description.trim();
+    // 퀴즈인 질문이 하나라도 있으면 퀴즈(한 번만 제출, 서버에서 채점). 아니면 예전 종류(슬라이드 질문·설문)를 그대로 둔다
+    const quiz = e.questions.some((q) => q.quiz);
+    const kind = quiz ? "quiz" : e.kind === "quiz" ? "survey" : e.kind;
+    const row = { kind, title: e.title, page: e.page, show_answer: e.show_answer, named: e.named, questions: e.questions.map(({ quiz: _, ...q }) => q) };
+    const to = pageTo(e);
+    if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
+    if (to !== undefined) row.page_to = to;
     if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
     const saved = await save("activities", row, e.id);
     if (!saved) return;
@@ -1015,36 +1061,31 @@ function editor() {
     flash("저장했습니다.");
   }
 
-  async function removeActivity() {
-    if (!confirm("「" + e.title + "」을(를) 지울까요? 학생 응답도 함께 지워집니다.")) return;
-    const { error } = await sb.from("activities").delete().eq("id", e.id);
-    if (error) { msg.textContent = error.message; return; }
-    activities = activities.filter((a) => a.id !== e.id);
-    editing = null;
-    drawBuild();
-  }
-
   return h("section", { class: "card stack editor" },
-    h("p", { class: "muted small" }, KIND_NAME[e.kind] + (e.id ? " 고치기" : " 새로 만들기")),
-    hasResponses ? h("p", { class: "banner" }, "이미 학생 응답이 있습니다. 질문이나 보기를 바꾸면 기존 응답과 맞지 않을 수 있습니다.") : null,
+    h("h2", {}, e.id ? "질문 고치기" : "질문 만들기"),
+    hasResponses ? h("p", { class: "banner" }, "이미 학생 응답이 있습니다. 질문이나 항목을 바꾸면 기존 응답과 맞지 않을 수 있습니다.") : null,
+    placeField(e),
+    h("label", {}, "제목", title),
+    h("label", {}, "설명문 (선택)", description),
     h("div", { class: "row wrap" },
-      h("label", { class: "grow" }, "제목", title),
-      lesson.slide_count ? h("label", {}, "어디에 보일까요?", h("div", { class: "row" }, placeSel, e.page != null ? pageIn : null, e.page != null ? h("span", {}, "쪽부터") : null,
-        e.page != null ? pageToIn : null, e.page != null ? h("span", {}, "쪽까지") : null)) : null),
-      lesson.slide_count && e.page != null ? h("p", { class: "muted small grow" }, "끝 쪽을 적으면 그 사이 쪽마다 같은 질문이 보이고, 학생이 쓴 답도 이어서 보입니다.") : null,
-    h("label", {}, "설문 설명문 (선택)", description),
-    h("div", { class: "row wrap" },
-      e.kind === "quiz" ? h("label", { class: "check" }, h("input", { type: "checkbox", checked: e.show_answer, onchange(ev) { e.show_answer = ev.target.checked; } }), "제출 뒤 정답과 해설 보여 주기") : null,
+      e.questions.some((q) => q.quiz) ? h("label", { class: "check" }, h("input", { type: "checkbox", checked: e.show_answer, onchange(ev) { e.show_answer = ev.target.checked; } }), "제출 뒤 정답과 해설 보여 주기") : null,
       h("label", { class: "check" }, h("input", { type: "checkbox", checked: e.named, onchange(ev) { e.named = ev.target.checked; } }), "학생에게 공개할 때 이름 표시")),
     qs,
-    h("div", { class: "row" }, Object.entries(TYPE_NAME).map(([k, v]) =>
-      h("button", { class: "ghost", type: "button", onclick() { e.questions.push(newQuestion(k)); redraw(); } }, "+ " + v))),
+    h("button", { class: "ghost add-q", type: "button", onclick() { e.questions.push(newQuestion("choice")); redraw(); } }, "+ 추가"),
     msg,
-    h("div", { class: "row between" },
-      e.id ? h("button", { class: "ghost danger", type: "button", onclick: removeActivity }, "활동 지우기") : h("span", {}),
-      h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
-        h("button", { class: "primary", type: "button", onclick: saveActivity }, "저장"))));
+    editorButtons(saveActivity, msg, "「" + e.title + "」을(를) 지울까요? 학생 응답도 함께 지워집니다."));
+}
+
+const isChoice = (q) => q.type === "choice" || q.type === "multi";
+
+// 저장할 끝 쪽. undefined = 보내지 않음, null/숫자 = 보냄, false = 데이터베이스에 page_to 칸이 없어 저장할 수 없음
+// (page_to 칸이 없는 예전 데이터베이스에서도 한 쪽짜리는 저장되도록 필요할 때만 보낸다)
+const PAGE_TO_SETUP = "여러 쪽에 걸친 활동을 쓰려면 먼저 Supabase에서 setup.sql을 한 번 실행해야 합니다. 끝 쪽 칸을 비우면 지금도 저장할 수 있습니다.";
+function pageTo(e) {
+  const to = e.page != null && e.page_to > e.page ? Math.min(e.page_to, Math.max(slideTotal(lesson), e.page)) : null;
+  const hasPageTo = activities.some((x) => "page_to" in x);
+  if (to != null && activities.length && !hasPageTo) return false;
+  return to != null || hasPageTo ? to : undefined;
 }
 
 function flash(text) {
