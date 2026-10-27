@@ -164,6 +164,15 @@ main.lesson .slide { cursor: zoom-in; }
 .run { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
 .run-left { flex: 999 1 600px; min-width: 0; }
 .run-right { flex: 1 1 360px; min-width: 0; }
+/* 넓은 화면: 수업 진행 화면 높이를 창에 맞추고(높이는 teacher.js의 pinRun이 머리말·아래 만든 사람 줄 높이에 맞춘다) 오른쪽만 안에서 스크롤. 왼쪽 슬라이드는 움직이지 않는다 */
+@media (min-width: 1100px) {
+  main.wide.run-page { padding-bottom: 0; }
+  main.wide.run-page ~ .credit { padding: .5rem 16px; }
+  .run.pinned { flex-wrap: nowrap; align-items: stretch; }
+  .run.pinned > .run-left { overflow-y: auto; }
+  .run.pinned > .run-right { overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
+  .run.pinned > .run-right > * { flex-shrink: 0; }
+}
 .join { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; }
 .qr { background: #fff; padding: 12px; border-radius: 12px; }
 .qr img, .qr canvas { display: block; width: min(320px, 70vw); height: auto; }

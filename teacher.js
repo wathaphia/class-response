@@ -424,6 +424,7 @@ function drawRun() {
   const panel = h("div", { class: "stack" });
   const roster = h("section", { class: "card stack" });
   const hasSlides = lesson.slide_count > 0;
+  main.classList.add("run-page");
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
@@ -441,6 +442,31 @@ function drawRun() {
       panel)));
   run = { img, stage, simStage, simLayer, simKey: "", pptKey: "", where, prev, next, deckBtn, openBtn, openText, panel, roster, blocks: new Map() };
   refreshRun();
+  pinRun();
+}
+
+// 수업 진행을 넓은 화면에서 창 높이에 맞춘다: 왼쪽(슬라이드)은 고정, 오른쪽(제출·명단·활동)만 안에서 스크롤.
+let runPin = null;
+function pinRun() {
+  if (runPin) { runPin.ro.disconnect(); removeEventListener("resize", runPin.fit); runPin = null; }
+  const box = main.querySelector(".run");
+  if (!box) return;
+  const head = app.querySelector(".top");
+  const credit = document.querySelector(".credit");
+  const fit = () => {
+    if (!box.isConnected) return;
+    if (!matchMedia("(min-width: 1100px)").matches) { box.classList.remove("pinned"); box.style.height = ""; return; }
+    box.classList.add("pinned");
+    // 머리말, main 위쪽 여백(1rem), 맨 아래 만든 사람 줄을 뺀 나머지
+    const used = (head ? head.getBoundingClientRect().height : 0) + 16 + (credit ? credit.getBoundingClientRect().height : 0);
+    box.style.height = Math.max(320, Math.floor(innerHeight - used)) + "px";
+  };
+  const ro = new ResizeObserver(fit);
+  if (head) ro.observe(head);
+  if (credit) ro.observe(credit);
+  addEventListener("resize", fit);
+  runPin = { ro, fit };
+  fit();
 }
 
 function refreshRun() {
