@@ -64,7 +64,8 @@ function pageOfSlide(lesson, slide) {
 }
 function slideLabel(lesson, page) {
   const p = slidePos(lesson, page);
-  return p.slide + " / " + p.total + (p.steps > 1 ? " · 애니메이션 " + p.step + "/" + p.steps : "");
+  // 애니메이션은 클릭 수로 센다: 처음 화면 0/3 → 클릭마다 1/3, 2/3, 3/3. 애니메이션이 없으면 0/0
+  return p.slide + " / " + p.total + " · 애니메이션 " + (p.steps > 1 ? (p.step - 1) + "/" + (p.steps - 1) : "0/0");
 }
 // 실시간 화면 신호에서 학생을 알아보는 이름(학생 id를 모를 때 씀)
 const screenKey = (s) => "k:" + s.class_no + ":" + s.name;
@@ -103,7 +104,7 @@ function swapSlide(img, src, fx, dir) {
     }
     img.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev");
     img.src = src;
-    if (cls) { void img.offsetWidth; img.classList.add(cls); }
+    if (cls && prev) { void img.offsetWidth; img.classList.add(cls); }   // 처음 열 때는 효과 없이 바로 보인다
   };
   if (!img.getAttribute("src")) return show();
   const pre = new Image();

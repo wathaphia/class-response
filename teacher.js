@@ -213,21 +213,185 @@ function draw() {
     },
   }, lessons.map((l) => h("option", { value: l.id, selected: lesson && l.id === lesson.id }, (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
     h("option", { value: "new", selected: !lesson }, "+ 새 수업 만들기"));
-  const tabs = [["run", "수업 진행"], ["build", "질문·설문 만들기"], ["students", "학생 관리"], ["settings", "수업 설정"]];
+  const tabs = [["run", "수업 진행"], ["build", "질문·설문 만들기"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"]];
   if (!tabs.some(([k]) => k === tab)) tab = "run";
   main = h("main", { class: "wide" });
   app.replaceChildren(
     h("header", { class: "top" },
       h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), pick),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
-        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings",
+        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "manage",
         onclick() { tab = k; localStorage.setItem("cra-tab", k); draw(); },
       }, label))),
       h("button", { class: "link", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃")),
     main);
-  if (!lesson) tab = "settings";
-  ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings })[tab]();
+  if (!lesson && tab !== "manage") tab = "settings";
+  ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, manage: drawManage })[tab]();
   schedule();
+}
+
+// ---------- 전체 수업 관리 ----------
+// 역대 모든 수업을 폴더로 정리한다. 수업 카드를 끌어 폴더에 넣거나 순서를 바꾸고, 골라서 불러오거나 슬라이드를 PDF로 받는다.
+let folders = [];
+let pickedId = null;
+
+async function drawManage() {
+  const { data, error } = await sb.from("lesson_folders").select("*").order("sort").order("created_at");
+  if (tab !== "manage") return;
+  folders = error ? [] : data;
+  const msg = h("p", { class: "msg" });
+  const groups = [...folders.map((f) => ({ id: f.id, name: f.name })), { id: null, name: "폴더 없음" }];
+  const inGroup = (gid) => lessons
+    .filter((l) => (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null) === gid)
+    .sort((x, y) => (x.sort || 0) - (y.sort || 0) || x.created_at.localeCompare(y.created_at));
+  const picked = () => lessons.find((l) => l.id === pickedId) || null;
+
+  // 끌어 놓기: 수업 카드 위에 놓으면 그 앞에, 폴더 빈 곳에 놓으면 맨 뒤에 넣고 그 폴더 순서를 다시 매겨 저장한다
+  async function moveLesson(id, gid, beforeId) {
+    const l = lessons.find((x) => x.id === id);
+    if (!l || id === beforeId) return;
+    const list = inGroup(gid).filter((x) => x.id !== id);
+    const at = beforeId ? list.findIndex((x) => x.id === beforeId) : -1;
+    list.splice(at < 0 ? list.length : at, 0, l);
+    const changes = list.map((x, i) => ({ x, change: { folder_id: gid, sort: i } }))
+      .filter(({ x, change }) => (x.folder_id || null) !== change.folder_id || (x.sort || 0) !== change.sort);
+    changes.forEach(({ x, change }) => Object.assign(x, change));
+    drawManage();
+    for (const { x, change } of changes) {
+      const r = await sb.from("lessons").update(change).eq("id", x.id);
+      if (r.error) return alert("옮기지 못했습니다: " + r.error.message);
+    }
+  }
+  const dropZone = (el, gid, beforeId) => {
+    el.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); el.classList.add("drop-on"); });
+    el.addEventListener("dragleave", () => el.classList.remove("drop-on"));
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove("drop-on");
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) moveLesson(id, gid, beforeId);
+    });
+  };
+
+  const loadPicked = async () => {
+    const l = picked();
+    if (!l) return;
+    lesson = l;
+    tab = "run";
+    localStorage.setItem("cra-tab", "run");
+    await loadLesson();
+  };
+  const card = (l) => {
+    const el = h("article", {
+      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: "true", tabindex: "0",
+      onclick() { pickedId = l.id; drawManage(); },
+      ondblclick() { pickedId = l.id; loadPicked(); },
+      ondragstart(e) { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; el.classList.add("dragging"); },
+      ondragend() { el.classList.remove("dragging"); },
+    },
+      h("strong", {}, (l.kind === "survey" ? "[설문] " : "") + l.title),
+      h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString()),
+      l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null);
+    dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
+    return el;
+  };
+
+  const folderBox = (g) => {
+    const items = inGroup(g.id);
+    const list = h("div", { class: "lesson-list" }, items.length ? items.map(card) : h("p", { class: "muted small" }, "여기로 수업을 끌어 놓으세요."));
+    dropZone(list, g.id, null);
+    const f = folders.find((x) => x.id === g.id);
+    return h("section", { class: "card stack folder" },
+      h("div", { class: "row between" },
+        h("h2", {}, (g.id ? "📁 " : "") + g.name, h("span", { class: "muted small" }, " · " + items.length + "개")),
+        f ? h("div", { class: "row" },
+          h("button", { class: "link", type: "button", async onclick() {
+            const name = (prompt("폴더 이름", f.name) || "").trim();
+            if (!name || name === f.name) return;
+            const r = await sb.from("lesson_folders").update({ name: name.slice(0, 60) }).eq("id", f.id);
+            if (r.error) return alert(r.error.message);
+            drawManage();
+          } }, "이름 바꾸기"),
+          h("button", { class: "link danger", type: "button", async onclick() {
+            if (!confirm("「" + f.name + "」 폴더를 지울까요? 안의 수업은 지워지지 않고 「폴더 없음」으로 옮겨집니다.")) return;
+            const r = await sb.from("lesson_folders").delete().eq("id", f.id);
+            if (r.error) return alert(r.error.message);
+            lessons.forEach((l) => { if (l.folder_id === f.id) l.folder_id = null; });
+            drawManage();
+          } }, "폴더 지우기")) : null),
+      list);
+  };
+
+  const newName = h("input", { type: "text", maxlength: 60, placeholder: "새 폴더 이름 (예: 2학기 물리)" });
+  const addFolder = async () => {
+    const name = newName.value.trim();
+    if (!name) { newName.focus(); return; }
+    const r = await sb.from("lesson_folders").insert({ name, sort: folders.length });
+    if (r.error) { msg.textContent = "폴더를 만들지 못했습니다: " + r.error.message; return; }
+    drawManage();
+  };
+  newName.addEventListener("keydown", (e) => { if (e.key === "Enter") addFolder(); });
+
+  const p = picked();
+  const moveSel = p ? h("select", { "aria-label": "옮길 폴더", async onchange() { await moveLesson(p.id, moveSel.value || null, null); } },
+    groups.map((g) => h("option", { value: g.id || "", selected: (folders.some((f) => f.id === p.folder_id) ? p.folder_id : null) === g.id }, g.name))) : null;
+  main.replaceChildren(h("div", { class: "stack manage" },
+    h("section", { class: "card stack" },
+      h("div", { class: "row between wrap" },
+        h("h2", {}, "전체 수업 " + lessons.length + "개"),
+        h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가"))),
+      h("p", { class: "muted small" }, "수업 카드를 끌어 폴더에 넣거나 순서를 바꿀 수 있습니다. 카드를 눌러 고른 뒤 「불러오기」(또는 두 번 누르기)로 그 수업을 엽니다."),
+      error ? h("p", { class: "error" }, "폴더 기능을 쓰려면 Supabase에서 새 setup.sql을 실행해야 합니다.") : null,
+      p ? h("div", { class: "row wrap picked-bar" },
+        h("strong", {}, "고른 수업: " + p.title + " (" + p.code + ")"),
+        h("button", { class: "primary", type: "button", onclick: loadPicked }, "불러오기"),
+        h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+        h("label", { class: "row" }, h("span", { class: "muted small" }, "폴더:"), moveSel))
+        : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
+      msg),
+    groups.map(folderBox)));
+}
+
+// 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.
+async function loadJsPdf() {
+  if (!window.jspdf) {
+    await new Promise((ok, fail) => document.head.append(h("script", {
+      src: "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+      onload: ok, onerror: () => fail(new Error("PDF 도구를 불러오지 못했습니다")),
+    })));
+  }
+  return window.jspdf.jsPDF;
+}
+function pdfPages(l) {
+  const steps = slideSteps(l);
+  if (!steps) return Array.from({ length: l.slide_count }, (_, i) => i + 1);
+  let first = 1;
+  return steps.map((n) => { const p = first + n - 1; first += n; return p; });
+}
+async function exportSlidesPdf(l, msg) {
+  if (!l.slide_count) { msg.textContent = "슬라이드가 없는 수업입니다."; return; }
+  if (isPptx(l)) { msg.textContent = "PowerPoint 파일 그대로 올린 수업은 여기서 PDF로 바꿀 수 없습니다. PowerPoint에서 PDF로 저장해 주세요."; return; }
+  try {
+    const JsPdf = await loadJsPdf();
+    const pages = pdfPages(l);
+    let doc = null;
+    for (const [i, pg] of pages.entries()) {
+      msg.textContent = "PDF 만드는 중 " + (i + 1) + " / " + pages.length;
+      const blob = await (await fetch(slideSrc(l, pg))).blob();
+      const bmp = await createImageBitmap(blob);
+      const w = bmp.width, hh = bmp.height;
+      const url = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(blob); });
+      const orient = w >= hh ? "landscape" : "portrait";
+      if (!doc) doc = new JsPdf({ orientation: orient, unit: "px", format: [w, hh], hotfixes: ["px_scaling"] });
+      else doc.addPage([w, hh], orient);
+      doc.addImage(url, /png/i.test(blob.type) ? "PNG" : "JPEG", 0, 0, w, hh);
+    }
+    doc.save((l.title || l.code).replace(/[\\/:*?"<>|]/g, "_") + "_슬라이드.pdf");
+    msg.textContent = "PDF를 받았습니다 (" + pages.length + "쪽).";
+  } catch (e) {
+    msg.textContent = "PDF를 만들지 못했습니다: " + (e.message || e);
+  }
 }
 
 // ---------- 수업 진행 ----------
@@ -299,9 +463,9 @@ function refreshRun() {
     run.where.textContent = slideLabel(L, L.page);
     run.prev.disabled = pos.slide <= 1;
     run.next.disabled = pos.slide >= pos.total;
-    run.animPrev.hidden = run.animNext.hidden = !anim;
-    run.animPrev.disabled = L.page <= 1;
-    run.animNext.disabled = L.page >= L.slide_count;
+    // 애니메이션 버튼은 늘 같은 자리에 두고(버튼이 움직이지 않게), 애니메이션이 없는 수업에서는 누를 수 없게만 한다
+    run.animPrev.disabled = !anim || L.page <= 1;
+    run.animNext.disabled = !anim || L.page >= L.slide_count;
     run.deckBtn.hidden = !deckUrl(L);
     if (L.page < L.slide_count) new Image().src = slideSrc(L, L.page + 1);
   }
@@ -1143,7 +1307,7 @@ function drawSettings() {
 // 단계 그림 미리보기 이름: "3쪽" 또는 "3쪽 · 2/4"
 function thumbLabel(i) {
   const p = slidePos(lesson, i);
-  return p.slide + "쪽" + (p.steps > 1 ? " · " + p.step + "/" + p.steps : "");
+  return p.slide + "쪽" + (p.steps > 1 ? " · " + (p.step - 1) + "/" + (p.steps - 1) : "");
 }
 
 // 슬라이드 올리기: PPTX 한 개는 그대로, PDF 한 개 또는 그림 여러 장은 쪽마다 JPG로 바꿔 Storage에 올린다.
