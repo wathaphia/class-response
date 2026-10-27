@@ -1,5 +1,8 @@
 // 학생 화면과 교사 화면이 함께 쓰는 것들
 
+// http:// 로 열렸으면 https:// 로 다시 연다(내 PC에서 시험할 때는 그대로)
+if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) location.replace("https:" + location.href.slice(5));
+
 // 주소 끝에 /rest/v1/ 같은 꼬리나 빈칸이 붙어 있어도 프로젝트 주소만 쓴다
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");
 const configured = (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(SB_URL))
@@ -34,6 +37,38 @@ function h(tag, attrs, ...kids) {
 // 활동이 이 쪽에 보이는지. page부터 page_to까지(page_to가 없으면 page 한 쪽)
 function onPage(a, n) {
   return a.page != null && a.page <= n && n <= Math.max(a.page_to ?? a.page, a.page);
+}
+
+// 애니메이션 단계 그림(class-publish.ps1 로 올림): slide_dir 끝의 anim=0213 은 슬라이드마다 클릭 수(36진수 한 글자)다.
+// 슬라이드 하나가 (클릭 수 + 1)장의 그림이 되므로 lesson.page 는 그림 번호이고, 활동의 쪽 번호는 슬라이드 번호다.
+function slideSteps(lesson) {
+  const m = /[?&]anim=([0-9a-z]+)/.exec(lesson.slide_dir || "");
+  return m ? [...m[1]].map((c) => parseInt(c, 36) + 1) : null;
+}
+// 그림 번호 → { slide: 슬라이드 번호, step: 그 슬라이드에서 몇 번째 단계, steps: 단계 수, total: 슬라이드 수 }
+function slidePos(lesson, page) {
+  const steps = slideSteps(lesson);
+  if (!steps) return { slide: page, step: 1, steps: 1, total: lesson.slide_count };
+  let first = 1;
+  for (const [i, n] of steps.entries()) {
+    if (page < first + n || i === steps.length - 1) return { slide: i + 1, step: Math.min(page - first + 1, n), steps: n, total: steps.length };
+    first += n;
+  }
+}
+const slideNo = (lesson, page) => slidePos(lesson, page).slide;
+const slideTotal = (lesson) => slidePos(lesson, 1).total;
+// 슬라이드 번호 → 그 슬라이드의 첫 그림 번호
+function pageOfSlide(lesson, slide) {
+  const steps = slideSteps(lesson);
+  return steps ? steps.slice(0, slide - 1).reduce((a, b) => a + b, 1) : slide;
+}
+function slideLabel(lesson, page) {
+  const p = slidePos(lesson, page);
+  return p.slide + " / " + p.total + (p.steps > 1 ? " · 애니메이션 " + p.step + "/" + p.steps : "");
+}
+// 단계 그림과 함께 올린 원본 PPTX(같은 폴더의 deck.pptx) 주소
+function deckUrl(lesson) {
+  return /[?&]deck=1/.test(lesson.slide_dir || "") ? lesson.slide_dir.split("?")[0].replace(/\{n\}\.jpg$/, "deck.pptx") : null;
 }
 
 // 시뮬레이션(html) 칸. sandbox 로 격리해서 이 웹앱의 로그인 정보나 저장소에 손대지 못하게 한다.

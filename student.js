@@ -391,7 +391,7 @@ function render(pageChanged) {
     }
     if (shell.zoom && shell.zoom.getAttribute("src") !== src) shell.zoom.src = src;
     shell.img.alt = "슬라이드 " + viewing;
-    shell.where.textContent = viewing + " / " + L.slide_count;
+    shell.where.textContent = slideLabel(L, viewing);
     shell.prev.disabled = viewing <= 1;
     shell.next.disabled = viewing >= clampPage(L.page);
     shell.back.hidden = following;
@@ -401,7 +401,7 @@ function render(pageChanged) {
   const acts = state.activities;
   // 큰 화면에서는 슬라이드와 질문을 나란히(split), 슬라이드가 없으면 가운데 한 줄(single)
   shell.slideBox.parentNode.className = "lesson " + (hasSlides ? "split" : "single");
-  let here = hasSlides ? acts.filter((a) => onPage(a, viewing)) : acts;
+  let here = hasSlides ? acts.filter((a) => onPage(a, slideNo(L, viewing))) : acts;
   const anytime = hasSlides ? acts.filter((a) => a.page == null) : [];
   // 「슬라이드 자리에 띄우기」 시뮬레이션은 슬라이드 그림 대신 위쪽에 크게 보인다
   const stageSim = hasSlides ? here.find((a) => a.kind === "sim" && a.sim_full) : null;
