@@ -222,10 +222,32 @@ main.lesson .slide { cursor: zoom-in; }
 }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
-.kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .4rem; }
+.kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
 .kind { display: grid; gap: .1rem; padding: .6rem .4rem; min-height: 48px; background: #fff; border: 1px solid var(--field); text-align: center; }
 .kind:hover { border-color: var(--accent); }
 .q-edit { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
+/* 편집기: 표시 위치(모든 페이지 · n쪽부터 n쪽까지 한 줄), 질문 머리(객관식|서술형 · 퀴즈), 항목 줄 */
+.field-name { font-weight: 500; font-size: .95rem; }
+.place { display: grid; gap: .35rem; }
+.place-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; white-space: nowrap; }
+.place-row label.check { margin-right: .3rem; }
+.place-row span { font-size: .92rem; }
+input.num.page-num { width: 3.9rem; padding: .5rem .4rem; text-align: center; }
+.q-head { display: flex; align-items: center; gap: .5rem; }
+.q-head > strong { white-space: nowrap; }
+.seg { flex: 1; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--field); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: #fff; color: var(--ink); padding: 0 .4rem; }
+.seg button + button { border-left: 1px solid var(--field); }
+.seg button.on { background: var(--accent); color: #fff; font-weight: 700; }
+.quiz-toggle { background: #fff; color: var(--ink); border: 1px solid var(--field); padding: 0 .9rem; }
+.quiz-toggle.on { background: var(--ok-soft); border: 2px solid var(--ok); color: var(--ok); font-weight: 700; }
+.opt-list { display: grid; gap: .4rem; }
+.opt-row { display: flex; align-items: center; gap: .4rem; }
+.opt-row input[type=text] { flex: 1; min-width: 0; }
+.ans-pick { min-height: 0; font-size: .85rem; white-space: nowrap; gap: .25rem; }
+.opt-del { font-size: 1.2rem; min-width: 36px; padding: 0; }
+.add-q { align-self: flex-start; }
+.row.end { justify-content: flex-end; }
 
 /* 슬라이드 미리보기 */
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .5rem; }
@@ -263,7 +285,6 @@ td.actions { white-space: nowrap; text-align: right; }
   .act-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
-  .kinds { grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: minmax(0, 1fr) 3rem; }
   .bar-track { grid-column: 1 / -1; grid-row: 2; }
 }
