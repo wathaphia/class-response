@@ -1637,7 +1637,9 @@ function tileReset(t, text) {
 
 function askTile(t) {
   t.asked = Date.now();
-  sendTeacherScreenSignal({ type: "request", lite: true, from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
+  // 영상이 막혀 그림으로 보낼 때 전체가 초당 약 7장을 넘지 않게(무료 Supabase 초당 메시지 한도) 학생이 많을수록 천천히
+  const every = Math.min(5000, Math.max(500, grid.tiles.size * 150));
+  sendTeacherScreenSignal({ type: "request", lite: true, every, from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
 }
 
 function gridTile(s) {
