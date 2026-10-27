@@ -276,3 +276,7 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 /* 수업 설정: 전환 효과 미리보기(작은 화면) */
 .fx-preview { max-width: 360px; overflow: hidden; border-radius: 12px; }
 .fx-box { padding: .75rem; border: 1px solid var(--line); border-radius: 12px; }
+
+/* 전환 효과 동안 이전 장면을 아래에 깔아 둔다(깜빡임 방지) */
+.slide-under { position: absolute; z-index: 0; margin: 0; pointer-events: none; animation: none !important; }
+.slide-under + .slide { position: relative; z-index: 1; }
