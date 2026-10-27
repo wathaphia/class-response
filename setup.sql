@@ -417,6 +417,29 @@ create policy slides_teacher_update on storage.objects for update to authenticat
 create policy slides_teacher_delete on storage.objects for delete to authenticated using (bucket_id = 'slides' and is_teacher());
 
 -- ------------------------------------------------------------
+-- 기타 관리(교사 화면): 무료 한도에 견줄 사용량. 교사만 부를 수 있다.
+-- 접속 중 = 최근 20초 안에 수업 화면을 연 학생(교사 화면의 「접속 중」과 같은 기준)
+-- ------------------------------------------------------------
+create or replace function resource_usage()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_teacher() then raise exception 'not a teacher'; end if;
+  return jsonb_build_object(
+    'db_bytes', pg_database_size(current_database()),
+    'storage_bytes', (select coalesce(sum((metadata ->> 'size')::bigint), 0) from storage.objects),
+    'storage_files', (select count(*) from storage.objects),
+    'mau', (select count(*) from auth.users where last_sign_in_at >= date_trunc('month', now())),
+    'db_conn', (select count(*) from pg_stat_activity where datname = current_database()),
+    'db_conn_max', current_setting('max_connections')::int,
+    'online', (select count(distinct student_id) from lesson_students where last_seen > now() - interval '20 seconds'),
+    'students', (select count(*) from students),
+    'lessons', (select count(*) from lessons),
+    'responses', (select count(*) from responses));
+end $$;
+revoke all on function resource_usage() from public;
+grant execute on function resource_usage() to authenticated;
+
+-- ------------------------------------------------------------
 -- 교사 이메일: teacher@example.com 을 자기 이메일(소문자)로 바꾸세요. 여러 명이면 줄을 더하면 됩니다.
 -- ------------------------------------------------------------
 insert into teachers (email) values ('wathaphia@gmail.com') on conflict do nothing;

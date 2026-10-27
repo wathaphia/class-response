@@ -206,13 +206,14 @@ const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentB
 const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.page + "~" + a.page_to + "쪽" : a.page + "쪽";
 
 // ---------- 틀 ----------
-// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 수업 설정 조절기 · 전체 수업 관리 폴더
+// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 수업 설정 조절기 · 전체 수업 관리 폴더 · 기타 관리 계기판
 const TAB_ICONS = {
   run: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   build: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>',
   students: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M15.5 5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   manage: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  etc: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/>',
 };
 function tabIcon(k) {
   const el = h("span", { class: "tab-icon", "aria-hidden": "true" });
@@ -230,21 +231,21 @@ function draw() {
     },
   }, lessons.map((l) => h("option", { value: l.id, selected: lesson && l.id === lesson.id }, (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
     h("option", { value: "new", selected: !lesson }, "+ 새 수업 만들기"));
-  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"]];
+  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"], ["etc", "기타 관리"]];
   if (!tabs.some(([k]) => k === tab)) tab = "run";
   main = h("main", { class: "wide" });
   app.replaceChildren(
     h("header", { class: "top" },
       h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), pick),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
-        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "manage",
+        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "manage" && k !== "etc",
         onclick() { tab = k; localStorage.setItem("cra-tab", k); draw(); },
       }, tabIcon(k), h("span", {}, label)))),
       h("button", { class: "link", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃")),
     main);
-  if (!lesson && tab !== "manage") tab = "settings";
+  if (!lesson && tab !== "manage" && tab !== "etc") tab = "settings";
   if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
-  ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, manage: drawManage })[tab]();
+  ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, manage: drawManage, etc: drawEtc })[tab]();
   schedule();
 }
 
@@ -377,6 +378,185 @@ async function drawManage() {
         : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
       msg),
     groups.map(folderBox)));
+}
+
+// ---------- 기타 관리 ----------
+// 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프로 보여 준다.
+// 탭을 열면 5분 넘게 지난 것만, 「동기화」를 누르면 모두 다시 받는다. 탭을 열어 두면 Supabase(접속 중 학생 등)는 30초마다 새로 받는다.
+// GitHub는 로그인 없이 묻기 때문에 이 PC에서 시간당 60번까지만 되므로 저절로 다시 받지 않는다.
+const GITHUB_REPO = "wathaphia/class-response";
+const MB = 1024 * 1024, GB = 1024 * MB;
+const ETC_POLL_MS = 30000;
+const USAGE_STALE_MS = 5 * 60 * 1000;
+let usage = {};            // 서비스 이름 → { items, facts, note, link, at } 또는 { error, at }
+let usageBusy = false;
+let etcTimer = null;
+
+async function usageSupabase() {
+  const { data: d, error } = await sb.rpc("resource_usage");
+  if (error) throw new Error(/resource_usage/.test(error.message) ? "Supabase SQL Editor에서 setup.sql을 한 번 더 실행하세요." : error.message);
+  return {
+    items: [
+      { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
+      { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일(슬라이드 그림·PPTX)" },
+      { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
+      { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
+      { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
+    ],
+    facts: ["학생 " + d.students + "명", "수업 " + d.lessons + "개", "응답 " + d.responses + "개"],
+    note: "데이터 전송량(월 5GB)과 실시간 메시지(월 200만 건)는 Supabase가 숫자를 내주지 않아 대시보드에서만 볼 수 있습니다.",
+    link: "https://supabase.com/dashboard/project/" + SUPABASE_URL.match(/\/\/([^.]+)/)[1],
+  };
+}
+
+async function usageCloudflare() {
+  const url = typeof TURN_URL === "string" ? TURN_URL.trim().replace(/\/$/, "") : "";
+  if (!url) throw new Error("config.js에 TURN_URL이 없습니다.");
+  const { data } = await sb.auth.getSession();
+  const r = await fetch(url + "/usage", {
+    method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + (data.session ? data.session.access_token : "") }, body: "{}",
+  });
+  if (!r.ok) throw new Error("Worker 응답 " + r.status);
+  const d = await r.json();
+  if (!d.turn) throw new Error("Worker를 새로 배포해야 합니다(PC에서 class-tools\\usage-setup.ps1 실행).");
+  const a = d.analytics;
+  const missing = a ? null : "분석 토큰 필요";
+  return {
+    items: [
+      { label: "중계(TURN) 접속 발급", used: d.turn.issued, limit: d.turn.limit, period: "이번 달", hint: "다 쓰면 직접 연결(STUN)만 씀" },
+      { label: "중계(TURN) 전송량", used: a && a.turnBytesMonth, limit: 1000 * GB, fmt: "bytes", period: "이번 달", missing },
+      { label: "Worker 요청", used: a && a.workerRequestsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
+      { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: "오늘", missing },
+      { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: "오늘", missing },
+    ],
+    note: a ? "" : "전송량·요청 수를 보려면 PC에서 class-tools\\usage-setup.ps1 로 Cloudflare 분석 토큰(읽기 전용)을 넣으세요."
+      + (d.analyticsError && d.analyticsError !== "no token" ? " (" + d.analyticsError + ")" : ""),
+    link: "https://dash.cloudflare.com/",
+  };
+}
+
+async function usageGithub() {
+  const gh = async (path) => {
+    const r = await fetch("https://api.github.com" + path, { headers: { Accept: "application/vnd.github+json" } });
+    if (!r.ok) throw new Error("GitHub 응답 " + r.status + (r.status === 403 ? "(시간당 60번 한도, 잠시 뒤 다시)" : ""));
+    return r.json();
+  };
+  const monthStart = new Date().toISOString().slice(0, 8) + "01";
+  const [repo, rate, runs, alive] = await Promise.all([
+    gh("/repos/" + GITHUB_REPO),
+    gh("/rate_limit"),   // 이 요청은 한도에 세지 않는다
+    gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=1&created=%3E%3D" + monthStart),
+    gh("/repos/" + GITHUB_REPO + "/actions/workflows/keep-alive.yml/runs?per_page=1"),
+  ]);
+  const core = rate.resources.core;
+  const last = alive.workflow_runs[0];
+  // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
+  const idleDays = Math.floor((Date.now() - Date.parse(repo.pushed_at)) / 86400000);
+  return {
+    items: [
+      { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
+      { label: "keep-alive 멈춤까지", used: idleDays, limit: 60, fmt: "days", period: "실시간", hint: "마지막 변경 " + new Date(repo.pushed_at).toLocaleDateString() + " · 60일 지나면 멈춤" },
+      { label: "GitHub API(이 PC)", used: core.used, limit: core.limit, period: "1시간", hint: new Date(core.reset * 1000).toLocaleTimeString() + "에 초기화" },
+    ],
+    facts: [
+      "이번 달 Actions 실행 " + runs.total_count + "회(공개 저장소라 무료)",
+      last ? "keep-alive 마지막 실행 " + new Date(last.created_at).toLocaleString() + " · " + ({ success: "성공", failure: "실패" }[last.conclusion] || last.conclusion || last.status) : "keep-alive 실행 기록 없음",
+    ],
+    note: "GitHub Pages 전송량(월 100GB 권장)은 GitHub가 숫자를 내주지 않습니다.",
+    link: "https://github.com/" + GITHUB_REPO + "/actions",
+  };
+}
+
+const USAGE_SOURCES = [["supabase", "Supabase", "데이터베이스 · 파일 · 로그인", usageSupabase], ["cloudflare", "Cloudflare", "중계 서버(TURN) · Worker", usageCloudflare], ["github", "GitHub", "사이트 · 자동 실행", usageGithub]];
+
+async function syncUsage(names) {
+  usageBusy = true;
+  if (tab === "etc") paintEtc();
+  await Promise.all(USAGE_SOURCES.filter(([k]) => names.includes(k)).map(async ([k, , , get]) => {
+    try { usage[k] = { ...(await get()), at: Date.now() }; }
+    catch (e) { usage[k] = { error: e.message || String(e), at: Date.now() }; }
+  }));
+  usageBusy = false;
+  if (tab === "etc") paintEtc();
+}
+
+function drawEtc() {
+  paintEtc();
+  const stale = USAGE_SOURCES.map(([k]) => k).filter((k) => !usage[k] || Date.now() - usage[k].at > USAGE_STALE_MS);
+  syncUsage(stale.includes("supabase") ? stale : ["supabase", ...stale]);
+  etcTick();
+}
+function etcTick() {
+  clearTimeout(etcTimer);
+  etcTimer = setTimeout(async () => {
+    if (tab !== "etc") return;
+    await syncUsage(["supabase"]);
+    etcTick();
+  }, ETC_POLL_MS);
+}
+
+function usageAmount(n, fmt) {
+  if (fmt === "days") return n + "일";
+  if (fmt !== "bytes") return n.toLocaleString();
+  if (n < MB) return (n / 1024).toFixed(0) + "KB";
+  if (n < GB) return (n / MB).toFixed(1) + "MB";
+  return (n / GB).toFixed(2) + "GB";
+}
+
+// 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
+const USAGE_LEVEL = { ok: "여유", warn: "주의", bad: "위험" };
+function usageRing(it) {
+  const known = !it.missing && it.used != null && it.limit > 0;
+  const p = known ? it.used / it.limit : 0;
+  const level = p >= 0.85 ? "bad" : p >= 0.6 ? "warn" : "ok";
+  const c = 2 * Math.PI * 40;
+  const pct = !known ? "—" : p > 0 && p < 0.01 ? "<1%" : Math.round(p * 100) + "%";
+  const ring = h("span", { class: "ring", "aria-hidden": "true" });
+  ring.innerHTML = '<svg viewBox="0 0 100 100"><circle class="ring-track" cx="50" cy="50" r="40"/>'
+    + (known && p > 0 ? '<circle class="ring-bar ' + level + '" cx="50" cy="50" r="40" transform="rotate(-90 50 50)" stroke-dasharray="' + Math.max(Math.min(p, 1) * c, 0.5).toFixed(2) + " " + c.toFixed(2) + '"/>' : "")
+    + '<text x="50" y="50">' + pct + "</text></svg>";
+  const amount = known ? usageAmount(it.used, it.fmt) + " / " + usageAmount(it.limit, it.fmt) : it.missing || "알 수 없음";
+  const left = known ? "남음 " + usageAmount(Math.max(it.limit - it.used, 0), it.fmt) : "";
+  return h("figure", { class: "usage-item", title: it.label + " · " + it.period + "\n" + amount + (left ? " · " + left : "") + (it.hint ? "\n" + it.hint : "") },
+    ring,
+    h("figcaption", {},
+      h("strong", {}, it.label),
+      h("span", { class: "small" }, amount),
+      left ? h("span", { class: "muted small" }, left) : null,
+      h("span", { class: "usage-tags" },
+        h("span", { class: "tag info" }, it.period),
+        known ? h("span", { class: "tag " + level }, (level === "ok" ? "● " : level === "warn" ? "▲ " : "■ ") + USAGE_LEVEL[level]) : null),
+      it.hint ? h("span", { class: "muted small" }, it.hint) : null));
+}
+
+function paintEtc() {
+  if (tab !== "etc" || !main) return;
+  const times = Object.values(usage).map((u) => u.at);
+  const syncIcon = h("span", { class: "sync-icon" + (usageBusy ? " spin" : ""), "aria-hidden": "true" });
+  syncIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
+  main.replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "row between" },
+      h("div", {},
+        h("h2", {}, "기타 관리"),
+        h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상)")),
+      h("div", { class: "row" },
+        times.length ? h("span", { class: "muted small" }, "마지막 동기화 " + new Date(Math.max(...times)).toLocaleTimeString()) : null,
+        h("button", { class: "primary sync-btn", type: "button", disabled: usageBusy, onclick() { syncUsage(USAGE_SOURCES.map(([k]) => k)); } },
+          syncIcon, usageBusy ? "동기화 중…" : "동기화"))),
+    USAGE_SOURCES.map(([k, name, what]) => {
+      const u = usage[k];
+      return h("section", { class: "card stack usage-card" },
+        h("div", { class: "row between" },
+          h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)),
+          u && u.link ? h("a", { class: "small", href: u.link, target: "_blank", rel: "noopener" }, "대시보드 열기") : null),
+        !u ? h("p", { class: "muted small" }, "불러오는 중…")
+          : u.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error)
+          : [
+            h("div", { class: "usage-grid" }, u.items.map(usageRing)),
+            u.facts ? h("p", { class: "small" }, u.facts.join(" · ")) : null,
+            u.note ? h("p", { class: "muted small" }, u.note) : null,
+          ]);
+    })));
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.
