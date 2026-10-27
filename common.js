@@ -3,6 +3,19 @@
 // http:// 로 열렸으면 https:// 로 다시 연다(내 PC에서 시험할 때는 그대로)
 if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) location.replace("https:" + location.href.slice(5));
 
+// GitHub Pages는 html을 10분 동안 브라우저에 캐시해서, 고친 뒤에도 예전 스크립트(?v=)를 불러올 수 있다.
+// 열 때 한 번 지금 올라간 html의 버전을 보고, 다르면 한 번만 새로고침한다(같은 버전으로 두 번 새로고침하지 않음)
+(function reloadIfStale() {
+  const mine = /[?&]v=([\w-]+)/.exec(document.querySelector('script[src*="common.js"]')?.getAttribute("src") || "")?.[1];
+  if (!mine || location.protocol === "file:") return;
+  fetch(location.pathname, { cache: "no-store" }).then((r) => (r.ok ? r.text() : "")).then((t) => {
+    const live = /common\.js\?v=([\w-]+)/.exec(t)?.[1];
+    if (!live || live === mine) return;
+    try { if (sessionStorage.getItem("craReloaded") === live) return; sessionStorage.setItem("craReloaded", live); } catch { return; }
+    location.reload();
+  }).catch(() => {});
+})();
+
 // 주소 끝에 /rest/v1/ 같은 꼬리나 빈칸이 붙어 있어도 프로젝트 주소만 쓴다
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");
 const configured = (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(SB_URL))
