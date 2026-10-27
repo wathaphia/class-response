@@ -685,18 +685,23 @@ function showJoin() {
 const newId = () => Math.random().toString(36).slice(2, 8);
 const newQuestion = (type) => ({ id: newId(), type: type || "choice", text: "", options: ["", ""] });
 
-// 만들기 탭의 시뮬레이션 미리보기 칸. 다시 그려도 같은 칸을 다시 써서 시뮬레이션이 처음부터 다시 시작하지 않게 한다
+// 만들기 탭의 시뮬레이션 미리보기 칸. 다시 그려도 같은 칸을 다시 써서 시뮬레이션이 처음부터 다시 시작하지 않게 한다.
+// 처음에는 멈춘 상태이고, 제목 아래 재생/일시정지 버튼(play)으로 돌린다. 넓은 화면으로 그려 줄여 보여 준다(box).
 const buildSimFrames = new Map();
 function buildSimFrame(a) {
   const key = a.id + ":" + (a.html || "").length;
-  let f = buildSimFrames.get(a.id);
-  if (!f || f.dataset.key !== key) { f = simFrame(a.html || "", a.title); f.dataset.key = key; buildSimFrames.set(a.id, f); }
-  return f;
+  let s = buildSimFrames.get(a.id);
+  if (!s || s.key !== key) {
+    const f = simFrame(withSimPause(a.html || ""), a.title);
+    s = { key, box: simScaled(f), play: simPlayButton(f) };
+    buildSimFrames.set(a.id, s);
+  }
+  return s;
 }
 
 // 활동 내용 미리보기: 시뮬레이션은 실행 화면, 설명 카드는 글, 질문은 질문과 보기
 function activityPreview(a) {
-  if (a.kind === "sim") return a.html ? buildSimFrame(a) : h("p", { class: "muted small" }, "html이 없습니다.");
+  if (a.kind === "sim") return a.html ? buildSimFrame(a).box : h("p", { class: "muted small" }, "html이 없습니다.");
   if (isInfoActivity(a)) return linkedDescription(a.questions[0].text);
   const intro = activityDescription(a);
   return h("div", { class: "stack" }, intro ? linkedDescription(intro) : null,
@@ -714,6 +719,7 @@ function drawBuild() {
     h("div", { class: "act-head stack" },
       h("p", { class: "muted small" }, activityName(a) + " · " + whereText(a)),
       h("h3", {}, a.title),
+      a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
       h("button", { type: "button", class: editing && editing.id === a.id ? "primary" : "ghost",
         onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } },
         editing && editing.id === a.id ? "고치는 중" : "고치기")),
