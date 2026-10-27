@@ -143,6 +143,7 @@ async function iceServers(auth) {
 // 바뀐 화면 구조(head·body)와 캔버스 그림(JPEG)만 보내고, 부모가 다 보냈다고 답(ack)해야 다음 장면을 찍는다.
 // 밀린 장면이 쌓이지 않아 지연이 늘지 않는다(최신 장면만 보냄).
 const SIM_AGENT = `<script>(function(){if(window.__craAgent)return;window.__craAgent=1;
+var SI=setInterval,CI=clearInterval,DN=Date.now;
 var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0,pc=null,vidIdx=-1,vidOk=false;
 function bigCanvas(){var cs=document.querySelectorAll("canvas"),b=-1,a=0;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),s=r.width*r.height;if(s>a){a=s;b=i;}}return b;}
 function rtcStop(){vidOk=false;if(pc){try{pc.close();}catch(e){}pc=null;}}
@@ -167,12 +168,12 @@ else if(a.tagName==="SELECT"){for(var k=0;k<b.options.length;k++){if(k===a.selec
 else if(a.type!=="password")b.setAttribute("value",a.value);}
 var sc=root.querySelectorAll("script");for(var m=0;m<sc.length;m++)sc[m].parentNode.removeChild(sc[m]);
 var head=root.querySelector("head"),body=root.querySelector("body"),hh=head?head.innerHTML:"",bh=body?body.innerHTML:"",bs=body?(body.getAttribute("style")||""):"";
-var msg={craSim:1,canvases:data,w:innerWidth,h:innerHeight,sx:scrollX,sy:scrollY,t:Date.now()},key=hh+"|#|"+bh+"|#|"+bs;
+var msg={craSim:1,canvases:data,w:innerWidth,h:innerHeight,sx:scrollX,sy:scrollY,t:DN()},key=hh+"|#|"+bh+"|#|"+bs;
 if(key!==lastKey){msg.head=hh;msg.body=bh;msg.bs=bs;lastKey=key;}return msg;}
 function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=false;return;}parent.postMessage(m,"*");}
 addEventListener("message",function(e){var m=e.data||{};if(e.source!==parent)return;
-if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;clearInterval(timer);timer=setInterval(tick,m.every||200);tick();}
-else if(m.craMirror==="stop"){on=false;clearInterval(timer);rtcStop();}
+if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;CI(timer);timer=SI(tick,m.every||200);tick();}
+else if(m.craMirror==="stop"){on=false;CI(timer);rtcStop();}
 else if(m.craRtc==="start"){rtcStart(m.ice,m.relay);}
 else if(m.craRtc==="answer"&&pc){pc.setRemoteDescription(m.sdp).catch(function(){});}
 else if(m.craRtc==="ice"&&pc&&m.candidate){pc.addIceCandidate(m.candidate).catch(function(){});}
@@ -183,6 +184,59 @@ function withSimAgent(html) {
   if (!html || html.includes("__craAgent")) return html;
   const doctype = /^\s*<!doctype[^>]*>/i;
   return doctype.test(html) ? html.replace(doctype, (m) => m + SIM_AGENT) : SIM_AGENT + html;
+}
+
+// 시뮬레이션 일시정지 장치: 시뮬레이션 안의 시계(performance.now·Date.now)와 requestAnimationFrame·타이머·CSS 애니메이션을
+// 멈췄다가 이어서 돌린다. 부모가 {craPause: true/false} 를 보낸다. 처음에는 멈춘 상태지만, 첫 화면은 그려지도록
+// 불러온 직후 두 프레임(늦어도 3초)까지는 그대로 돌린다. 촬영기(SIM_AGENT)는 이보다 먼저 원래 타이머를 잡아 두어 멈추지 않는다.
+const SIM_PAUSE = `<script>(function(){if(window.__craPause)return;window.__craPause=1;
+var W=window,P=W.performance,pn=P.now.bind(P),dn=Date.now,raf=W.requestAnimationFrame.bind(W),st=W.setTimeout.bind(W),si=W.setInterval.bind(W),ct=W.clearTimeout.bind(W),
+paused=true,warm=true,held=false,gone=0,at=0,live={},wait=[],later=[],dead={},n=0,anims=[];
+function lost(){return gone+(held?pn()-at:0);}
+P.now=function(){return pn()-lost();};
+Date.now=function(){return dn()-lost();};
+function frame(id){return function(){var cb=live[id];if(!cb)return;if(held){wait.push(id);return;}delete live[id];cb(P.now());};}
+W.requestAnimationFrame=function(cb){var id=++n;live[id]=cb;raf(frame(id));return id;};
+W.cancelAnimationFrame=function(id){delete live[id];};
+W.setTimeout=function(fn,ms){var a=[].slice.call(arguments,2);if(typeof fn!=="function")return st(fn,ms);var t=st(function g(){if(dead[t])return;if(held){later.push(g);return;}fn.apply(W,a);},ms);return t;};
+W.clearTimeout=function(t){if(t!=null)dead[t]=1;ct(t);};
+W.setInterval=function(fn,ms){var a=[].slice.call(arguments,2);if(typeof fn!=="function")return si(fn,ms);return si(function(){if(!held)fn.apply(W,a);},ms);};
+function anim(){if(!document.getAnimations)return;if(held){anims=document.getAnimations().filter(function(x){return x.playState==="running";});anims.forEach(function(x){x.pause();});}else{anims.forEach(function(x){try{x.play();}catch(e){}});anims=[];}}
+function sync(){var h=paused&&!warm;if(h===held)return;held=h;if(h)at=pn();else gone+=pn()-at;anim();
+if(!h){var w=wait,l=later;wait=[];later=[];w.forEach(function(id){raf(frame(id));});l.forEach(function(g){st(g,0);});}}
+function endWarm(){if(warm){warm=false;sync();}}
+function warmUp(){raf(function(){raf(endWarm);});}
+if(document.readyState==="complete")warmUp();else W.addEventListener("load",warmUp);st(endWarm,3000);
+W.addEventListener("message",function(e){var m=e.data||{};if(e.source===parent&&typeof m.craPause==="boolean"){paused=m.craPause;sync();}});})();<\/script>`;
+function withSimPause(html) {
+  if (!html || html.includes("__craPause")) return html;
+  if (html.includes(SIM_AGENT)) return html.replace(SIM_AGENT, () => SIM_AGENT + SIM_PAUSE);
+  const doctype = /^\s*<!doctype[^>]*>/i;
+  return doctype.test(html) ? html.replace(doctype, (m) => m + SIM_PAUSE) : SIM_PAUSE + html;
+}
+
+// 재생/일시정지 버튼 하나. 시뮬레이션을 새로 불러오면 다시 멈춘 상태(▶ 재생)로 돌아간다.
+function simPlayButton(frame) {
+  let playing = false;
+  const b = h("button", { class: "ghost sim-play", type: "button", onclick() { set(!playing); } });
+  function set(on) {
+    playing = on;
+    b.textContent = on ? "⏸ 일시정지" : "▶ 재생";
+    b.setAttribute("aria-pressed", String(on));
+    frame.contentWindow?.postMessage({ craPause: !on }, "*");
+  }
+  frame.addEventListener("load", () => set(false));
+  set(false);
+  return b;
+}
+
+// 새 창에서 연 것처럼 넓은 가로 화면(SIM_VIEW)으로 그린 뒤 칸 너비에 맞게 줄여 보여 준다.
+// 좁은 칸에 그대로 넣으면 시뮬레이션이 휴대폰용 배치(위아래로 길게)로 바뀌기 때문.
+const SIM_VIEW = { w: 1120, h: 630 };
+function simScaled(frame) {
+  const box = h("div", { class: "sim-scale" }, frame);
+  new ResizeObserver(() => box.style.setProperty("--s", box.clientWidth / SIM_VIEW.w)).observe(box);
+  return box;
 }
 
 // 시뮬레이션(html) 칸. sandbox 로 격리해서 이 웹앱의 로그인 정보나 저장소에 손대지 못하게 한다.
@@ -272,10 +326,11 @@ let floatingSim = null;
 function showFloatingSim(title, html, key) {
   if (floatingSim && floatingSim.dataset.key === key) return floatingSim;
   closeFloatingSim();
-  const frame = simFrame(html, title);
+  const frame = simFrame(withSimPause(html), title);
   const head = h("div", { class: "sim-float-head" },
     h("strong", {}, title || "시뮬레이션"),
     h("div", { class: "row" },
+      simPlayButton(frame),
       h("button", { class: "ghost", type: "button", "aria-label": "시뮬레이션 크게 보기", onclick() { openSimFull(title, frame.srcdoc); } }, "크게"),
       h("button", { class: "ghost", type: "button", "aria-label": "시뮬레이션 닫기", onclick: closeFloatingSim }, "닫기")));
   const box = h("section", { class: "sim-float", "aria-label": "실시간 시뮬레이션" }, head, frame);
@@ -309,9 +364,11 @@ function closeFloatingSim() {
 function openSimFull(title, html) {
   const close = () => { box.remove(); document.removeEventListener("keydown", esc); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
   const esc = (e) => { if (e.key === "Escape") close(); };
+  const frame = simFrame(withSimPause(html), title);
   const box = h("div", { class: "sim-full" },
-    h("div", { class: "sim-full-head" }, h("strong", {}, title || "시뮬레이션"), h("button", { class: "ghost", type: "button", onclick: close }, "닫기")),
-    simFrame(html, title));
+    h("div", { class: "sim-full-head" }, h("strong", {}, title || "시뮬레이션"),
+      h("div", { class: "row" }, simPlayButton(frame), h("button", { class: "ghost", type: "button", onclick: close }, "닫기"))),
+    frame);
   document.addEventListener("keydown", esc);
   document.body.append(box);
   if (box.requestFullscreen) box.requestFullscreen().catch(() => {});
