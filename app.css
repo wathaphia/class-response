@@ -16,6 +16,8 @@
   --bad: #b42318;
 }
 * { box-sizing: border-box; }
+/* 스크롤 막대 자리를 늘 비워 둔다: 긴 탭(수업 설정 등)으로 바꿀 때 막대가 생기며 화면이 왼쪽으로 밀리지 않게 */
+html { scrollbar-gutter: stable; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; }
 h1, h2, h3 { margin: 0; line-height: 1.3; }
@@ -160,8 +162,20 @@ main.lesson .slide { cursor: zoom-in; }
 
 /* 교사: 탭 */
 .tabs { display: flex; flex-wrap: wrap; gap: .25rem; }
-.tab { background: none; border: 0; color: var(--ink); }
+/* 탭: 기호 + 글자. 올리면 글자색이 바뀌고 아래 선이 가운데서 좌우로 퍼진다 */
+.tab { position: relative; display: inline-flex; align-items: center; gap: .4rem; background: none; border: 0; color: var(--ink); overflow: hidden;
+  transition: color .2s, background-color .2s; }
+.tab-icon { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 8px; background: var(--accent-soft); color: var(--accent);
+  font-size: .95rem; line-height: 1; transition: transform .25s cubic-bezier(.2, .8, .2, 1), background-color .2s, color .2s; }
+.tab::after { content: ""; position: absolute; left: 12%; right: 12%; bottom: 4px; height: 2px; border-radius: 2px; background: var(--accent);
+  transform: scaleX(0); transform-origin: center; transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
+.tab:hover:not(:disabled):not(.on) { color: var(--accent); background: var(--accent-soft); }
+.tab:hover:not(:disabled):not(.on)::after { transform: scaleX(1); }
+.tab:hover:not(:disabled) .tab-icon { transform: translateY(-1px) scale(1.08); background: #fff; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tab.on { background: var(--accent); color: #fff; font-weight: 700; }
+.tab.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon { transition: none; } }
 .teacher .top-title select { min-height: 40px; padding: .3rem .6rem; font-weight: 700; max-width: 70vw; }
 
 /* 교사: 수업 진행 */
@@ -440,3 +454,21 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .fx-head .grow { flex: 1 1 12rem; }
 /* 애니메이션 이전·다음 화살표 */
 .pager .arrow { min-width: 3.2rem; font-size: 1.1rem; padding-inline: .8rem; }
+
+/* 학생 관리: 실시간 화면 일괄 미리보기(240p 미만 작은 칸). 1000px로 그린 학생 화면을 320px로 줄인다 */
+.grid-toggle { min-height: 36px; padding: 0 .75rem; border: 1px solid var(--field); background: #fff; color: var(--accent); font-size: .85rem; font-weight: 700; white-space: nowrap;
+  transition: background-color .2s, border-color .2s, color .2s; }
+.grid-toggle:hover { background: var(--accent-soft); border-color: var(--accent); }
+.grid-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+td.grid-cell { white-space: normal; }
+.students-table th, .students-table td:nth-child(-n+6) { white-space: nowrap; }
+.live-tile { display: grid; gap: .3rem; width: 320px; }
+.tile-view { position: relative; width: 320px; height: 180px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #f6f7fb; }
+.tile-frame { position: absolute; left: 0; top: 0; width: 1000px; height: 562px; border: 0; transform: scale(.32); transform-origin: 0 0; background: #f6f7fb; }
+.tile-hit { position: absolute; inset: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; display: flex; align-items: flex-end; justify-content: flex-end; cursor: zoom-in;
+  transition: background-color .2s; }
+.tile-hit span { margin: 6px; padding: .15rem .5rem; border-radius: 6px; background: rgba(27, 34, 48, .75); color: #fff; font-size: .8rem; opacity: 0; transition: opacity .2s; }
+.tile-hit:hover, .tile-hit:focus-visible { background: rgba(36, 86, 214, .08); }
+.tile-hit:hover span, .tile-hit:focus-visible span { opacity: 1; }
+.tile-cap { font-size: .8rem; color: var(--muted); }
+.live-tile.stale .tile-view { opacity: .5; }
