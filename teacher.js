@@ -566,6 +566,8 @@ function runBlock(a) {
       h("div", {}, h("p", { class: "muted small" }, "시뮬레이션 · " + whereText(a)), h("h2", {}, a.title)),
       h("button", { class: "primary", type: "button", onclick() { showFloatingSim(a.title, a.html, a.id + ":" + (a.html || "").length); } }, "화면에 띄우기"),
       h("button", { class: "ghost", type: "button", onclick() { openSimFull(a.title, a.html); } }, "크게 실행")),
+    lesson.slide_count && (a.sim_place || a.sim_full) && a.page == null
+      ? h("p", { class: "error small" }, "쪽이 정해지지 않아 슬라이드에 붙지 않습니다. 「질문·설문 만들기」에서 이 시뮬레이션을 고쳐 쪽 번호를 정하고 저장하세요.") : null,
     h("p", { class: "pill" }, !lesson.slide_count ? "학생 화면: 카드로 보임" : a.sim_full ? "학생 화면: 슬라이드 자리에 크게 보임"
       : a.sim_place ? "학생 화면: 슬라이드 위에 얹어 보임(왼쪽 화면에서 끌어 옮기기)" : "학생 화면: 슬라이드 아래 카드로 보임"));
   if (isInfoActivity(a)) return h("section", { class: "card stack" },
@@ -686,6 +688,8 @@ function drawBuild() {
 
 function simEditor() {
   const e = editing;
+  // 화면에 보이는 쪽 번호가 그대로 저장되게 한다(예전에는 칸을 고치지 않으면 빈 값=「언제든」으로 저장되어 슬라이드에 얹히지 않았다)
+  if (lesson.slide_count && e.page == null) e.page = slideNo(lesson, lesson.page);
   const msg = h("p", { class: "error" });
   const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 열의 전도 시뮬레이션", oninput() { e.title = title.value; } });
   const code = h("textarea", { rows: 8, class: "mono", spellcheck: "false", placeholder: "<!DOCTYPE html> 로 시작하는 코드를 통째로 붙여넣거나, 위에서 html 파일을 고르세요.", oninput() { e.html = code.value; size.textContent = sizeText(); } }, e.html || "");
@@ -708,6 +712,7 @@ function simEditor() {
     if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
     if (!(e.html || "").trim()) { msg.textContent = "html 파일을 고르거나 코드를 붙여넣으세요."; return; }
     if (e.html.length > 500000) { msg.textContent = "코드가 너무 깁니다(최대 50만 자)."; return; }
+    if (lesson.slide_count && (e.sim_full || e.sim_place) && !(e.page >= 1)) { msg.textContent = "몇 쪽 슬라이드에 넣을지 적어 주세요."; return; }
     const row = { kind: "sim", title: e.title, page: lesson.slide_count ? e.page : null, html: e.html, sim_full: !!e.sim_full && lesson.slide_count > 0,
       sim_place: lesson.slide_count && !e.sim_full && e.sim_place ? e.sim_place : null, show_answer: false, named: false, questions: [] };
     const to = row.page != null && e.page_to > row.page ? Math.min(e.page_to, slideTotal(lesson)) : null;
@@ -1297,6 +1302,7 @@ function drawSettings() {
   // 왼쪽: 설정·슬라이드 올리기·전환 효과 미리보기 / 오른쪽: 전체 슬라이드와 다중 선택 삭제(함께 보면서 고르게)
   const slides = lesson && lesson.kind !== "survey" ? slidesCard() : null;
   main.replaceChildren(h("div", { class: slides && slides.allCard ? "settings-grid" : "stack narrowish" }, h("div", { class: "stack" },
+    slides ? slides.fxCard : null,   // 전환 효과 미리보기를 맨 위에(오른쪽 전체 슬라이드와 나란히)
     h("form", { class: "card stack", onsubmit: submit },
       h("h2", {}, lesson ? (lesson.kind === "survey" ? "설문 설정" : "수업 설정") : "새로 만들기"),
       lesson ? null : kindPick,
@@ -1410,8 +1416,8 @@ function slidesCard() {
     },
   }, Object.entries(SLIDE_FX).map(([k, name]) => h("option", { value: k, selected: k === slideFx(lesson) }, name)));
   if (lesson.slide_count && !ppt) { swapSlide(pv, slideSrc(lesson, 1), "none", 1); pvWhere.textContent = slideLabel(lesson, 1); }
-  const fxBox = h("div", { class: "fx-box stack" },
-    h("label", { class: "row" }, h("span", {}, "슬라이드 전환 효과"), fxPick,
+  const fxBox = h("section", { class: "card stack fx-box" },
+    h("div", { class: "row fx-head" }, h("h2", {}, "슬라이드 전환 효과"), fxPick,
       h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")),
     h("div", { class: "fx-preview" }, pv),
     h("nav", { class: "pager fx-pager" },
@@ -1434,9 +1440,8 @@ function slidesCard() {
     h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), bar, status,
     anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
-    lesson.slide_count && !ppt ? fxBox : null,
     ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null);
-  return { mainCard, allCard };
+  return { mainCard, allCard, fxCard: lesson.slide_count && !ppt ? fxBox : null };
 }
 
 async function loadZipJs() {

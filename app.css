@@ -316,3 +316,8 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .fx-pager .where { display: inline-block; min-width: 12.5rem; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lesson-thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); background: #f3f5f9; margin-top: .3rem; pointer-events: none; }
 .lesson-thumb.empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .85rem; }
+/* 전환 효과 카드: 제목·선택 칸·설명을 한 줄에(세로로 늘어나 빈 공간이 생기지 않게) */
+.fx-box { padding: 1.1rem; border-radius: 16px; }
+.fx-head { flex-direction: row; align-items: center; }
+.fx-head h2 { margin: 0; }
+.fx-head .grow { flex: 1 1 12rem; }
