@@ -455,6 +455,26 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .usage-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; align-items: start; }
 .usage-block { display: grid; gap: .4rem; min-width: 0; }
 .usage-block h4 { margin: 0; font-size: .92rem; }
+.usage-block.wide { grid-column: 1 / -1; }
+/* 날마다 전송량 막대 그래프: 두 그래프(캐시 전송량 · 전송량)를 나란히, 좁은 화면에서는 위아래로 */
+.eg-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: .75rem; }
+.eg-figure { margin: 0; display: grid; gap: .3rem; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; min-width: 0; }
+.eg-scroll { overflow-x: auto; }
+.eg-chart svg { display: block; width: 100%; min-width: 420px; height: auto; }
+.eg-grid { stroke: #eef1f6; stroke-width: 1; }
+.eg-axis { stroke: var(--field); stroke-width: 1; }
+.eg-tick, .eg-day-label, .eg-budget-label, .eg-over { fill: var(--muted); font-size: 11px; }
+.eg-tick { text-anchor: end; dominant-baseline: central; }
+.eg-day-label, .eg-over { text-anchor: middle; }
+.eg-day-label.now { fill: var(--ink); font-weight: 700; }
+.eg-over { fill: var(--ink); font-weight: 700; }
+.eg-budget { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+/* 막대와 겹쳐도 읽히게 흰 테두리 */
+.eg-budget-label, .eg-over { stroke: #fff; stroke-width: 3px; stroke-linejoin: round; paint-order: stroke; }
+.eg-hit { fill: transparent; }
+.eg-bar { fill: var(--accent); }
+.eg-day:hover .eg-hit { fill: var(--accent-soft); }
+.eg-day:hover .eg-bar { fill: var(--accent-ink); }
 .usage-table table { font-size: .88rem; }
 .usage-table th, .usage-table td { padding: .4rem .7rem; white-space: nowrap; }
 .sync-icon.spin svg { animation: sync-spin 1s linear infinite; }

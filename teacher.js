@@ -526,6 +526,55 @@ function egressProjection(m) {
   return { bytes: m.bytes + m.bytes / m.hours * left, cached: m.cached + m.cached / m.hours * left };
 }
 const EGRESS_SRC = { site: "사이트(학생·교사 화면)", test: "브라우저 시험(이 PC)", tool: "올리기 도구(PowerShell)", other: "기타(Office 뷰어 등)" };
+
+// 날마다 전송량 막대 그래프. 축척을 고정한다: 세로 0~500MB, 가로 그달 1일~말일(날마다·달마다 같은 눈으로 견줄 수 있게).
+// 점선은 「하루 몫」(5GB ÷ 그달 날 수). 500MB를 넘는 날은 막대를 위에서 자르고 값을 적는다.
+const EGRESS_DAY_MAX = 500 * MB;
+function egressDayChart(title, m, field) {
+  const ref = new Date(m && m.until ? Date.parse(m.until) - 1 : Date.now());
+  const y = ref.getUTCFullYear(), mo = ref.getUTCMonth();
+  const n = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  const key = (d) => y + "-" + String(mo + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  const today = new Date().toISOString().slice(0, 10);
+  const budget = 5 * GB / n;
+  const W = 640, H = 210, L = 52, R = 10, T = 16, B = 26, pw = W - L - R, ph = H - T - B, base = T + ph;
+  const yOf = (v) => T + ph * (1 - Math.min(v, EGRESS_DAY_MAX) / EGRESS_DAY_MAX);
+  const slot = pw / n, bw = Math.max(3, Math.min(14, slot * 0.62));
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  let svg = "";
+  for (let v = 0; v <= EGRESS_DAY_MAX; v += 100 * MB) {
+    svg += '<line class="eg-grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yOf(v) + '" y2="' + yOf(v) + '"/>'
+      + '<text class="eg-tick" x="' + (L - 6) + '" y="' + yOf(v) + '">' + (v ? v / MB + "MB" : "0") + "</text>";
+  }
+  let total = 0;
+  for (let d = 1; d <= n; d++) {
+    const k = key(d), v = m && m.days && m.days[k] ? m.days[k][field] || 0 : null;
+    const x = L + (d - 1) * slot + (slot - bw) / 2;
+    let bar = "";
+    if (v > 0) {
+      total += v;
+      const top = yOf(v), r = Math.min(4, bw / 2, base - top);
+      bar = '<path class="eg-bar" d="M' + x + "," + base + "V" + (top + r) + "Q" + x + "," + top + " " + (x + r) + "," + top
+        + "H" + (x + bw - r) + "Q" + (x + bw) + "," + top + " " + (x + bw) + "," + (top + r) + "V" + base + 'Z"/>';
+      if (v > EGRESS_DAY_MAX) bar += '<text class="eg-over" x="' + (x + bw / 2) + '" y="' + (T - 4) + '">' + esc(usageAmount(v, "bytes")) + "</text>";
+    }
+    const tip = (mo + 1) + "/" + d + " · " + (v == null ? (k > today ? "아직 안 옴" : "집계 없음") : usageAmount(v, "bytes"));
+    // 막대보다 넓은 칸 전체가 마우스 대상(얇은 막대도 가리키기 쉽게)
+    svg += '<g class="eg-day"><title>' + esc(tip) + "</title>"
+      + '<rect class="eg-hit" x="' + (L + (d - 1) * slot) + '" y="' + T + '" width="' + slot + '" height="' + ph + '"/>' + bar + "</g>";
+    if (d === 1 || d % 5 === 0 || k === today)
+      svg += '<text class="eg-day-label' + (k === today ? " now" : "") + '" x="' + (L + (d - 0.5) * slot) + '" y="' + (H - 8) + '">' + d + "</text>";
+  }
+  const by = yOf(budget);
+  svg += '<line class="eg-budget" x1="' + L + '" x2="' + (W - R) + '" y1="' + by + '" y2="' + by + '"/>'
+    + '<text class="eg-budget-label" x="' + (L + 4) + '" y="' + (by - 4) + '">하루 몫 ' + esc(usageAmount(budget, "bytes")) + "</text>"
+    + '<line class="eg-axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + base + '" y2="' + base + '"/>';
+  const box = h("div", { class: "eg-chart", role: "img", "aria-label": title + " " + (mo + 1) + "월 날마다 막대 그래프, 이번 달 합계 " + usageAmount(total, "bytes") });
+  box.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" aria-hidden="true">' + svg + "</svg>";
+  return h("figure", { class: "eg-figure" },
+    h("figcaption", {}, h("strong", {}, title), h("span", { class: "muted small" }, " " + (mo + 1) + "월 합계 " + usageAmount(total, "bytes") + " / 5GB")),
+    h("div", { class: "eg-scroll" }, box));
+}
 // 무료 5GB가 두 가지(전송량·캐시 전송량)라 따로 본다: 날마다 얼마나, 누가, 무엇이 많이 나갔는지
 function egressView(m, ep, e24, top) {
   const amt = (n) => usageAmount(n || 0, "bytes");
@@ -533,6 +582,10 @@ function egressView(m, ep, e24, top) {
   const srcs = m && m.srcs ? Object.entries(m.srcs).sort((a, b) => (b[1].bytes + b[1].cached) - (a[1].bytes + a[1].cached)) : [];
   const fileName = (p) => p.replace(/^\/storage\/v1\/object\/public\/slides\/\*\/\*\//, "슬라이드 ").replace(/^\/rest\/v1\/rpc\//, "함수 ").replace(/^\/rest\/v1\//, "표 ");
   return h("div", { class: "usage-blocks" },
+    m ? h("div", { class: "usage-block wide" }, h("h4", {}, "날마다 전송량 그래프(UTC 날짜 · 세로 축 0~500MB 고정)"),
+      h("div", { class: "eg-pair" }, egressDayChart("캐시 전송량", m, "cached"), egressDayChart("전송량", m, "bytes")),
+      h("p", { class: "muted small" }, "막대에 마우스를 올리면 그날 값이 나옵니다. 점선은 한 달 5GB를 날마다 고르게 쓸 때의 하루 몫입니다."
+        + (m.from && new Date(m.from).getUTCDate() > 1 ? " " + shortTime(m.from) + " 전 날짜는 집계가 없습니다." : ""))) : null,
     usageBlock("전송량 한눈에(무료 각 5GB)",
       usageTable(["", "전송량", "캐시 전송량"], [
         ["이번 달 지금까지", m ? amt(m.bytes) : "—", m ? amt(m.cached) : "—"],
