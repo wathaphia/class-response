@@ -68,7 +68,11 @@ legend { font-weight: 500; margin-bottom: .5rem; padding: 0; }
 button { font: inherit; border-radius: 10px; min-height: 44px; padding: 0 1rem; cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
 .primary { background: var(--accent); color: #fff; border: 0; font-weight: 700; }
-.primary:hover:not(:disabled) { background: var(--accent-ink); }
+.primary { transition: background-color .15s, box-shadow .15s, transform .15s; }
+.primary:hover:not(:disabled) { background: var(--accent-ink); box-shadow: 0 3px 10px rgba(36, 86, 214, .35); transform: translateY(-1px); }
+.primary:active:not(:disabled) { transform: none; box-shadow: none; }
+/* 편집기 저장 버튼: 바꾼 내용이 없으면 연한 회색 「저장됨」 */
+.primary.save-btn:disabled { opacity: 1; background: #e8ebf0; color: #8a93a3; cursor: not-allowed; }
 .ghost { background: #fff; color: var(--ink); border: 1px solid var(--field); }
 .ghost:hover:not(:disabled) { border-color: var(--accent); }
 .link { background: none; border: 0; color: var(--accent); padding: 0 .4rem; }

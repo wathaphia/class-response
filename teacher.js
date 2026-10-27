@@ -749,7 +749,10 @@ async function movePage(a, n) {
   if (a.page_to > a.page) { const to = Math.min(a.page_to + n - a.page, max); change.page_to = to > n ? to : null; }
   Object.assign(a, change);
   // 이 활동만 고치는 중이면 편집기의 표시 위치도 맞춘다
-  if (editing && (editing.blocks ? editing.blocks.length === 1 && editing.blocks[0].id === a.id : editing.id === a.id)) Object.assign(editing, change);
+  if (editing && (editing.blocks ? editing.blocks.length === 1 && editing.blocks[0].id === a.id : editing.id === a.id)) {
+    Object.assign(editing, change);
+    rebase(editing, (base) => Object.assign(base, change));
+  }
   drawBuild();
   const { error } = await sb.from("activities").update(change).eq("id", a.id);
   if (error) alert("쪽을 바꾸지 못했습니다: " + error.message);
@@ -938,6 +941,7 @@ function simEditor() {
     size.textContent = sizeText();
     if (!e.title.trim()) { e.title = f.name.replace(/\.html?$/i, ""); title.value = e.title; }
     msg.textContent = "";
+    syncSave();
   } });
   const place = placeField(e);
   async function saveSim() {
@@ -978,12 +982,34 @@ function simEditor() {
       h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html, { autoplay: true }); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기")));
 }
 
+// 저장 버튼 상태: 저장한 활동을 열고 아무것도 바꾸지 않았으면 회색 「저장됨」(누를 수 없음), 바꾸면 파란 「저장」.
+// 편집기를 처음 그릴 때(또는 저장한 뒤) 편집 내용을 기준(editBase)으로 적어 두고 지금 내용과 비교한다.
+const editBase = new WeakMap();
+const editSnap = (e) => JSON.stringify(e);
+const isSavedEdit = (e) => (e.blocks ? e.blocks.some((b) => b.id) : !!e.id);
+// 저장하지 않고 데이터베이스에 바로 반영된 변경(쪽 옮기기, 칸 삭제)은 기준에도 넣는다
+function rebase(e, change) {
+  if (!editBase.has(e)) return;
+  const base = JSON.parse(editBase.get(e));
+  change(base);
+  editBase.set(e, editSnap(base));
+}
+function syncSave(btn = main.querySelector(".editor .save-btn")) {
+  if (!btn || !editing) return;
+  const clean = isSavedEdit(editing) && editBase.get(editing) === editSnap(editing);
+  btn.disabled = clean;
+  btn.textContent = clean ? "저장됨" : "저장";
+  btn.title = clean ? "바꾼 내용이 없습니다." : "";
+}
+
 // 편집기 맨 아래 버튼: [닫기] [저장] [삭제]. 삭제는 저장한 활동에만 있다(학생 응답도 함께 지워짐)
 function editorButtons(onSave, msg, askText, ...extra) {
   const e = editing;
+  const saveBtn = h("button", { class: "primary save-btn", type: "button", onclick: onSave }, "저장");
+  syncSave(saveBtn);
   return h("div", { class: "row end" }, extra,
     h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
-    h("button", { class: "primary", type: "button", onclick: onSave }, "저장"),
+    saveBtn,
     e.id && askText ? h("button", { class: "ghost danger", type: "button", async onclick() {
       if (!confirm(askText)) return;
       const { error } = await sb.from("activities").delete().eq("id", e.id);
@@ -1027,9 +1053,13 @@ function placeField(e) {
 }
 
 function editor() {
-  if (editing.kind === "sim") return simEditor();
-  if (editing.kind !== "compose") editing = toCompose(editing);
-  return composeEditor();
+  if (editing.kind !== "sim" && editing.kind !== "compose") editing = toCompose(editing);
+  if (!editBase.has(editing)) editBase.set(editing, editSnap(editing));
+  const el = editing.kind === "sim" ? simEditor() : composeEditor();
+  // 입력·선택·버튼(켜고 끄기 등)이 편집 내용을 바꾼 뒤에 저장 버튼을 맞춘다
+  const later = () => setTimeout(() => syncSave(), 0);
+  ["input", "change", "click"].forEach((t) => el.addEventListener(t, later));
+  return el;
 }
 
 // ---------- 설명 및 질문 ----------
@@ -1077,6 +1107,7 @@ function composeEditor() {
         const { error } = await sb.from("activities").delete().eq("id", b.id);
         if (error) { msg.textContent = error.message; return; }
         activities = activities.filter((a) => a.id !== b.id);
+        rebase(e, (base) => { base.blocks = base.blocks.filter((x) => x.bid !== b.bid); });
       }
       e.blocks = e.blocks.filter((x) => x !== b);
       redraw();
@@ -1139,6 +1170,7 @@ function composeEditor() {
       else b.title = row.title; // 자동으로 붙인 「질문 n」도 칸에 남겨, 다시 저장해도 번호가 바뀌지 않게
     }
     e.blocks = e.blocks.filter((b) => b.id);
+    editBase.set(e, editSnap(e));
     const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
     activities = sortActivities(data || []);
     drawBuild();
