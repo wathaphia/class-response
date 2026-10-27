@@ -1066,7 +1066,6 @@ function editor() {
 // 편집기에서는 설명 칸·질문 칸을 몇 개든 만들고, 저장하면 칸마다 활동 하나가 된다(표시 위치는 모두 같음).
 const infoBlock = (b) => ({ bid: newId(), type: "info", title: "", text: "", ...b });
 const questionBlock = (b) => ({ bid: newId(), type: "q", show_answer: true, title: "", q: newQuestion("choice"), ...b });
-const firstLine = (text) => text.split("\n").map((x) => x.trim()).find(Boolean)?.slice(0, 100) || "";
 
 // 저장된 활동 하나를 편집기 칸으로. 예전 활동의 설명문(intro)은 앞의 설명 칸으로 꺼내고,
 // 질문이 여럿이면 질문마다 칸을 만든다(첫 칸만 원래 활동을 고치고, 나머지는 저장할 때 새 활동이 된다)
@@ -1095,9 +1094,11 @@ function composeEditor() {
   const msg = h("p", { class: "error" });
   const redraw = (focus) => { drawBuild(); if (focus) main.querySelector('.editor [data-focus="' + focus + '"]')?.focus(); };
   const hasResponses = e.blocks.some((b) => b.id && responses.some((r) => r.activity_id === b.id));
-  // 제목을 비운 질문은 「질문 n」. n은 이 수업에 이미 있는 질문(이 편집기 칸 말고) 다음 번호부터
-  const qBase = activities.filter((a) => a.kind !== "sim" && !isInfoActivity(a) && !e.blocks.some((b) => b.id === a.id)).length;
+  // 제목을 비운 질문은 「질문 n」, 설명은 「설명 n」. n은 이 수업에 이미 있는 같은 종류(이 편집기 칸 말고) 다음 번호부터
+  const others = activities.filter((a) => a.kind !== "sim" && !e.blocks.some((b) => b.id === a.id));
+  const qBase = others.filter((a) => !isInfoActivity(a)).length, iBase = others.filter(isInfoActivity).length;
   const autoTitle = (n) => "질문 " + (qBase + n);
+  const autoInfo = (n) => "설명 " + (iBase + n);
   let qn = 0, inN = 0;
   const blockEls = e.blocks.map((b) => {
     // 칸 오른쪽 위 「삭제」: 저장한 칸이면 그 활동을 바로 지운다
@@ -1112,7 +1113,7 @@ function composeEditor() {
       e.blocks = e.blocks.filter((x) => x !== b);
       redraw();
     } }, "삭제");
-    return b.type === "info" ? infoEdit(b, ++inN, del) : questionEdit(b, autoTitle(++qn), del, redraw);
+    return b.type === "info" ? infoEdit(b, autoInfo(++inN), del) : questionEdit(b, autoTitle(++qn), del, redraw);
   });
 
   async function saveAll() {
@@ -1127,8 +1128,9 @@ function composeEditor() {
         ii++;
         if (blankI(b)) continue;
         const text = b.text.trim();
-        if (!text) { msg.textContent = "설명 " + ii + "의 설명문을 입력하세요."; return; }
-        rows.push([b, { kind: "survey", title: b.title.trim() || firstLine(text), show_answer: false, named: false,
+        const title = b.title.trim() || autoInfo(ii);
+        if (!text) { msg.textContent = "「" + title + "」의 설명문을 입력하세요."; return; }
+        rows.push([b, { kind: "survey", title, show_answer: false, named: false,
           questions: [{ id: b.qid || newId(), type: "info", text }] }]);
         continue;
       }
@@ -1167,7 +1169,7 @@ function composeEditor() {
       if (!s) return;
       b.id = s.id;
       if (b.type === "info") b.qid = row.questions[0].id;
-      else b.title = row.title; // 자동으로 붙인 「질문 n」도 칸에 남겨, 다시 저장해도 번호가 바뀌지 않게
+      b.title = row.title; // 자동으로 붙인 「질문 n」·「설명 n」도 칸에 남겨, 다시 저장해도 번호가 바뀌지 않게
     }
     e.blocks = e.blocks.filter((b) => b.id);
     editBase.set(e, editSnap(e));
@@ -1188,13 +1190,13 @@ function composeEditor() {
     editorButtons(saveAll, msg, null));
 }
 
-// 설명 칸: 제목(비우면 설명문 첫 줄)과 설명문. 학생은 답하지 않는다
-function infoEdit(b, n, del) {
-  const title = h("input", { type: "text", maxlength: 100, value: b.title, placeholder: "비우면 설명문 첫 줄이 제목이 됩니다", "data-focus": b.bid, oninput() { b.title = title.value; } });
+// 설명 칸: 위 줄은 제목(비우면 auto, 예: 「설명 1」이 제목이 됨)과 삭제, 그 아래 설명문. 학생은 답하지 않는다
+function infoEdit(b, auto, del) {
+  const title = h("input", { type: "text", class: "blk-title", maxlength: 100, value: b.title || "", placeholder: auto, "aria-label": "설명 제목",
+    title: "비우면 「" + auto + "」이 제목이 됩니다.", "data-focus": b.bid, oninput() { b.title = title.value; } });
   const body = h("textarea", { rows: 5, maxlength: 5000, placeholder: "설명과 링크를 입력하세요. https:// 주소는 학생 화면에서 클릭할 수 있습니다.", oninput() { b.text = body.value; } }, b.text || "");
   return h("article", { class: "blk info-edit stack" },
-    h("div", { class: "blk-top" }, h("strong", {}, "설명 " + n), del),
-    h("label", {}, "제목", title),
+    h("div", { class: "blk-top" }, title, del),
     h("label", {}, "설명문", body));
 }
 
