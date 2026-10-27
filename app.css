@@ -244,3 +244,22 @@ main.lesson.split .sim-stage .sim-frame { max-height: calc(100vh - 9.5rem); }
 .sim-full > .pptx-frame { flex: 1; height: auto; min-height: 0; }
 @media (max-width: 520px) { .sim-float { right: 12px; bottom: 12px; width: calc(100vw - 24px); height: min(280px, calc(100vh - 80px)); } }
 textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; }
+
+/* 슬라이드 전환 효과(수업 설정에서 고름). 같은 슬라이드 안의 애니메이션 단계는 짧게 페이드 */
+.slide-box, .stage { overflow: hidden; }
+@keyframes fx-fade { from { opacity: 0; } }
+@keyframes fx-zoom { from { opacity: 0; transform: scale(.88); } }
+@keyframes fx-push-next { from { opacity: .3; transform: translateX(10%); } }
+@keyframes fx-push-prev { from { opacity: .3; transform: translateX(-10%); } }
+.slide.fx-step { animation: fx-fade .25s ease-out; }
+.slide.fx-fade { animation: fx-fade .5s ease-out; }
+.slide.fx-zoom { animation: fx-zoom .5s cubic-bezier(.2, .8, .2, 1); }
+.slide.fx-push-next { animation: fx-push-next .45s cubic-bezier(.2, .8, .2, 1); }
+.slide.fx-push-prev { animation: fx-push-prev .45s cubic-bezier(.2, .8, .2, 1); }
+@media (prefers-reduced-motion: reduce) { .slide[class*="fx-"] { animation: none; } }
+
+/* 실시간 수업 화면(학생이 허용한 경우). 학생이 보낸 화면은 스크립트가 막힌 iframe 안에만 그린다 */
+.mirror-frame { display: block; width: 100%; height: min(70vh, 640px); border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.mirror-state { font-weight: 700; }
+.mirror-state.away { color: var(--bad, #b42318); }
+.screen-share-note { flex-wrap: wrap; }
