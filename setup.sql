@@ -243,13 +243,17 @@ end $$;
 
 -- 학생 화면에 필요한 것 전부: 이 수업의 상태, 활동, 내 응답, 공개된 친구들 응답.
 -- 이미 입장한 학생(열쇠가 있는 기기)이 새 수업 코드로 오면 비밀번호 없이 그 수업에 참여시킨다.
+-- p_have: 학생 화면이 지난번에 받은 내용의 지문(v). 그대로면 {same:true}만 돌려줘 전송량을 아낀다.
 drop function if exists student_state(text);
-create or replace function student_state(p_token text, p_code text)
+drop function if exists student_state(text, text);
+create or replace function student_state(p_token text, p_code text, p_have text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
   s students;
   l lessons;
   m lesson_students;
+  res jsonb;
+  v text;
 begin
   select * into s from students where token = p_token and p_token is not null;
   if not found then return jsonb_build_object('error', 'logged_out'); end if;
@@ -265,7 +269,7 @@ begin
     update lesson_students set last_seen = now() where lesson_id = l.id and student_id = s.id;
   end if;
 
-  return jsonb_build_object(
+  res := jsonb_build_object(
     'me', jsonb_build_object('id', s.id, 'class_no', s.class_no, 'name', s.name, 'monitor', s.monitor_consent),
     'lesson', jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title, 'slide_dir', l.slide_dir,
                                  'slide_count', l.slide_count, 'page', l.page, 'open', l.open, 'kind', l.kind),
@@ -303,6 +307,9 @@ begin
       left join responses r on r.activity_id = a.id and r.student_id = s.id
       where a.lesson_id = l.id), '[]'::jsonb)
   );
+  v := md5(res::text);
+  if p_have = v then return jsonb_build_object('same', true); end if;
+  return res || jsonb_build_object('v', v);
 end $$;
 
 -- 학생 응답 저장. 그 수업에 참여한 학생만, 제출이 열려 있을 때만. 퀴즈는 한 번만 제출하고 서버에서 채점한다.
@@ -386,13 +393,13 @@ end $$;
 revoke all on function student_set_monitor(text, boolean) from public;
 grant execute on function student_set_monitor(text, boolean) to anon, authenticated;
 revoke all on function student_enter(text, text, text, text, boolean) from public;
-revoke all on function student_state(text, text) from public;
+revoke all on function student_state(text, text, text) from public;
 revoke all on function teacher_students(uuid) from public;
 revoke all on function student_sim(text, uuid) from public;
 revoke all on function student_save(text, uuid, jsonb) from public;
 revoke all on function create_lesson(text, text) from public;
 grant execute on function student_enter(text, text, text, text, boolean) to anon, authenticated;
-grant execute on function student_state(text, text) to anon, authenticated;
+grant execute on function student_state(text, text, text) to anon, authenticated;
 grant execute on function teacher_students(uuid) to authenticated;
 grant execute on function student_sim(text, uuid) to anon, authenticated;
 grant execute on function student_save(text, uuid, jsonb) to anon, authenticated;

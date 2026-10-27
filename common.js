@@ -20,7 +20,17 @@ if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");
 const configured = (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(SB_URL))
   && !/여기에/.test(SUPABASE_KEY) && String(SUPABASE_KEY).trim() !== "";
-const sb = configured ? supabase.createClient(SB_URL, String(SUPABASE_KEY).trim()) : null;
+const sb = configured ? supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { global: { fetch: watchedFetch } }) : null;
+// 수업 내용(lessons·activities·responses)을 바꾸는 요청이 성공하면 onDataWrite 를 부른다.
+// 교사 화면은 이때 학생들에게 「nudge」 신호를 보내, 학생 화면이 자주 묻지 않고도 바로 새 내용을 받게 한다.
+var onDataWrite = null;
+function watchedFetch(input, init) {
+  const p = fetch(input, init);
+  const method = (init && init.method) || "GET";
+  if (onDataWrite && method !== "GET" && method !== "HEAD" && /\/rest\/v1\/(lessons|activities|responses)\b/.test(String(input.url || input)))
+    p.then((r) => { if (r.ok && onDataWrite) onDataWrite(); }).catch(() => {});
+  return p;
+}
 
 // 만든 사람 표시. 고쳐 쓰거나 나눌 때도 지우지 말아 주세요(LICENSE.md).
 const CREDIT = { name: "이효송", year: 2026 };
@@ -145,6 +155,8 @@ const relayFirst = (list) => forceRelay() || hasTurn(list);
 async function iceServers(auth) {
   const url = typeof TURN_URL === "string" ? TURN_URL.trim() : "";
   if (!url) return STUN_ONLY;
+  if (!iceCache) try { iceCache = JSON.parse(sessionStorage.getItem("cra-ice")); } catch {}
+  // 새로고침해도 같은 접속 정보를 다시 쓴다(새로 받을 때마다 월 발급 한도 1,000장에서 한 장씩 줄어듦)
   if (iceCache && iceCache.until > Date.now()) return iceCache.list;
   try {
     const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...(auth.headers || {}) }, body: JSON.stringify(auth.body || {}) });
@@ -152,6 +164,7 @@ async function iceServers(auth) {
     const d = await r.json();
     const list = d.iceServers ? [].concat(d.iceServers) : STUN_ONLY;
     iceCache = { list, until: Date.now() + 50 * 60 * 1000 };   // 접속 정보는 1시간짜리라 50분 동안 다시 쓴다
+    if (hasTurn(list)) try { sessionStorage.setItem("cra-ice", JSON.stringify(iceCache)); } catch {}
     return list;
   } catch {
     return STUN_ONLY;

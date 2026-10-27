@@ -158,24 +158,48 @@ function sortActivities(list) {
     (x.sort ?? 0) - (y.sort ?? 0) || String(x.created_at || "").localeCompare(String(y.created_at || "")));
 }
 
-async function loadResponses() {
+// 응답은 처음과 1분마다 전체를, 그 사이 3초마다는 바뀐 것(updated_at)만 받는다.
+// 응답이 많은 수업에서 3초마다 전체를 받으면 Supabase 전송량을 크게 쓴다. 10초를 겹쳐 받아 늦게 저장된 것도 놓치지 않는다.
+let respSince = null;
+let respTick = 0;
+async function loadResponses(changedOnly = false) {
   if (!lesson) return;
   // 이 수업에 들어온 학생(학생 계정은 웹앱 전체에 하나, 수업마다 참여 기록이 따로 있다)
   const st = await sb.rpc("teacher_students", { p_lesson: lesson.id });
   if (st.error) return fatal(st.error);
   students = (st.data || []).sort((x, y) => x.class_no.localeCompare(y.class_no, "ko", { numeric: true }) || x.name.localeCompare(y.name, "ko"));
   const ids = activities.map((a) => a.id);
-  if (!ids.length) { responses = []; return; }
-  const rs = await sb.from("responses").select("*").in("activity_id", ids);
+  if (!ids.length) { responses = []; respSince = null; return; }
+  const part = changedOnly && respSince && ++respTick % 20 !== 0;
+  let q = sb.from("responses").select("*").in("activity_id", ids);
+  if (part) q = q.gte("updated_at", respSince);
+  const rs = await q;
   if (rs.error) return fatal(rs.error);
-  responses = rs.data;
+  if (part) {
+    const key = (r) => r.student_id + ":" + r.activity_id;
+    const got = new Map(rs.data.map((r) => [key(r), r]));
+    const keep = new Set(ids);
+    responses = responses.filter((r) => !got.has(key(r)) && keep.has(r.activity_id)).concat(rs.data);
+  } else {
+    responses = rs.data;
+    respTick = 0;
+  }
+  const last = Math.max(0, ...responses.map((r) => Date.parse(r.updated_at) || 0));
+  respSince = last ? new Date(last - 10000).toISOString() : null;
 }
+
+// 교사가 수업 내용을 바꾸면 학생 화면에 바로 새로 받으라고 알린다(여러 번 바꿔도 0.3초에 한 번)
+let nudgeTimer = null;
+onDataWrite = () => {
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(() => { if (screenChannel) screenChannel.send({ type: "broadcast", event: "nudge", payload: {} }).catch(() => {}); }, 300);
+};
 
 function schedule() {
   clearTimeout(timer);
   if (!lesson || (tab !== "run" && tab !== "students")) return;
   timer = setTimeout(async () => {
-    await loadResponses();
+    await loadResponses(true);
     if (tab === "run") refreshRun();
     if (tab === "students") drawStudents();
     schedule();
@@ -2290,7 +2314,7 @@ async function uploadPptx(file, progress) {
   progress(0, 1, "PPTX 올리는 중");
   const objectPath = folder + "deck.pptx";
   const { error } = await sb.storage.from("slides").upload(objectPath, file, {
-    upsert: true, contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", cacheControl: "3600",
+    upsert: true, contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", cacheControl: "31536000",
   });
   if (error) throw error;
   const { data } = sb.storage.from("slides").getPublicUrl(objectPath);
@@ -2312,10 +2336,12 @@ async function loadPdfJs() {
   return window.pdfjsLib;
 }
 
-const SLIDE_WIDTH = 1600;
+// 학생 기기로 내려가는 그림 크기: 1280px·품질 0.72면 글씨는 또렷하고 1600px·0.85의 약 3분의 1 크기다(Supabase 전송량 절약)
+const SLIDE_WIDTH = 1280;
+const SLIDE_QUALITY = 0.72;
 
 function canvasToJpeg(canvas) {
-  return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("그림으로 바꾸지 못했습니다"))), "image/jpeg", 0.85));
+  return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("그림으로 바꾸지 못했습니다"))), "image/jpeg", SLIDE_QUALITY));
 }
 
 // 파일들을 쪽별 JPG 묶음으로 바꾼다
@@ -2481,7 +2507,7 @@ async function uploadSlides(files, progress) {
   const folder = slideFolder(lesson);
   for (const [i, blob] of images.entries()) {
     progress(i, images.length, "올리는 중");
-    const { error } = await sb.storage.from("slides").upload(folder + (i + 1) + ".jpg", blob, { upsert: true, contentType: "image/jpeg", cacheControl: "3600" });
+    const { error } = await sb.storage.from("slides").upload(folder + (i + 1) + ".jpg", blob, { upsert: true, contentType: "image/jpeg", cacheControl: "31536000" });   // 주소에 ?v=올린시각 이 붙어 1년 캐시해도 새 그림이 보인다
     if (error) throw error;
   }
   progress(images.length, images.length, "올리는 중");

@@ -1,9 +1,11 @@
 // 학생 화면: 입장(학번 + 이름 + 비밀번호) → 슬라이드를 따라가며 질문에 답한다.
-// 3초마다 서버에서 수업 상태를 받아 온다(교사가 넘긴 쪽, 제출 열림, 공개된 응답).
+// 서버에서 수업 상태를 받아 온다(교사가 넘긴 쪽, 제출 열림, 공개된 응답). 교사가 무엇을 바꾸면 수업 채널의 「nudge」 신호로
+// 바로 받고, 신호를 못 받을 때를 위해 10초마다(채널이 끊기면 3초마다) 묻는다. 바뀐 것이 없으면 서버는 {same:true}만 보낸다.
 
 const app = document.getElementById("app");
 const params = new URLSearchParams(location.search);
 const POLL_MS = 3000;
+const POLL_LIVE_MS = 10000;   // 수업 채널(nudge)이 이어져 있을 때
 // 학생 계정은 웹앱 전체에 하나. 한 번 입장한 기기는 열쇠(token)를 기억해서, 새 수업 코드만 넣으면 바로 들어간다.
 const TOKEN_KEY = "cra-token";
 const ME_KEY = "cra-me";
@@ -11,6 +13,8 @@ const ME_KEY = "cra-me";
 let code = "";          // 수업 코드
 let token = null;       // 입장 열쇠(이 기기에 저장)
 let state = null;       // 서버에서 받은 수업 상태
+let stateV = null;      // 그 상태의 지문(서버가 같으면 다시 보내지 않음)
+let liveOk = false;     // 수업 채널에 붙어 있는지
 let viewing = 1;        // 학생이 보고 있는 쪽
 let following = true;   // 교사가 띄운 쪽을 따라가는 중인지
 let timer = null;
@@ -195,6 +199,7 @@ function leaveScreenShare() {
   if (screenPc) stopScreenShare();
   if (screenChannel) sb.removeChannel(screenChannel);
   screenChannel = null;
+  liveOk = false;
   screenChannelKey = "";
   screenPending = false;
 }
@@ -207,7 +212,7 @@ function stopPolling() {
 
 async function poll() {
   clearTimeout(timer);
-  const { data, error } = await sb.rpc("student_state", { p_token: token, p_code: code });
+  const { data, error } = await sb.rpc("student_state", { p_token: token, p_code: code, p_have: shell ? stateV : null });
   if (!token) return;
   if (!error && data.error === "no_lesson") return showCodeOnly("수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.");
   if (!error && data.error === "full") return showCodeOnly("이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.");
@@ -216,10 +221,19 @@ async function poll() {
     else showEntry("연결하지 못했습니다. 인터넷을 확인하고 다시 입장하세요.");
   } else if (data.error === "logged_out") {
     return logout("다시 입장해 주세요. 선생님이 비밀번호를 초기화했거나 학생 정보가 지워졌습니다.");
+  } else if (data.same) {
+    if (shell) shell.conn.hidden = true;
   } else {
+    stateV = data.v || null;
     apply(data);
   }
-  timer = setTimeout(poll, document.hidden ? POLL_MS * 4 : POLL_MS);
+  timer = setTimeout(poll, (liveOk ? POLL_LIVE_MS : POLL_MS) * (document.hidden ? 4 : 1));
+}
+// 교사가 바꿨다는 신호: 모든 학생이 한꺼번에 묻지 않게 조금씩 흩어서 받는다
+function pollSoon() {
+  if (!token || !shell) return;
+  clearTimeout(timer);
+  timer = setTimeout(poll, Math.random() * 600);
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token && shell) poll(); });
 
@@ -291,7 +305,11 @@ function ensureScreenChannel() {
   // presence: 교사 화면에 접속 상태(보고 있음/다른 앱·탭)만 알린다. 화면 내용은 보내지 않는다.
   screenChannel = sb.channel(key, { config: { broadcast: { self: false }, presence: { key: screenStudentId } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleScreenSignal(payload));
-  screenChannel.subscribe((status) => { if (status === "SUBSCRIBED") trackPresence(); });
+  screenChannel.on("broadcast", { event: "nudge" }, pollSoon);
+  screenChannel.subscribe((status) => {
+    liveOk = status === "SUBSCRIBED";
+    if (liveOk) trackPresence();
+  });
 }
 
 // 수업 중 화면 보기 동의: 가입할 때 묻고 학생 계정에 저장한다(모든 수업·기기에 적용, 언제든 바꿀 수 있다).
@@ -672,13 +690,17 @@ function render(pageChanged) {
 // ---------- 시뮬레이션 ----------
 const simCache = new Map();   // 활동 id → { ver, html }
 
+// 시뮬레이션 HTML은 이 기기에도 저장해 두어, 새로고침하거나 다음 시간에 다시 들어와도 바뀌지 않았으면 다시 받지 않는다
 async function loadSim(a) {
-  const hit = simCache.get(a.id);
-  if (hit && hit.ver === a.html_ver) return hit.html;
+  let hit = simCache.get(a.id);
+  if (!hit) try { hit = JSON.parse(localStorage.getItem("cra-sim:" + a.id)); } catch {}
+  if (hit && hit.ver === a.html_ver) { simCache.set(a.id, hit); return hit.html; }
   const { data, error } = await sb.rpc("student_sim", { p_token: token, p_activity: a.id });
   if (error) throw error;
   const html = typeof data === "string" ? data : "";
-  simCache.set(a.id, { ver: a.html_ver, html });
+  hit = { ver: a.html_ver, html };
+  simCache.set(a.id, hit);
+  if (html.length < 500000) try { localStorage.setItem("cra-sim:" + a.id, JSON.stringify(hit)); } catch {}
   return html;
 }
 
@@ -846,6 +868,8 @@ function buildForm(c) {
     else {
       localStorage.removeItem(draftKey(a));
       c.formSig = null;   // 저장한 내용으로 다시 그린다
+      // 공개 응답이면 친구들 화면도 새로 받게 알린다(내용 없이 신호만)
+      if (a.shared && liveOk) screenChannel.send({ type: "broadcast", event: "nudge", payload: {} }).catch(() => {});
       return poll();
     }
     c.refresh();
