@@ -408,11 +408,9 @@ let run = null;
 function drawRun() {
   const img = h("img", { class: "slide", alt: "" });
   const where = h("span", { class: "where" });
-  const prev = h("button", { class: "ghost", type: "button", onclick() { goSlide(-1); } }, "◀ 이전");
-  const next = h("button", { class: "primary", type: "button", onclick() { goSlide(1); } }, "다음 ▶");
-  // 애니메이션 단계 그림이 있는 수업에서만: 클릭 한 번만큼 앞뒤로
-  const animPrev = h("button", { class: "ghost", type: "button", onclick() { setPage(lesson.page - 1); } }, "◁ 애니메이션");
-  const animNext = h("button", { class: "ghost", type: "button", onclick() { setPage(lesson.page + 1); } }, "애니메이션 ▷");
+  // 화살표 두 개: 애니메이션 한 단계씩 앞뒤로(그 슬라이드의 애니메이션이 끝나면 다음 슬라이드로). 키보드 ← → 와 같다
+  const prev = h("button", { class: "ghost arrow", type: "button", title: "애니메이션 이전 (←)", "aria-label": "애니메이션 이전", onclick() { setPage(lesson.page - 1); } }, "◀");
+  const next = h("button", { class: "primary arrow", type: "button", title: "애니메이션 다음 (→)", "aria-label": "애니메이션 다음", onclick() { setPage(lesson.page + 1); } }, "▶");
   const deckBtn = h("button", { class: "ghost", type: "button", title: "Office 온라인 뷰어로 원본 애니메이션을 재생합니다(학생 화면은 따라오지 않음)",
     onclick() { openPptxFull({ slide_dir: "pptx:" + deckUrl(lesson), slide_count: slideTotal(lesson) }, slideNo(lesson, lesson.page)); } }, "원본 애니메이션 보기");
   const openBtn = h("button", { type: "button", onclick() { setLesson({ open: !lesson.open }); } });
@@ -429,7 +427,7 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      hasSlides ? h("nav", { class: "pager" }, prev, where, next, animPrev, animNext, h("span", { class: "spacer" }), deckBtn,
+      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       h("div", { class: "row" },
         h("button", { class: "ghost", type: "button", onclick: showJoin }, "학생 접속 주소·QR"),
@@ -441,7 +439,7 @@ function drawRun() {
       h("section", { class: "card row between" }, openText, openBtn),
       roster,
       panel)));
-  run = { img, stage, simStage, simLayer, simKey: "", pptKey: "", where, prev, next, animPrev, animNext, deckBtn, openBtn, openText, panel, roster, blocks: new Map() };
+  run = { img, stage, simStage, simLayer, simKey: "", pptKey: "", where, prev, next, deckBtn, openBtn, openText, panel, roster, blocks: new Map() };
   refreshRun();
 }
 
@@ -466,14 +464,9 @@ function refreshRun() {
       run.lastPage = L.page;
       run.img.alt = "슬라이드 " + L.page;
     }
-    const pos = slidePos(L, L.page);
-    const anim = !!slideSteps(L);
     run.where.textContent = slideLabel(L, L.page);
-    run.prev.disabled = pos.slide <= 1;
-    run.next.disabled = pos.slide >= pos.total;
-    // 애니메이션 버튼은 늘 같은 자리에 두고(버튼이 움직이지 않게), 애니메이션이 없는 수업에서는 누를 수 없게만 한다
-    run.animPrev.disabled = !anim || L.page <= 1;
-    run.animNext.disabled = !anim || L.page >= L.slide_count;
+    run.prev.disabled = L.page <= 1;
+    run.next.disabled = L.page >= L.slide_count;
     run.deckBtn.hidden = !deckUrl(L);
     if (L.page < L.slide_count) new Image().src = slideSrc(L, L.page + 1);
   }
@@ -610,11 +603,6 @@ function responseTable(a) {
     }))));
 }
 
-// 슬라이드 단위로 넘기기(애니메이션 단계 그림이 있으면 앞뒤 슬라이드의 첫 단계로)
-function goSlide(d) {
-  const s = slideNo(lesson, lesson.page) + d;
-  if (s >= 1 && s <= slideTotal(lesson)) setPage(pageOfSlide(lesson, s));
-}
 
 async function setPage(n) {
   n = Math.min(Math.max(n, 1), Math.max(lesson.slide_count, 1));
@@ -1392,10 +1380,6 @@ function slidesCard() {
     swapSlide(pv, slideSrc(lesson, to), fxPick.value, dir);
     pvWhere.textContent = slideLabel(lesson, to);
   };
-  const pvSlide = (d) => {
-    const s = slideNo(lesson, pvAt) + d;
-    if (s >= 1 && s <= slideTotal(lesson)) pvShow(pageOfSlide(lesson, s));
-  };
   const pvPlay = () => {
     const here = pvAt;
     const back = slideNo(lesson, here) > 1 ? pageOfSlide(lesson, slideNo(lesson, here) - 1) : pageOfSlide(lesson, Math.min(2, slideTotal(lesson)));
@@ -1421,11 +1405,9 @@ function slidesCard() {
       h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")),
     h("div", { class: "fx-preview" }, pv),
     h("nav", { class: "pager fx-pager" },
-      h("button", { class: "ghost", type: "button", onclick() { pvSlide(-1); } }, "◀ 이전"),
+      h("button", { class: "ghost arrow", type: "button", title: "애니메이션 이전", "aria-label": "애니메이션 이전", onclick() { pvShow(pvAt - 1); } }, "◀"),
       pvWhere,
-      h("button", { class: "ghost", type: "button", onclick() { pvSlide(1); } }, "다음 ▶"),
-      h("button", { class: "ghost", type: "button", title: "애니메이션 한 단계 뒤로", onclick() { pvShow(pvAt - 1); } }, "◁"),
-      h("button", { class: "ghost", type: "button", title: "애니메이션 한 단계 앞으로", onclick() { pvShow(pvAt + 1); } }, "▷"),
+      h("button", { class: "ghost arrow", type: "button", title: "애니메이션 다음", "aria-label": "애니메이션 다음", onclick() { pvShow(pvAt + 1); } }, "▶"),
       h("button", { class: "ghost", type: "button", onclick: pvPlay }, "다시 보기")),
     h("p", { class: "muted small" }, "미리보기는 이 화면에서만 움직이고 수업 쪽과 학생 화면은 바뀌지 않습니다."));
   const allCard = lesson.slide_count && !ppt ? h("section", { class: "card stack all-slides" },
