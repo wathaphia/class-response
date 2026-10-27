@@ -818,9 +818,10 @@ async function takeSimFrame(watch, m) {
   watch.sims.set(m.k, s);
   await watch.ready;
   paintSim(watch, m.k);
-  const lag = m.t ? (now - m.t) / 1000 : null;
-  watch.simInfo.textContent = "시뮬레이션 " + (s.times.length / 2).toFixed(1) + "장/초"
-    + (lag != null && lag >= 0 && lag < 60 ? " · 지연 약 " + lag.toFixed(1) + "초" : "");
+  // 지연은 학생 기기 시계 기준이라 두 기기 시계가 어긋나면 조금 틀릴 수 있다
+  const lag = m.t ? now - m.t : null;
+  watch.simInfo.textContent = "시뮬레이션 " + (s.times.length / 2).toFixed(1) + " FPS"
+    + (lag != null && lag >= 0 && lag < 60000 ? " · 지연 " + Math.round(lag) + " ms" : "");
 }
 
 async function showMirror(watch, m) {
