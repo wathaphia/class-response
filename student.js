@@ -229,6 +229,8 @@ function apply(data) {
   queueMirror();
 }
 
+addEventListener("resize", () => { if (shell && shell.simLayer) syncSimLayer(shell.simLayer, shell.img); });
+
 function clampPage(n) {
   const max = Math.max(state.lesson.slide_count, 1);
   return Math.min(Math.max(n || 1, 1), max);
@@ -247,7 +249,10 @@ function buildShell() {
   const who = h("span", {});
   const screenNotice = h("section", { class: "screen-share-note", hidden: true });
   const simStage = h("div", { class: "sim-stage", hidden: true });
-  const slideBox = h("div", { class: "slide-box" }, img, simStage,
+  const simLayer = h("div", { class: "sim-layer" });   // 선생님이 슬라이드 위에 얹은 시뮬레이션
+  const slideWrap = h("div", { class: "slide-wrap" }, img, simLayer);
+  img.addEventListener("load", () => syncSimLayer(simLayer, img));
+  const slideBox = h("div", { class: "slide-box" }, slideWrap, simStage,
     h("nav", { class: "pager" }, prev, where, next, back, h("span", { class: "spacer" }),
       h("button", { class: "ghost", type: "button", onclick: zoom }, "크게 보기")),
     h("p", { class: "muted small" }, "다음 쪽은 선생님이 넘기면 자동으로 열립니다."));
@@ -260,7 +265,7 @@ function buildShell() {
     h("main", { class: "lesson" }, conn, closed, screenNotice, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
   const empty = h("p", { class: "muted center" });
-  shell = { img, simStage, prev, next, where, back, closed, conn, title, who, screenNotice, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
+  shell = { img, simStage, simLayer, prev, next, where, back, closed, conn, title, who, screenNotice, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
   renderScreenNotice();
 }
 
@@ -604,6 +609,12 @@ function render(pageChanged) {
   const stageSim = hasSlides ? here.find((a) => a.kind === "sim" && a.sim_full) : null;
   showStageSim(stageSim);
   if (stageSim) here = here.filter((a) => a !== stageSim);
+  // 슬라이드 위에 얹는 시뮬레이션: 선생님이 정한 자리에 테두리 없이 놓는다(카드로는 보이지 않음)
+  const overs = hasSlides && !isPptx(L) && !stageSim ? here.filter(isOverSim) : [];
+  here = here.filter((a) => !overs.includes(a));
+  shell.simLayer.hidden = !overs.length;
+  syncSimLayer(shell.simLayer, shell.img);
+  renderSimLayer(shell.simLayer, overs, { load: (a) => loadSim(a).then(withSimAgent), ver: (a) => a.html_ver, editable: false });
   const els = here.map(cardFor);
   if (anytime.length) els.push(shell.anytimeHead, anytime.map(cardFor));
   if (!here.length && !anytime.length) {
@@ -719,6 +730,19 @@ function buildForm(c) {
   const err = h("p", { class: "error" });
   const status = h("p", { class: "status" });
   const btn = h("button", { class: "primary big", type: "button" });
+  // 저장한 뒤에는 답을 잠그고 「저장됨」으로 보여 준다. 「수정하기」를 누르면 다시 고칠 수 있고, 「취소」는 저장한 답으로 되돌린다.
+  let unlocked = false;
+  const editBtn = h("button", { class: "ghost big", type: "button", hidden: true, onclick() {
+    if (unlocked) {   // 취소: 고치던 내용을 버리고 저장한 답으로
+      localStorage.removeItem(draftKey(a));
+      c.formSig = null;
+      cardFor(a);
+      return;
+    }
+    unlocked = true;
+    c.refresh();
+    c.form.querySelector(".question input:not([type=radio]):not([type=checkbox]), .question textarea, .question input")?.focus();
+  } }, "수정하기");
   let sending = false;
 
   const saveDraft = () => {
@@ -794,8 +818,12 @@ function buildForm(c) {
       status.className = "status ok";
       return;
     }
+    const locked = !!a.mine && !d && !unlocked && !sending;
+    c.form.querySelectorAll(".question input, .question textarea").forEach((el) => { el.disabled = locked; });
+    editBtn.hidden = !a.mine || !open || (!unlocked && d) || sending;
+    editBtn.textContent = unlocked ? "취소" : "수정하기";
     btn.disabled = sending || !open || (a.mine && !d);
-    btn.textContent = sending ? "저장 중…" : a.kind === "quiz" ? "제출하기" : !a.mine ? "저장하기" : d ? "고친 내용 저장" : "저장됨";
+    btn.textContent = sending ? "저장 중…" : a.kind === "quiz" ? "제출하기" : !a.mine ? "저장하기" : d ? "고친 내용 저장" : unlocked ? "고친 뒤 저장" : "저장됨";
     status.textContent = !open ? "지금은 저장할 수 없습니다." : a.mine && !d ? "✓ 저장 완료 (" + fmtTime(a.saved_at) + ")" : a.mine ? "저장하지 않은 수정 내용이 있습니다." : "";
     status.className = a.mine && !d && open ? "status ok" : "status";
   };
@@ -804,5 +832,5 @@ function buildForm(c) {
     h("div", { class: "card-head" }, h("h2", {}, a.title), h("span", { class: "badge" }, KIND_NAME[a.kind])),
     activityDescription(a) ? linkedDescription(activityDescription(a)) : null,
     quizDone && a.total ? h("p", { class: "score" }, "점수 " + a.score + " / " + a.total) : null,
-    rows, err, btn, status].flat().filter(Boolean));
+    rows, err, h("div", { class: "row" }, btn, editBtn), status].flat().filter(Boolean));
 }

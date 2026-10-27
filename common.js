@@ -192,6 +192,80 @@ function simFrame(html, title) {
   return f;
 }
 
+// ---------- 슬라이드 위에 얹는 시뮬레이션 ----------
+// 테두리 없이 슬라이드의 정해진 자리에 놓인다. 자리(sim_place)는 슬라이드 크기에 대한 비율 {x, y, w, h}(0~1).
+// 교사 화면(editable)에서는 위쪽 막대를 끌어 옮기고, 오른쪽 아래 모서리를 끌어 크기를 바꾼다.
+const SIM_PLACE_DEFAULT = { x: 0.55, y: 0.1, w: 0.4, h: 0.55 };
+const clamp01 = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const isOverSim = (a) => a.kind === "sim" && !a.sim_full && !!a.sim_place;
+
+// 얹는 칸(layer)을 슬라이드 그림이 실제로 보이는 자리에 맞춘다(전체 화면에서 그림이 가운데로 줄어들 때도)
+function syncSimLayer(layer, img) {
+  Object.assign(layer.style, { left: img.offsetLeft + "px", top: img.offsetTop + "px", width: img.offsetWidth + "px", height: img.offsetHeight + "px" });
+}
+
+// list: 이 쪽에 얹을 시뮬레이션들. load(a) → html, ver(a) → 바뀌었는지 볼 값. 같은 시뮬레이션은 다시 불러오지 않아 조작 상태가 남는다.
+function renderSimLayer(layer, list, { load, ver, editable, onMove }) {
+  const ids = new Set(list.map((a) => a.id));
+  layer.querySelectorAll(":scope > .sim-over").forEach((b) => { if (!ids.has(b.dataset.sim)) b.remove(); });
+  for (const a of list) {
+    let box = layer.querySelector(':scope > .sim-over[data-sim="' + a.id + '"]');
+    if (!box) {
+      box = h("div", { class: "sim-over" + (editable ? " editable" : ""), "data-sim": a.id });
+      if (editable) {
+        box.append(h("div", { class: "sim-grip", title: "끌어서 옮기기" }, "⠿ 끌어서 옮기기"), h("div", { class: "sim-resize", title: "끌어서 크기 바꾸기" }));
+        dragSim(layer, box, onMove);
+      }
+      layer.append(box);
+    }
+    box._a = a;
+    const v = String(ver(a));
+    if (box.dataset.ver !== v) {
+      box.dataset.ver = v;
+      box.querySelector("iframe")?.remove();
+      const f = simFrame(null, a.title);
+      box.prepend(f);
+      Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = html; }).catch(() => {});
+    }
+    if (!box.classList.contains("moving")) placeBox(box, a.sim_place || SIM_PLACE_DEFAULT);
+  }
+}
+function placeBox(box, p) {
+  Object.assign(box.style, { left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: p.h * 100 + "%" });
+}
+function dragSim(layer, box, onMove) {
+  const start = (e, mode) => {
+    e.preventDefault();
+    const L = layer.getBoundingClientRect(), r = box.getBoundingClientRect();
+    const s = { x: e.clientX, y: e.clientY, l: (r.left - L.left) / L.width, t: (r.top - L.top) / L.height, w: r.width / L.width, h: r.height / L.height, W: L.width, H: L.height };
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    box.classList.add("moving");
+    layer.classList.add("dragging");   // 끄는 동안 시뮬레이션이 마우스를 가로채지 않게
+    let p = null;
+    const move = (ev) => {
+      const dx = (ev.clientX - s.x) / s.W, dy = (ev.clientY - s.y) / s.H;
+      p = mode === "move"
+        ? { x: clamp01(s.l + dx, 0, 1 - s.w), y: clamp01(s.t + dy, 0, 1 - s.h), w: s.w, h: s.h }
+        : { x: s.l, y: s.t, w: clamp01(s.w + dx, 0.1, 1 - s.l), h: clamp01(s.h + dy, 0.1, 1 - s.t) };
+      placeBox(box, p);
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      box.classList.remove("moving");
+      layer.classList.remove("dragging");
+      if (p) onMove(box._a, { x: +p.x.toFixed(3), y: +p.y.toFixed(3), w: +p.w.toFixed(3), h: +p.h.toFixed(3) });
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+  box.querySelector(".sim-grip").addEventListener("pointerdown", (e) => start(e, "move"));
+  box.querySelector(".sim-resize").addEventListener("pointerdown", (e) => start(e, "size"));
+}
+
 // 수업 화면 위에 떠 있는 시뮬레이션 창. iframe을 재사용해 조작 상태를 보존한다.
 let floatingSim = null;
 function showFloatingSim(title, html, key) {
