@@ -88,6 +88,15 @@ function showEntry(notice) {
   const pinIn = h("input", { type: "password", inputmode: "numeric", maxlength: 4, autocomplete: "off", required: true });
   const pin2In = h("input", { type: "password", inputmode: "numeric", maxlength: 4, autocomplete: "off" });
   const pin2Row = h("label", { hidden: true }, "비밀번호 한 번 더", pin2In);
+  // 처음 가입할 때만: 수업 중 화면 보기 동의(둘 중 하나를 직접 고른다. 동의하지 않아도 수업에 참여할 수 있다)
+  const consentYes = h("input", { type: "radio", name: "monitor-consent", value: "yes" });
+  const consentNo = h("input", { type: "radio", name: "monitor-consent", value: "no" });
+  const consentRow = h("fieldset", { class: "options consent", hidden: true },
+    h("legend", {}, "수업 중 화면 보기"),
+    h("p", { class: "muted small" }, "수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있게 할까요? 다른 앱이나 탭은 보이지 않습니다. 선생님이 보고 있을 때는 화면에 표시되고, 나중에 언제든 바꿀 수 있습니다. 동의하지 않아도 수업에 참여할 수 있습니다."),
+    h("label", { class: "option" }, consentYes, h("span", {}, "동의합니다")),
+    h("label", { class: "option" }, consentNo, h("span", {}, "동의하지 않습니다")));
+  let newAccount = false;
   const msg = h("p", { class: "msg" }, notice || "");
   const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
   let confirming = false;
@@ -95,7 +104,9 @@ function showEntry(notice) {
   // 이름이나 번호를 바꾸면 확인 단계를 처음부터 다시
   [codeIn, noIn, nameIn].forEach((el) => el.addEventListener("input", () => {
     confirming = false;
+    newAccount = false;
     pin2Row.hidden = true;
+    consentRow.hidden = true;
   }));
 
   const form = h("form", {
@@ -105,6 +116,7 @@ function showEntry(notice) {
       const pin = pinIn.value.trim();
       if (!/^\d{4}$/.test(pin)) { msg.textContent = "비밀번호는 숫자 4자리로 입력하세요."; return; }
       if (confirming && pin2In.value.trim() !== pin) { msg.textContent = "두 비밀번호가 다릅니다. 다시 입력하세요."; return; }
+      if (newAccount && !consentYes.checked && !consentNo.checked) { msg.textContent = "「수업 중 화면 보기」에서 동의 여부를 골라 주세요."; return; }
       btn.disabled = true;
       msg.textContent = "확인 중…";
       const { data, error } = await sb.rpc("student_enter", {
@@ -119,12 +131,14 @@ function showEntry(notice) {
       else if (err === "full") msg.textContent = "이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.";
       else if (err === "need_confirm") {
         confirming = true;
+        newAccount = !data.reset;
         pin2Row.hidden = false;
+        consentRow.hidden = !newAccount;
         pin2In.value = "";
         pin2In.focus();
         msg.textContent = data.reset
           ? "선생님이 비밀번호를 초기화했습니다. 새 비밀번호를 한 번 더 입력하고 입장하세요."
-          : "처음 들어왔네요. 지금 입력한 번호가 내 비밀번호가 됩니다. 한 번 더 입력하고 입장하세요.";
+          : "처음 들어왔네요. 지금 입력한 번호가 내 비밀번호가 됩니다. 한 번 더 입력하고, 아래에서 화면 보기 동의 여부를 고른 뒤 입장하세요.";
       } else if (err === "wrong_pin") msg.textContent = "비밀번호가 틀렸습니다. " + data.left + "번 더 틀리면 10분 동안 잠깁니다.";
       else if (err === "locked") msg.textContent = "비밀번호를 여러 번 틀려 잠겼습니다. " + data.minutes + "분 뒤에 다시 하거나 선생님께 초기화를 부탁하세요.";
       else if (data.token) {
@@ -133,6 +147,7 @@ function showEntry(notice) {
         localStorage.setItem("cra-last-code", code);
         localStorage.setItem(TOKEN_KEY, token);
         localStorage.setItem(ME_KEY, data.class_no + " " + data.name);
+        if (newAccount) { try { await sb.rpc("student_set_monitor", { p_token: token, p_consent: consentYes.checked }); } catch {} }
         following = true;
         poll();
       } else msg.textContent = "알 수 없는 오류입니다. 다시 시도하세요.";
@@ -143,6 +158,7 @@ function showEntry(notice) {
     h("label", {}, "이름", nameIn),
     h("label", {}, "비밀번호 (숫자 4자리)", pinIn),
     pin2Row,
+    consentRow,
     h("div", { class: "tip" },
       h("strong", {}, "처음 들어오나요?"),
       h("p", {}, "처음 입력한 번호가 내 비밀번호가 됩니다. 다른 수업에서도 같은 학번·이름·비밀번호를 씁니다. 휴대폰 비밀번호나 생일은 쓰지 마세요.")),
@@ -265,12 +281,23 @@ function ensureScreenChannel() {
   screenChannel.subscribe((status) => { if (status === "SUBSCRIBED") trackPresence(); });
 }
 
-// 수업 중 화면 보기 동의: 수업에 처음 들어올 때 한 번 묻고 이 기기에 기억한다("yes"/"no"). 언제든 끌 수 있다.
+// 수업 중 화면 보기 동의: 가입할 때 묻고 학생 계정에 저장한다(모든 수업·기기에 적용, 언제든 바꿀 수 있다).
+// 아직 안 정한 기존 학생은 수업 화면에서 한 번 묻는다. 예전 setup.sql(동의 칸 없음)이면 이 기기에만 기억한다.
 const monitorKey = () => "cra-monitor:" + String(state?.lesson.code || code || "").toUpperCase();
-function monitorChoice() { try { return localStorage.getItem(monitorKey()); } catch { return null; } }
-function setMonitorChoice(v) {
-  try { localStorage.setItem(monitorKey(), v); } catch {}
+const monitorInAccount = () => !!(state?.me && "monitor" in state.me);
+function monitorChoice() {
+  if (monitorInAccount()) return state.me.monitor === true ? "yes" : state.me.monitor === false ? "no" : null;
+  try { return localStorage.getItem(monitorKey()); } catch { return null; }
+}
+async function setMonitorChoice(v) {
   if (v === "no") { stopMirror(); if (screenPc) stopScreenShare(); }
+  if (monitorInAccount()) {
+    state.me.monitor = v === "yes";
+    renderScreenNotice();
+    try { await sb.rpc("student_set_monitor", { p_token: token, p_consent: v === "yes" }); } catch {}
+  } else {
+    try { localStorage.setItem(monitorKey(), v); } catch {}
+  }
   renderScreenNotice();
 }
 
@@ -280,7 +307,7 @@ function renderScreenNotice() {
   const canScreen = !!navigator.mediaDevices?.getDisplayMedia && !screenPc;
   let text, buttons;
   if (!choice) {
-    text = "이 수업에서는 수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있습니다. 다른 앱이나 탭은 보이지 않습니다. 동의할까요?";
+    text = "수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있게 할까요? 다른 앱이나 탭은 보이지 않습니다. 한 번 정하면 모든 수업에 적용되고, 언제든 바꿀 수 있습니다.";
     buttons = [h("button", { class: "primary", type: "button", onclick() { setMonitorChoice("yes"); if (screenPending) startMirror(); } }, "동의"),
       h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "동의 안 함")];
   } else if (choice === "yes") {

@@ -65,6 +65,10 @@ create table if not exists students (
   created_at   timestamptz not null default now()
 );
 alter table students add column if not exists last_seen timestamptz;
+-- 수업 중 화면 보기 동의: 가입할 때 한 번 묻고(비어 있으면 아직 안 물음) 학생 계정에 남긴다.
+-- 학생은 언제든 바꿀 수 있고, 교사가 비밀번호를 초기화해도 그대로이며, 계정을 지우면 함께 지워진다.
+alter table students add column if not exists monitor_consent boolean;
+alter table students add column if not exists monitor_consent_at timestamptz;
 
 -- 수업 참여: 학생이 어느 수업에 들어왔는지, 그 수업 화면을 마지막으로 연 때(교사 화면의 '접속 중')
 create table if not exists lesson_students (
@@ -246,7 +250,7 @@ begin
   end if;
 
   return jsonb_build_object(
-    'me', jsonb_build_object('id', s.id, 'class_no', s.class_no, 'name', s.name),
+    'me', jsonb_build_object('id', s.id, 'class_no', s.class_no, 'name', s.name, 'monitor', s.monitor_consent),
     'lesson', jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title, 'slide_dir', l.slide_dir,
                                  'slide_count', l.slide_count, 'page', l.page, 'open', l.open, 'kind', l.kind),
     'activities', coalesce((
@@ -332,11 +336,25 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
       'id', s.id, 'class_no', s.class_no, 'name', s.name, 'pin_set', s.pin_set, 'fails', s.fails,
-      'locked_until', s.locked_until, 'created_at', s.created_at, 'joined_at', m.joined_at, 'last_seen', m.last_seen))
+      'locked_until', s.locked_until, 'created_at', s.created_at, 'joined_at', m.joined_at, 'last_seen', m.last_seen,
+      'monitor', s.monitor_consent))
     from lesson_students m join students s on s.id = m.student_id
     where m.lesson_id = p_lesson), '[]'::jsonb);
 end $$;
 
+-- 학생이 자기 화면 보기 동의를 정하거나 바꾼다(자기 열쇠로만)
+create or replace function student_set_monitor(p_token text, p_consent boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if p_consent is null then return jsonb_build_object('error', 'bad_value'); end if;
+  update students set monitor_consent = p_consent, monitor_consent_at = now()
+    where token = p_token and p_token is not null;
+  if not found then return jsonb_build_object('error', 'logged_out'); end if;
+  return jsonb_build_object('ok', true, 'monitor', p_consent);
+end $$;
+
+revoke all on function student_set_monitor(text, boolean) from public;
+grant execute on function student_set_monitor(text, boolean) to anon, authenticated;
 revoke all on function student_enter(text, text, text, text, boolean) from public;
 revoke all on function student_state(text, text) from public;
 revoke all on function teacher_students(uuid) from public;

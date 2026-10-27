@@ -995,6 +995,9 @@ function drawStudents() {
     return h("tr", { class: locked ? "locked" : "" },
       h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name),
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)), h("td", {}, status),
+      h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
+        : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
+        : h("span", { class: "tag info" }, "아직 안 정함")),
       h("td", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
         h("button", {
@@ -1037,10 +1040,10 @@ function drawStudents() {
   main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", {}, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 「허용」을 눌러야 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)만 보입니다. 노트북·태블릿·휴대폰 모두 되고, 한 번에 한 명씩 봅니다."),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 한 번에 한 명씩 봅니다."),
       h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
     students.length ? h("div", { class: "table-wrap" }, h("table", {},
-      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", "화면 보기", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
 }
 
