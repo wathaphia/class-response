@@ -266,3 +266,9 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 /* 선생님이 지금 보고 있을 때 학생 화면 알림을 눈에 띄게 */
 .screen-share-note.live { border-color: var(--bad); background: #fff5f4; }
 .sim-mirror { margin-top: .5rem; }
+
+/* 실시간 접속 표시: 초록 = 수업 화면을 보고 있음, 주황 = 다른 앱·탭, 회색 = 접속 안 함 */
+.presence { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; vertical-align: middle; background: #c4cad4; }
+.presence.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.presence.away { background: #e08a00; box-shadow: 0 0 0 3px #fff1db; }
+.chip.away { background: #fff1db; color: #a35f00; border-color: #f2c98a; font-weight: 700; }

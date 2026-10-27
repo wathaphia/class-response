@@ -259,9 +259,10 @@ function ensureScreenChannel() {
   screenChannelKey = key;
   // 학생 id가 없으면 학번·이름으로 알아본다(교사 화면도 같은 이름을 함께 보냄)
   screenStudentId = state.me.id || screenKey(state.me);
-  screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
+  // presence: 교사 화면에 접속 상태(보고 있음/다른 앱·탭)만 알린다. 화면 내용은 보내지 않는다.
+  screenChannel = sb.channel(key, { config: { broadcast: { self: false }, presence: { key: screenStudentId } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleScreenSignal(payload));
-  screenChannel.subscribe();
+  screenChannel.subscribe((status) => { if (status === "SUBSCRIBED") trackPresence(); });
 }
 
 // 수업 중 화면 보기 동의: 수업에 처음 들어올 때 한 번 묻고 이 기기에 기억한다("yes"/"no"). 언제든 끌 수 있다.
@@ -337,16 +338,23 @@ function startSimAgents() {
   for (const f of simFrames()) {
     if (simStarted.get(f) === f.srcdoc.length) continue;
     simStarted.set(f, f.srcdoc.length);
-    const start = () => f.contentWindow?.postMessage({ craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
+    const start = () => {
+      f.contentWindow?.postMessage({ craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
+      f.contentWindow?.postMessage({ craRtc: "start" }, "*");   // 캔버스가 있으면 영상(WebRTC)으로도 보낸다
+    };
     f.addEventListener("load", () => { if (mirrorOn) start(); });
     start();
   }
 }
 window.addEventListener("message", async (e) => {
   const m = e.data;
-  if (!m || !m.craSim) return;
+  if (!m || !(m.craSim || m.craRtc)) return;
   const k = simFrames().findIndex((f) => f.contentWindow === e.source);
   if (k < 0) return;
+  if (m.craRtc) {   // 시뮬레이션 영상 연결 신호는 그대로 교사에게 넘긴다
+    if (mirrorOn) sendScreenSignal({ type: "sim-rtc", from: screenStudentId, to: "teacher", k, rtc: m.craRtc, sdp: m.sdp, candidate: m.candidate, idx: m.idx });
+    return;
+  }
   if (!mirrorOn) return e.source.postMessage({ craMirror: "stop" }, "*");
   const size = JSON.stringify(m).length;
   const ack = { craAck: 1 };
@@ -359,7 +367,10 @@ window.addEventListener("message", async (e) => {
   e.source.postMessage(ack, "*");
 });
 ["input", "change", "click", "scroll"].forEach((t) => document.addEventListener(t, queueMirror, { capture: true, passive: true }));
-document.addEventListener("visibilitychange", () => { if (mirrorOn) sendMirror(); });
+document.addEventListener("visibilitychange", () => { trackPresence(); if (mirrorOn) sendMirror(); });
+function trackPresence() {
+  if (screenChannel && screenChannel.state === "joined") screenChannel.track({ away: document.hidden }).catch(() => {});
+}
 
 // 지금 수업 화면을 복사한다(쓰고 있는 답을 속성으로 옮겨 적어 그대로 보이게)
 function mirrorSnapshot() {
@@ -423,6 +434,10 @@ async function handleScreenSignal(message) {
   if (message.type === "stop") {
     stopMirror(false);
     if (screenPc) stopScreenShare(false);
+    return;
+  }
+  if (message.type === "sim-rtc") {   // 교사가 보낸 영상 연결 신호를 해당 시뮬레이션으로
+    if (mirrorOn) simFrames()[message.k]?.contentWindow?.postMessage({ craRtc: message.rtc, sdp: message.sdp, candidate: message.candidate }, "*");
     return;
   }
   if (!screenPending && !screenPc) return;

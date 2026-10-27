@@ -145,6 +145,7 @@ async function loadLesson() {
     if (error) return fatal(error);
     activities = sortActivities(data);
     await loadResponses();
+    ensureTeacherScreenChannel().catch(() => {});   // 실시간 접속 표시를 위해 수업 채널에 미리 붙는다
   }
   draw();
 }
@@ -323,27 +324,55 @@ function refreshRun() {
     : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「질문·설문 만들기」에서 추가하세요.")]));
 }
 
-// 접속한 학생: 초록 = 지금 화면을 열어 둔 학생(20초 안에 서버에 물어봄), ✓ = 이 쪽 활동에 답함
+// ---------- 실시간 접속 표시 ----------
+// 학생 화면은 수업 채널에 접속 상태(보고 있음/다른 앱·탭)만 알린다(Supabase Presence). 화면 데이터는 보내지 않는다.
+// 채널에 붙기 전에는 예전처럼 마지막 접속 시각(20초)으로 판단한다.
 const ONLINE_MS = 20000;
+const PRESENCE_TEXT = { on: "수업 화면을 보고 있음", away: "접속했지만 다른 앱·탭에 있음", off: "접속 안 함" };
+let presence = {};   // 학생 id 또는 학번·이름 키 → { away }
+function presenceOf(s) {
+  if (!screenChannel || screenChannel.state !== "joined") return s.last_seen && Date.now() - Date.parse(s.last_seen) < ONLINE_MS ? "on" : "off";
+  const p = presence[s.id] || presence[screenKey(s)];
+  return p ? (p.away ? "away" : "on") : "off";
+}
+function setDot(el, st) {
+  el.className = "presence " + st;
+  el.title = PRESENCE_TEXT[st];
+  el.setAttribute("aria-label", PRESENCE_TEXT[st]);
+}
+function presenceDot(s) {
+  const el = h("span", { "data-sid": s.id });
+  setDot(el, presenceOf(s));
+  return el;
+}
+function updatePresence() {
+  presence = {};
+  for (const [k, metas] of Object.entries(screenChannel ? screenChannel.presenceState() : {})) presence[k] = { away: metas.every((m) => m.away) };
+  document.querySelectorAll(".presence[data-sid]").forEach((el) => {
+    const s = students.find((x) => x.id === el.dataset.sid);
+    if (s) setDot(el, presenceOf(s));
+  });
+  if (tab === "run" && run) refreshRun();
+}
+
+// 접속한 학생: 초록 = 수업 화면을 보고 있음, 주황 = 다른 앱·탭, ✓ = 이 쪽 활동에 답함
 function rosterChips(shown, big) {
-  const now = Date.now();
   const ids = new Set(shown.map((a) => a.id));
   return h("div", { class: "roster" + (big ? " big" : "") }, students.map((s) => {
-    const on = s.last_seen && now - Date.parse(s.last_seen) < ONLINE_MS;
+    const st = presenceOf(s);
     const done = shown.length && responses.some((r) => r.student_id === s.id && ids.has(r.activity_id));
-    return h("span", { class: "chip" + (on ? " on" : "") + (done ? " done" : ""), title: on ? "접속 중" : "접속 끊김" }, nameOf(s));
+    return h("span", { class: "chip" + (st === "on" ? " on" : st === "away" ? " away" : "") + (done ? " done" : ""), title: PRESENCE_TEXT[st] }, nameOf(s));
   }));
 }
 
 function drawRoster(shown) {
-  const now = Date.now();
-  const online = students.filter((s) => s.last_seen && now - Date.parse(s.last_seen) < ONLINE_MS).length;
+  const online = students.filter((s) => presenceOf(s) !== "off").length;
   run.roster.replaceChildren(
     h("div", { class: "row between" },
       h("h2", {}, "접속 중 " + online + "명", h("span", { class: "muted small" }, " · 입장 " + students.length + "명")),
       h("button", { class: "ghost", type: "button", onclick() { openModal("입장한 학생", rosterChips(shown, true)); } }, "크게 보기")),
     students.length ? rosterChips(shown) : h("p", { class: "muted small" }, "아직 입장한 학생이 없습니다."),
-    students.length ? h("p", { class: "muted small" }, "초록색: 지금 접속 중 · ✓: " + (lesson.slide_count ? "이 쪽" : "") + " 활동에 답함") : h("span", {}));
+    students.length ? h("p", { class: "muted small" }, "초록: 수업 화면을 보고 있음 · 주황: 다른 앱·탭 · ✓: " + (lesson.slide_count ? "이 쪽" : "") + " 활동에 답함") : h("span", {}));
 }
 
 function runBlock(a) {
@@ -705,6 +734,7 @@ function ensureTeacherScreenChannel() {
   screenChannelKey = key;
   screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
+  screenChannel.on("presence", { event: "sync" }, updatePresence);
   screenChannelReady = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("화면 공유 연결을 준비하지 못했습니다. 새로고침해 주세요.")), 10000);
     screenChannel.subscribe((status) => {
@@ -728,6 +758,8 @@ async function handleTeacherScreenSignal(message) {
       await showMirror(watch, message);
     } else if (message.type === "sim") {
       await takeSimFrame(watch, message);
+    } else if (message.type === "sim-rtc") {
+      await simRtc(watch, message);
     } else if (message.type === "offer" && message.sdp) {
       await watch.pc.setRemoteDescription(message.sdp);
       for (const candidate of watch.queued) await watch.pc.addIceCandidate(candidate);
@@ -805,7 +837,76 @@ function paintSim(watch, k) {
   v.style.height = s.h + "px";
   v.style.transform = "scale(" + scale + ")";
   v.parentNode.style.height = Math.round(s.h * scale) + "px";
+  // 영상으로 받는 캔버스는 그림 자리를 영상으로 바꾼다(수업 화면이 다시 그려지면 다시 끼운다)
+  if (s.stream && s.vidIdx != null) {
+    const img = d.querySelector('img[data-cra-canvas="' + s.vidIdx + '"]');
+    if (img) {
+      const vid = d.createElement("video");
+      vid.muted = true;
+      vid.autoplay = true;
+      vid.playsInline = true;
+      vid.className = img.className;
+      vid.setAttribute("style", (img.getAttribute("style") || "") + ";object-fit:contain;background:#000");
+      vid.srcObject = s.stream;
+      img.replaceWith(vid);
+      vid.play().catch(() => {});
+    }
+  }
   if (d.scrollingElement) { d.scrollingElement.scrollTop = s.sy || 0; d.scrollingElement.scrollLeft = s.sx || 0; }
+}
+
+// 시뮬레이션 영상(WebRTC): 학생 시뮬레이션의 가장 큰 캔버스를 15~30 FPS 영상으로 받는다.
+// 연결되면 학생 쪽은 그 캔버스의 JPEG 전송을 멈추고, 연결되지 않으면(학교망이 막는 등) 그림 전송이 그대로 이어진다.
+const RTC_ICE = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
+async function simRtc(watch, m) {
+  const send = (rtc, extra) => sendTeacherScreenSignal({ type: "sim-rtc", from: "teacher", to: m.from, k: m.k, rtc, ...extra });
+  if (m.rtc === "offer" && m.sdp) {
+    watch.rtc.get(m.k)?.pc.close();
+    const pc = new RTCPeerConnection({ iceServers: RTC_ICE });
+    const r = { pc, queued: [] };
+    watch.rtc.set(m.k, r);
+    pc.ontrack = (e) => {
+      const s = watch.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };
+      s.stream = e.streams[0] || new MediaStream([e.track]);
+      s.vidIdx = m.idx;
+      watch.sims.set(m.k, s);
+      paintSim(watch, m.k);
+    };
+    pc.onicecandidate = (e) => e.candidate && send("ice", { candidate: e.candidate.toJSON() });
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") send("ok");
+      if (pc.connectionState === "failed") { send("fail"); watch.videoText = ""; }
+    };
+    await pc.setRemoteDescription(m.sdp);
+    for (const c of r.queued) await pc.addIceCandidate(c).catch(() => {});
+    r.queued = [];
+    await pc.setLocalDescription(await pc.createAnswer());
+    await send("answer", { sdp: pc.localDescription.toJSON() });
+  } else if (m.rtc === "ice" && m.candidate) {
+    const r = watch.rtc.get(m.k);
+    if (!r) return;
+    if (r.pc.remoteDescription) await r.pc.addIceCandidate(m.candidate).catch(() => {});
+    else r.queued.push(m.candidate);
+  }
+}
+
+// 영상의 실제 FPS와 지연(왕복 시간의 절반 + 재생 대기 시간)을 1초마다 WebRTC 통계에서 읽는다
+async function readRtcStats(watch) {
+  for (const r of watch.rtc.values()) {
+    if (r.pc.connectionState !== "connected") continue;
+    let fps = 0, rtt = 0, jb = 0, relay = false;
+    (await r.pc.getStats()).forEach((x) => {
+      if (x.type === "inbound-rtp" && x.kind === "video") {
+        fps = x.framesPerSecond || 0;
+        if (x.jitterBufferEmittedCount) jb = (x.jitterBufferDelay / x.jitterBufferEmittedCount) * 1000;
+      }
+      if (x.type === "candidate-pair" && x.nominated && x.state === "succeeded") rtt = (x.currentRoundTripTime || 0) * 1000;
+      if (x.type === "remote-candidate" && x.candidateType === "relay") relay = true;
+    });
+    watch.videoText = "영상 " + Math.round(fps) + " FPS · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
+    watch.simInfo.textContent = watch.videoText;
+    return;
+  }
 }
 
 async function takeSimFrame(watch, m) {
@@ -820,8 +921,8 @@ async function takeSimFrame(watch, m) {
   paintSim(watch, m.k);
   // 지연은 학생 기기 시계 기준이라 두 기기 시계가 어긋나면 조금 틀릴 수 있다
   const lag = m.t ? now - m.t : null;
-  watch.simInfo.textContent = "시뮬레이션 " + (s.times.length / 2).toFixed(1) + " FPS"
-    + (lag != null && lag >= 0 && lag < 60000 ? " · 지연 " + Math.round(lag) + " ms" : "");
+  watch.simInfo.textContent = watch.videoText || ("시뮬레이션 " + (s.times.length / 2).toFixed(1) + " FPS"
+    + (lag != null && lag >= 0 && lag < 60000 ? " · 지연 " + Math.round(lag) + " ms" : ""));
 }
 
 async function showMirror(watch, m) {
@@ -858,10 +959,13 @@ async function watchStudentScreen(s) {
       h("p", { class: "muted small" }, "학생의 수업 화면(보고 있는 쪽, 쓰고 있는 답)은 바뀔 때마다, 시뮬레이션은 초당 최대 5장으로 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
       sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
       pc.close();
+      clearInterval(watch.statsTimer);
+      for (const r of watch.rtc.values()) r.pc.close();
       screenWatchers.delete(s.id);
       screenWatchers.delete(screenKey(s));
     });
-    const watch = { pc, video, status, frame, ready, html: "", sims: new Map(), simInfo, queued: [], close };
+    const watch = { pc, video, status, frame, ready, html: "", sims: new Map(), simInfo, rtc: new Map(), videoText: "", queued: [], close };
+    watch.statsTimer = setInterval(() => readRtcStats(watch).catch(() => {}), 1000);
     screenWatchers.set(s.id, watch);
     screenWatchers.set(screenKey(s), watch);   // 예전 setup.sql 이면 학생이 학번·이름으로 답한다
     pc.ontrack = (e) => { video.srcObject = e.streams[0]; video.hidden = false; };
@@ -885,7 +989,7 @@ function drawStudents() {
       : !s.pin_set ? h("span", { class: "tag info" }, "초기화됨 · 새 비밀번호 기다리는 중")
       : h("span", { class: "tag ok" }, "정상");
     return h("tr", { class: locked ? "locked" : "" },
-      h("td", {}, s.class_no), h("td", {}, s.name),
+      h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name),
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)), h("td", {}, status),
       h("td", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
@@ -929,7 +1033,8 @@ function drawStudents() {
   main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", {}, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 「허용」을 눌러야 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)만 보입니다. 노트북·태블릿·휴대폰 모두 되고, 한 번에 한 명씩 봅니다.")),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 「허용」을 눌러야 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)만 보입니다. 노트북·태블릿·휴대폰 모두 되고, 한 번에 한 명씩 봅니다."),
+      h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
     students.length ? h("div", { class: "table-wrap" }, h("table", {},
       h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
