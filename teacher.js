@@ -522,7 +522,7 @@ function refreshRun() {
   const sn = slideNo(L, L.page);
   const shown = activities.filter((a) => L.slide_count === 0 || onPage(a, sn) || a.page == null);
   // 「슬라이드 자리에 띄우기」 시뮬레이션: 교사 화면에서도 슬라이드 대신 띄운다(다시 그릴 때마다 새로 띄우지 않게 key로 확인)
-  const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, sn)) : null;
+  const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, sn)) || shown.find((a) => a.sim_full && allPagesSim(a)) || null : null;
   const simKey = stageSim ? stageSim.id + ":" + (stageSim.html || "").length + ":" + stageSim.title : "";
   if (!isPptx(L)) run.img.hidden = !!stageSim;
   const pptFrame = run.stage.querySelector(".pptx-frame");
@@ -533,7 +533,7 @@ function refreshRun() {
     run.simStage.replaceChildren(...(stageSim ? [simFrame(stageSim.html, stageSim.title)] : []));
   }
   // 슬라이드 위에 얹는 시뮬레이션: 위쪽 막대를 끌어 옮기면 바로 저장되고 학생 화면에도 그 자리에 보인다
-  const overs = L.slide_count > 0 && !isPptx(L) && !stageSim ? shown.filter((a) => isOverSim(a) && onPage(a, sn)) : [];
+  const overs = L.slide_count > 0 && !isPptx(L) && !stageSim ? shown.filter((a) => isOverSim(a) && simOnSlide(a, sn)) : [];
   syncSimLayer(run.simLayer, run.img);
   renderSimLayer(run.simLayer, overs, {
     load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: true,
@@ -720,10 +720,85 @@ const buildListKey = () => lesson.id + "|" + JSON.stringify(activities.map((a) =
 
 // 활동 칸의 「수정/수정 중」 표시만 지금 편집 중인 활동에 맞춘다
 function markEditingRow(row, a) {
-  const on = !!(editing && editing.id === a.id);
+  const on = !!(editing && (editing.blocks ? editing.blocks.some((b) => b.id === a.id) : editing.id === a.id));
   row.classList.toggle("on", on);
   const btn = row.querySelector(".act-edit");
   if (btn) { btn.className = "act-edit " + (on ? "primary" : "ghost"); btn.textContent = on ? "수정 중" : "수정"; }
+}
+
+// 활동 목록의 쪽 칸: 숫자와 「쪽」을 나눠 두고, ▲▼를 누르거나 숫자를 고쳐 쪽을 옮긴다(여러 쪽에 걸친 활동은 끝 쪽도 함께)
+function pageCell(a) {
+  if (a.page == null || !lesson.slide_count) return h("strong", { class: "act-page" }, whereText(a));
+  const max = Math.max(slideTotal(lesson), 1);
+  const num = h("input", { type: "text", inputmode: "numeric", maxlength: 3, class: "act-num", value: a.page, "aria-label": "쪽 번호",
+    onkeydown(ev) { if (ev.key === "Enter") num.blur(); else if (ev.key === "Escape") { num.value = a.page; num.blur(); } },
+    onchange() { const n = parseInt(num.value, 10); if (n >= 1) movePage(a, n); else num.value = a.page; } });
+  const step = (d) => h("button", { type: "button", class: "act-step", "aria-label": d > 0 ? "한 쪽 뒤로" : "한 쪽 앞으로",
+    disabled: d > 0 ? a.page >= max : a.page <= 1, onclick() { movePage(a, a.page + d); } }, d > 0 ? "▲" : "▼");
+  return h("div", { class: "act-page split" },
+    h("div", { class: "act-spin" }, step(1), num, step(-1)),
+    h("span", { class: "act-unit" }, (a.page_to > a.page ? "~" + a.page_to : "") + "쪽"));
+}
+
+async function movePage(a, n) {
+  const max = Math.max(slideTotal(lesson), 1);
+  n = Math.max(1, Math.min(n, max));
+  if (n === a.page) { drawBuild(); return; }
+  const change = { page: n };
+  if (a.page_to > a.page) { const to = Math.min(a.page_to + n - a.page, max); change.page_to = to > n ? to : null; }
+  Object.assign(a, change);
+  // 이 활동만 고치는 중이면 편집기의 표시 위치도 맞춘다
+  if (editing && (editing.blocks ? editing.blocks.length === 1 && editing.blocks[0].id === a.id : editing.id === a.id)) Object.assign(editing, change);
+  drawBuild();
+  const { error } = await sb.from("activities").update(change).eq("id", a.id);
+  if (error) alert("쪽을 바꾸지 못했습니다: " + error.message);
+}
+
+// 끌어서 순서 바꾸기: 같은 쪽 활동끼리만. 다른 쪽 활동 위에 놓으면 그 쪽이 앞이면 맨 앞, 뒤면 맨 뒤로 간다
+let dragActId = null;
+const pageGroup = (a) => (a.page ?? "") + "|" + (a.page_to > a.page ? a.page_to : "");
+function dragRow(row, a) {
+  const after = (ev) => {
+    const r = row.getBoundingClientRect();
+    const cols = getComputedStyle(row.parentNode).gridTemplateColumns.split(" ").length;
+    return cols > 1 ? ev.clientX > r.left + r.width / 2 : ev.clientY > r.top + r.height / 2;
+  };
+  const clear = () => main.querySelectorAll(".act-row.drop-before, .act-row.drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
+  // 입력칸·버튼·시뮬레이션 칸에서 누르면 끌지 않는다(숫자를 고치거나 버튼을 누를 수 있게)
+  row.addEventListener("mousedown", (ev) => { row.draggable = !ev.target.closest("input, textarea, button, select, a, iframe"); });
+  row.addEventListener("dragstart", (ev) => { dragActId = a.id; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", a.id); row.classList.add("dragging"); });
+  row.addEventListener("dragend", () => { dragActId = null; row.classList.remove("dragging"); row.draggable = false; clear(); });
+  row.addEventListener("dragover", (ev) => {
+    if (!dragActId || dragActId === a.id) return;
+    ev.preventDefault();
+    clear();
+    row.classList.add(after(ev) ? "drop-after" : "drop-before");
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+  row.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    const id = dragActId, last = after(ev);
+    clear();
+    dragActId = null;
+    if (id && id !== a.id) reorderActivity(id, a.id, last);
+  });
+}
+
+async function reorderActivity(id, targetId, after) {
+  const src = activities.find((x) => x.id === id), target = activities.find((x) => x.id === targetId);
+  if (!src || !target) return;
+  const group = activities.filter((x) => pageGroup(x) === pageGroup(src));
+  const rest = group.filter((x) => x !== src);
+  const at = pageGroup(target) === pageGroup(src) ? rest.indexOf(target) + (after ? 1 : 0)
+    : activities.indexOf(target) < activities.indexOf(group[0]) ? 0 : rest.length;
+  rest.splice(at, 0, src);
+  const changed = rest.map((x, i) => [x, i]).filter(([x, i]) => x.sort !== i);
+  if (!changed.length) return;
+  changed.forEach(([x, i]) => { x.sort = i; });
+  drawBuild();
+  const done = await Promise.all(changed.map(([x, i]) => sb.from("activities").update({ sort: i }).eq("id", x.id)));
+  const bad = done.find((r) => r.error);
+  if (bad) alert("순서를 저장하지 못했습니다: " + bad.error.message);
 }
 
 function drawBuild() {
@@ -733,19 +808,14 @@ function drawBuild() {
   const startPage = lesson.slide_count ? slideNo(lesson, lesson.page) : null;
   const kinds = h("div", { class: "kinds" },
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "sim", title: "", page: startPage, sim_full: lesson.slide_count > 0, html: "", questions: [] };
+      editing = { kind: "sim", title: "", page: startPage, sim_full: false, sim_place: lesson.slide_count ? { ...SIM_PLACE_DEFAULT } : null, html: "", questions: [] };
       drawBuild();
     } }, h("strong", {}, "시뮬레이션")),
+    // 설명 및 질문: 설명 칸·질문 칸을 여러 개 만들고, 저장하면 칸마다 활동 하나가 된다
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "survey", title: "", page: startPage, show_answer: false, named: false, shared: false,
-        questions: [{ id: newId(), type: "info", text: "" }] };
+      editing = { kind: "compose", page: startPage, page_to: null, blocks: [questionBlock()] };
       drawBuild();
-    } }, h("strong", {}, "설명")),
-    // 질문: 예전의 슬라이드 질문·설문·퀴즈를 하나로. 질문마다 「퀴즈」를 켜면 저장할 때 퀴즈(자동 채점)가 된다
-    h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "survey", title: "", page: startPage, show_answer: true, named: false, shared: false, questions: [newQuestion("choice")] };
-      drawBuild();
-    } }, h("strong", {}, "질문")));
+    } }, h("strong", {}, "설명 및 질문")));
   const asideKids = [h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds), editing ? editor() : null];
   const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
   const key = buildListKey();
@@ -765,16 +835,22 @@ function drawBuild() {
       h("div", { class: "act-head stack" },
         // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
         h("div", { class: "act-id" },
-          h("strong", { class: "act-page" }, whereText(a)),
+          pageCell(a),
           h("div", { class: "act-name" },
             h("p", { class: "muted small" }, activityName(a)),
             h("h3", {}, a.title))),
         h("div", { class: "act-btns" },
           a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
           h("button", { type: "button", class: "act-edit",
-            onclick() { editing = JSON.parse(JSON.stringify(a)); drawBuild(); main.querySelector(".editor")?.scrollIntoView({ block: "start" }); } }))),
+            onclick() {
+              const copy = JSON.parse(JSON.stringify(a));
+              editing = copy.kind === "sim" ? copy : toCompose(copy);
+              drawBuild();
+              main.querySelector(".editor")?.scrollIntoView({ block: "start" });
+            } }))),
       h("div", { class: "act-body" }, activityPreview(a)));
     markEditingRow(row, a);
+    dragRow(row, a);
     return row;
   }) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
   // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
@@ -818,10 +894,6 @@ function pinBuild() {
 
 function simEditor() {
   const e = editing;
-  // 얹기·크게는 쪽이 있어야 붙으므로 화면에 보이는 쪽 번호가 그대로 저장되게 한다
-  // (예전에는 칸을 고치지 않으면 빈 값=「언제든」으로 저장되어 슬라이드에 얹히지 않았다)
-  const needsPage = () => !!(e.sim_full || e.sim_place);
-  if (lesson.slide_count && e.page == null && needsPage()) e.page = slideNo(lesson, lesson.page);
   const msg = h("p", { class: "error" });
   const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 열의 전도 시뮬레이션", oninput() { e.title = title.value; } });
   const code = h("textarea", { rows: 8, class: "mono", spellcheck: "false", placeholder: "<!DOCTYPE html> 로 시작하는 코드를 통째로 붙여넣거나, 위에서 html 파일을 고르세요.", oninput() { e.html = code.value; size.textContent = sizeText(); } }, e.html || "");
@@ -837,13 +909,12 @@ function simEditor() {
     if (!e.title.trim()) { e.title = f.name.replace(/\.html?$/i, ""); title.value = e.title; }
     msg.textContent = "";
   } });
-  const place = placeField(e, () => !needsPage());
+  const place = placeField(e);
   async function saveSim() {
     e.title = e.title.trim();
     if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
     if (!(e.html || "").trim()) { msg.textContent = "html 파일을 고르거나 코드를 붙여넣으세요."; return; }
     if (e.html.length > 500000) { msg.textContent = "코드가 너무 깁니다(최대 50만 자)."; return; }
-    if (lesson.slide_count && (e.sim_full || e.sim_place) && !(e.page >= 1)) { msg.textContent = "몇 쪽 슬라이드에 넣을지 적어 주세요."; return; }
     const row = { kind: "sim", title: e.title, page: lesson.slide_count ? e.page : null, html: e.html, sim_full: !!e.sim_full && lesson.slide_count > 0,
       sim_place: lesson.slide_count && !e.sim_full && e.sim_place ? e.sim_place : null, show_answer: false, named: false, questions: [] };
     const to = pageTo(e);
@@ -861,21 +932,15 @@ function simEditor() {
   return h("section", { class: "card stack editor" },
     h("h2", {}, e.id ? "시뮬레이션 고치기" : "시뮬레이션 넣기"),
     place,
+    lesson.slide_count ? h("fieldset", { class: "options" }, h("legend", {}, "어떻게 보일까요?"),
+      [["over", "슬라이드 위에 얹기"], ["full", "슬라이드 자리에 크게"], ["card", "슬라이드 아래 카드"]].map(([k, name]) =>
+        h("label", { class: "option" },
+          h("input", { type: "radio", name: "sim-place", checked: k === (e.sim_full ? "full" : e.sim_place ? "over" : "card"),
+            onchange() { e.sim_full = k === "full"; e.sim_place = k === "over" ? (e.sim_place || { ...SIM_PLACE_DEFAULT }) : null; } }),
+          h("strong", {}, name)))) : null,
     h("label", {}, "제목", title),
     h("label", {}, "html 파일 올리기", file),
     h("label", {}, "또는 코드 붙여넣기", code), size,
-    lesson.slide_count ? h("fieldset", { class: "options" }, h("legend", {}, "어떻게 보일까요?"),
-      [["over", "슬라이드 위에 얹기", "테두리 없이 슬라이드의 한 자리에 붙습니다. 「수업 진행」 화면에서 위쪽 막대를 끌어 옮기고, 오른쪽 아래 모서리를 끌어 크기를 바꿉니다."],
-        ["full", "슬라이드 자리에 크게", "그 쪽에서는 슬라이드 대신 시뮬레이션이 크게 보입니다."],
-        ["card", "슬라이드 아래 카드", "슬라이드 아래에 카드로 보입니다."]].map(([k, name, sub]) =>
-        h("label", { class: "option" },
-          h("input", { type: "radio", name: "sim-place", checked: k === (e.sim_full ? "full" : e.sim_place ? "over" : "card"),
-            onchange() {
-              e.sim_full = k === "full"; e.sim_place = k === "over" ? (e.sim_place || { ...SIM_PLACE_DEFAULT }) : null;
-              if (needsPage() && e.page == null) e.page = slideNo(lesson, lesson.page);
-              place.refresh();
-            } }),
-          h("span", {}, h("strong", {}, name), " · ", h("span", { class: "muted small" }, sub))))) : null,
     lesson.slide_count ? h("p", { class: "muted small" }, "슬라이드 사이에 따로 넣으려면 PPT에 「시뮬레이션」 같은 빈 슬라이드를 한 장 끼워 두고, 그 쪽에 「슬라이드 자리에 크게」로 넣으세요.") : null,
     h("p", { class: "muted small" }, "시뮬레이션은 격리된 칸에서 실행되어 이 웹앱의 로그인 정보에 접근할 수 없습니다. 학생은 이 카드에 답을 입력하지 않습니다."),
     msg,
@@ -889,7 +954,7 @@ function editorButtons(onSave, msg, askText, ...extra) {
   return h("div", { class: "row end" }, extra,
     h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
     h("button", { class: "primary", type: "button", onclick: onSave }, "저장"),
-    e.id ? h("button", { class: "ghost danger", type: "button", async onclick() {
+    e.id && askText ? h("button", { class: "ghost danger", type: "button", async onclick() {
       if (!confirm(askText)) return;
       const { error } = await sb.from("activities").delete().eq("id", e.id);
       if (error) { msg.textContent = error.message; return; }
@@ -907,8 +972,7 @@ function toggleBox(text, on, onchange, cls) {
 }
 
 // 표시 위치: 「모든 페이지」를 켜면 쪽과 상관없이 늘 보이고(학생 화면의 「언제든 할 수 있는 활동」), 끄면 n쪽부터 n쪽까지.
-// canAll()이 거짓이면 「모든 페이지」를 켤 수 없다(시뮬레이션 얹기·크게). 바깥에서 e.page를 바꾸면 refresh()로 다시 맞춘다.
-function placeField(e, canAll) {
+function placeField(e) {
   if (!lesson.slide_count) return Object.assign(document.createDocumentFragment(), { refresh() {} });
   const max = Math.max(slideTotal(lesson), 1);
   const pageIn = h("input", { type: "number", min: 1, max, value: e.page ?? slideNo(lesson, lesson.page), class: "num page-num", "aria-label": "시작 쪽",
@@ -921,7 +985,6 @@ function placeField(e, canAll) {
   const refresh = () => {
     const on = e.page == null;
     all.set(on);
-    all.disabled = !on && !!canAll && !canAll();
     if (!on) pageIn.value = e.page;
     pageIn.disabled = pageToIn.disabled = on;
     hint.textContent = on ? "모든 쪽에서 보입니다." : "끝 쪽을 비우면 시작 쪽에만 보입니다.";
@@ -934,176 +997,217 @@ function placeField(e, canAll) {
 }
 
 function editor() {
-  const e = editing;
-  if (e.kind === "sim") return simEditor();
-  if (isInfoActivity(e)) {
-    const msg = h("p", { class: "error" });
-    const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 활동 안내", oninput() { e.title = title.value; } });
-    const body = h("textarea", { rows: 10, maxlength: 5000, placeholder: "설명과 링크를 입력하세요. https:// 주소는 학생 화면에서 클릭할 수 있습니다.", oninput() { e.questions[0].text = body.value; } }, e.questions[0].text || "");
-    return h("section", { class: "card stack editor" },
-      h("h2", {}, e.id ? "설명 고치기" : "설명 만들기"),
-      placeField(e),
-      h("label", {}, "제목", title), h("label", {}, "설명문", body),
-      h("p", { class: "muted small" }, "학생은 이 카드에 답을 입력하지 않습니다."), msg,
-      editorButtons(async () => {
-        e.title = e.title.trim(); e.questions[0].text = e.questions[0].text.trim();
-        if (!e.title || !e.questions[0].text) { msg.textContent = "제목과 설명문을 입력하세요."; return; }
-        const row = { kind: "survey", title: e.title, page: e.page, show_answer: false, named: false, questions: e.questions };
-        const to = pageTo(e);
-        if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
-        if (to !== undefined) row.page_to = to;
-        if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
-        const saved = await save("activities", row, e.id);
-        if (!saved) return;
-        const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
-        activities = sortActivities(data || []); editing = JSON.parse(JSON.stringify(saved)); drawBuild(); flash("저장했습니다.");
-      }, msg, "설명 카드를 지울까요?"));
-  }
-  if (e.description === undefined) e.description = activityDescription(e);
-  for (const q of e.questions) {
+  if (editing.kind === "sim") return simEditor();
+  if (editing.kind !== "compose") editing = toCompose(editing);
+  return composeEditor();
+}
+
+// ---------- 설명 및 질문 ----------
+// 편집기에서는 설명 칸·질문 칸을 몇 개든 만들고, 저장하면 칸마다 활동 하나가 된다(표시 위치는 모두 같음).
+const infoBlock = (b) => ({ bid: newId(), type: "info", title: "", text: "", ...b });
+const questionBlock = (b) => ({ bid: newId(), type: "q", show_answer: true, title: "", q: newQuestion("choice"), ...b });
+const firstLine = (text) => text.split("\n").map((x) => x.trim()).find(Boolean)?.slice(0, 100) || "";
+
+// 저장된 활동 하나를 편집기 칸으로. 예전 활동의 설명문(intro)은 앞의 설명 칸으로 꺼내고,
+// 질문이 여럿이면 질문마다 칸을 만든다(첫 칸만 원래 활동을 고치고, 나머지는 저장할 때 새 활동이 된다)
+function toCompose(a) {
+  const base = { kind: "compose", page: a.page ?? null, page_to: a.page_to ?? null };
+  if (isInfoActivity(a)) return { ...base, blocks: [infoBlock({ id: a.id, qid: a.questions[0].id, title: a.title, text: a.questions[0].text || "" })] };
+  const blocks = [];
+  const intro = activityDescription(a);
+  if (intro) blocks.push(infoBlock({ text: intro }));
+  (a.questions || []).forEach((q0, i) => {
+    const q = { ...q0 };
+    delete q.intro;
+    delete q.description;
     // 예전 퀴즈는 정답이 있는 질문을 퀴즈로 본다(q.quiz는 편집할 때만 쓰고 저장하지 않는다)
-    if (q.quiz === undefined) q.quiz = e.kind === "quiz" && q.answer != null;
-    if (q.anon === undefined) q.anon = isAnon(e, q);
-  }
-  // 제목을 비우면 첫 질문 글로 정한다. 제목·설명문 칸은 「설명 추가」를 눌렀을 때만(직접 정한 제목이나 설명문이 있으면 처음부터) 보인다
-  const autoTitle = () => ((e.questions.find((q) => (q.text || "").trim()) || {}).text || "").trim().slice(0, 100);
-  if (e.showIntro === undefined) e.showIntro = !!(e.description || "").trim() || (!!e.id && e.title !== autoTitle());
-  const hasResponses = e.id && responses.some((r) => r.activity_id === e.id);
+    q.quiz = a.kind === "quiz" && q.answer != null;
+    q.anon = isAnon(a, q);
+    if (isChoice(q) && !(q.options && q.options.length)) q.options = ["", ""];
+    // 직접 정한 제목만 남긴다(질문 글과 같으면 질문 글을 따라감)
+    blocks.push(questionBlock({ id: i === 0 ? a.id : null, kind: a.kind, show_answer: a.show_answer, title: i === 0 && a.title !== q.text ? a.title : "", q }));
+  });
+  return { ...base, blocks };
+}
+
+function composeEditor() {
+  const e = editing;
   const msg = h("p", { class: "error" });
-  const redraw = (focus) => { const y = scrollY; drawBuild(); scrollTo(0, y); if (focus) main.querySelector('.editor [data-focus="' + focus + '"]')?.focus(); };
-
-  const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "비우면 첫 질문 글이 제목이 됩니다", oninput() { e.title = title.value; } });
-  const description = h("textarea", { rows: 4, maxlength: 2000, placeholder: "질문 전체에 대한 설명을 입력하세요. 웹 주소는 학생 화면에서 링크가 됩니다.", oninput() { e.description = description.value; } }, e.description || "");
-  const intro = e.showIntro
-    ? h("div", { class: "intro-box stack" }, h("label", {}, "제목", title), h("label", {}, "설명문 (선택)", description))
-    : h("button", { type: "button", class: "add-box", onclick() { e.showIntro = true; redraw("intro"); } }, "+ 설명 추가");
-  title.dataset.focus = "intro";
-
-  const qs = e.questions.map((q, i) => {
-    const choice = isChoice(q);
-    // 객관식 ↔ 서술형. 서술형은 자동 채점하지 않으므로 퀴즈도 꺼진다
-    const setType = (toChoice) => {
-      if (toChoice === choice) return;
-      q.type = toChoice ? "choice" : "long";
-      if (toChoice) q.options = q.options && q.options.length ? q.options : ["", ""];
-      else { q.quiz = false; delete q.explain; }
-      delete q.answer;
+  const redraw = (focus) => { drawBuild(); if (focus) main.querySelector('.editor [data-focus="' + focus + '"]')?.focus(); };
+  const hasResponses = e.blocks.some((b) => b.id && responses.some((r) => r.activity_id === b.id));
+  let qn = 0, inN = 0;
+  const blockEls = e.blocks.map((b) => {
+    // 칸 오른쪽 위 「삭제」: 저장한 칸이면 그 활동을 바로 지운다
+    const del = h("button", { type: "button", class: "blk-del", async onclick() {
+      if (b.id) {
+        if (!confirm("이 " + (b.type === "info" ? "설명" : "질문") + "을 지울까요? 학생 응답도 함께 지워집니다.")) return;
+        const { error } = await sb.from("activities").delete().eq("id", b.id);
+        if (error) { msg.textContent = error.message; return; }
+        activities = activities.filter((a) => a.id !== b.id);
+      }
+      e.blocks = e.blocks.filter((x) => x !== b);
       redraw();
-    };
-    const seg = h("div", { class: "seg", role: "group", "aria-label": "질문 종류" },
-      h("button", { type: "button", class: choice ? "on" : "", "aria-pressed": String(choice), onclick() { setType(true); } }, "객관식"),
-      h("button", { type: "button", class: choice ? "" : "on", "aria-pressed": String(!choice), onclick() { setType(false); } }, "서술형"));
-    const quizBtn = h("button", {
-      type: "button", class: "quiz-toggle" + (q.quiz ? " on" : ""), "aria-pressed": String(!!q.quiz), disabled: !choice,
-      title: choice ? "정답을 정하면 학생이 제출할 때 자동으로 채점합니다." : "객관식 질문만 퀴즈로 채점할 수 있습니다.",
-      onclick() { q.quiz = !q.quiz; if (!q.quiz) { delete q.answer; delete q.explain; } redraw(); },
-    }, "퀴즈");
-    const anon = toggleBox("익명", q.anon, (on) => { q.anon = on; }, "anon-tog");
-    anon.title = "켜 두면 학생에게 공개할 때 이 질문의 답에 이름이 보이지 않습니다.";
-    // 서술형은 질문 칸을 크게 해 객관식(항목 두 개)과 높이를 맞춘다(종류를 바꿔도 아래가 밀리지 않게)
-    const text = choice
-      ? h("input", { type: "text", maxlength: 300, value: q.text, placeholder: "질문을 입력하세요", oninput() { q.text = text.value; } })
-      : h("textarea", { class: "q-long", maxlength: 300, placeholder: "질문을 입력하세요", oninput() { q.text = text.value; } }, q.text || "");
-    const answers = () => [].concat(q.answer ?? []);
-    const optRows = choice ? q.options.map((o, j) => {
-      const input = h("input", { type: "text", maxlength: 200, value: o, placeholder: "항목 " + (j + 1), "data-focus": q.id + "-" + j, "aria-label": (j + 1) + "번 항목",
-        oninput() {
-          // 정답으로 고른 항목의 글을 고치면 정답도 따라 바뀐다
-          const old = q.options[j];
-          q.options[j] = input.value;
-          if (q.answer != null) q.answer = Array.isArray(q.answer) ? q.answer.map((x) => (x === old ? input.value : x)) : q.answer === old ? input.value : q.answer;
-        } });
-      const pick = q.quiz ? h("label", { class: "check ans-pick" },
-        h("input", {
-          type: q.type === "multi" ? "checkbox" : "radio", name: "ans-" + q.id, checked: o !== "" && answers().includes(o),
-          onchange(ev) {
-            const v = q.options[j];
-            if (q.type !== "multi") { q.answer = v; return; }
-            const now = new Set(answers());
-            if (ev.target.checked) now.add(v); else now.delete(v);
-            const list = q.options.filter((x) => now.has(x));
-            if (list.length) q.answer = list; else delete q.answer;
-          },
-        }), "정답") : null;
-      const del = h("button", { type: "button", class: "opt-del", "aria-label": (j + 1) + "번 항목 지우기", disabled: q.options.length <= 2,
-        onclick() {
-          const [gone] = q.options.splice(j, 1);
-          if (q.answer != null) {
-            const left = answers().filter((x) => x !== gone);
-            if (!left.length) delete q.answer; else q.answer = q.type === "multi" ? left : left[0];
-          }
-          redraw();
-        } }, "×");
-      return h("div", { class: "opt-row" }, pick, input, del);
-    }) : null;
-    const multi = choice ? toggleBox("복수 선택", q.type === "multi", (on) => {
-      q.type = on ? "multi" : "choice";
-      if (q.answer != null) q.answer = on ? answers() : answers()[0];
-      redraw();
-    }) : null;
-    const explain = q.quiz ? h("input", { type: "text", maxlength: 300, value: q.explain || "", placeholder: "해설 (선택)", oninput() { q.explain = explain.value.trim() || undefined; } }) : null;
-    return h("article", { class: "q-edit stack" },
-      h("div", { class: "q-head" }, h("div", { class: "q-num" }, h("strong", {}, "질문 " + (i + 1)), anon), seg, quizBtn),
-      h("label", {}, "질문", text),
-      choice ? h("div", { class: "opt-list" }, h("span", { class: "field-name" }, "항목" + (q.quiz ? " (정답을 고르세요)" : "")), optRows,
-        h("div", { class: "row between" }, multi,
-          h("button", { class: "ghost", type: "button", onclick() { q.options.push(""); redraw(q.id + "-" + (q.options.length - 1)); } }, "+ 항목 추가"))) : null,
-      explain ? h("label", {}, "해설", explain) : null);
+    } }, "삭제");
+    return b.type === "info" ? infoEdit(b, ++inN, del) : questionEdit(b, ++qn, del, redraw);
   });
 
-  async function saveActivity() {
-    // 아무것도 적지 않은 질문은 저장할 때 뺀다(번호는 화면에 보이는 번호 그대로 알린다)
-    const blank = (q) => !(q.text || "").trim() && !(isChoice(q) && q.options.some((x) => x.trim()));
-    if (e.questions.every(blank)) { msg.textContent = "질문을 입력하세요."; return; }
-    for (const [i, q] of e.questions.entries()) {
-      if (blank(q)) continue;
+  async function saveAll() {
+    msg.textContent = "";
+    const blankQ = (q) => !(q.text || "").trim() && !(isChoice(q) && q.options.some((x) => x.trim()));
+    const blankI = (b) => !b.title.trim() && !b.text.trim();
+    // 먼저 모두 확인하고(번호는 화면에 보이는 번호), 아무것도 적지 않은 칸은 뺀다
+    const rows = [];
+    let qi = 0, ii = 0;
+    for (const b of e.blocks) {
+      if (b.type === "info") {
+        ii++;
+        if (blankI(b)) continue;
+        const text = b.text.trim();
+        if (!text) { msg.textContent = "설명 " + ii + "의 설명문을 입력하세요."; return; }
+        rows.push([b, { kind: "survey", title: b.title.trim() || firstLine(text), show_answer: false, named: false,
+          questions: [{ id: b.qid || newId(), type: "info", text }] }]);
+        continue;
+      }
+      qi++;
+      const q = b.q;
+      if (blankQ(q)) continue;
       q.text = (q.text || "").trim();
-      delete q.description;
-      delete q.intro;
-      if (!q.text) { msg.textContent = (i + 1) + "번 질문을 입력하세요."; return; }
+      if (!q.text) { msg.textContent = "질문 " + qi + "을 입력하세요."; return; }
       if (isChoice(q)) {
         const opts = q.options.map((x) => x.trim()).filter(Boolean);
-        if (opts.length < 2) { msg.textContent = (i + 1) + "번 질문의 항목을 두 개 이상 적으세요."; return; }
-        if (new Set(opts).size !== opts.length) { msg.textContent = (i + 1) + "번 질문에 같은 항목이 두 번 있습니다."; return; }
+        if (opts.length < 2) { msg.textContent = "질문 " + qi + "의 항목을 두 개 이상 적으세요."; return; }
+        if (new Set(opts).size !== opts.length) { msg.textContent = "질문 " + qi + "에 같은 항목이 두 번 있습니다."; return; }
         const right = [].concat(q.answer ?? []).map((x) => String(x).trim()).filter((x) => opts.includes(x));
-        if (q.quiz && !right.length) { msg.textContent = (i + 1) + "번 질문(퀴즈)의 정답을 고르세요."; return; }
+        if (q.quiz && !right.length) { msg.textContent = "질문 " + qi + "(퀴즈)의 정답을 고르세요."; return; }
         q.options = opts;
         if (q.quiz) q.answer = q.type === "multi" ? right : right[0];
         else { delete q.answer; delete q.explain; }
       } else { delete q.options; delete q.answer; delete q.explain; q.quiz = false; }
+      const { quiz, ...clean } = q;
+      // 퀴즈를 켠 질문은 퀴즈(한 번만 제출, 서버에서 채점). 아니면 예전 종류(슬라이드 질문·설문)를 그대로 둔다
+      // named는 예전 화면을 위해 남긴다. 실제 익명 여부는 질문의 anon
+      rows.push([b, { kind: quiz ? "quiz" : b.kind === "slide" ? "slide" : "survey", title: (b.title || "").trim() || q.text.slice(0, 100),
+        show_answer: !!b.show_answer, named: !q.anon, questions: [clean] }]);
     }
-    e.questions = e.questions.filter((q) => !blank(q));
-    e.title = (e.title || "").trim() || autoTitle();
-    if (e.description.trim()) e.questions[0].intro = e.description.trim();
-    // 퀴즈인 질문이 하나라도 있으면 퀴즈(한 번만 제출, 서버에서 채점). 아니면 예전 종류(슬라이드 질문·설문)를 그대로 둔다
-    const quiz = e.questions.some((q) => q.quiz);
-    const kind = quiz ? "quiz" : e.kind === "quiz" ? "survey" : e.kind;
-    // named는 예전 화면을 위해 「이름을 보이는 질문이 하나라도 있음」으로 남긴다. 실제 익명 여부는 질문마다(anon)
-    const row = { kind, title: e.title, page: e.page, show_answer: e.show_answer, named: e.questions.some((q) => !q.anon),
-      questions: e.questions.map(({ quiz: _, ...q }) => q) };
+    if (!rows.length) { msg.textContent = "설명이나 질문을 입력하세요."; return; }
     const to = pageTo(e);
     if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
-    if (to !== undefined) row.page_to = to;
-    if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
-    const saved = await save("activities", row, e.id);
-    if (!saved) return;
+    // 새 활동은 같은 쪽 활동들의 맨 뒤에 편집기 순서대로 붙인다
+    let next = Math.max(-1, ...activities.filter((a) => (a.page ?? null) === (e.page ?? null)).map((a) => a.sort ?? 0)) + 1;
+    for (const [b, row] of rows) {
+      row.page = e.page;
+      if (to !== undefined) row.page_to = to;
+      if (!b.id) { row.lesson_id = lesson.id; row.sort = next++; }
+      const s = await save("activities", row, b.id);
+      if (!s) return;
+      b.id = s.id;
+      if (b.type === "info") b.qid = row.questions[0].id;
+    }
+    e.blocks = e.blocks.filter((b) => b.id);
     const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
     activities = sortActivities(data || []);
-    editing = JSON.parse(JSON.stringify(saved));
     drawBuild();
-    flash("저장했습니다.");
+    flash(rows.length > 1 ? rows.length + "개를 저장했습니다." : "저장했습니다.");
   }
 
   return h("section", { class: "card stack editor" },
-    h("h2", {}, e.id ? "질문 고치기" : "질문 만들기"),
+    h("h2", {}, e.blocks.some((b) => b.id) ? "설명 및 질문 고치기" : "설명 및 질문 만들기"),
     hasResponses ? h("p", { class: "banner" }, "이미 학생 응답이 있습니다. 질문이나 항목을 바꾸면 기존 응답과 맞지 않을 수 있습니다.") : null,
     placeField(e),
-    intro,
-    qs,
-    h("button", { class: "ghost add-q", type: "button", onclick() { e.questions.push(newQuestion("choice")); redraw(); } }, "+ 추가"),
-    e.questions.some((q) => q.quiz) ? toggleBox("제출 뒤 정답·해설 보여 주기", e.show_answer, (on) => { e.show_answer = on; }, "show-ans") : null,
+    blockEls,
+    h("button", { type: "button", class: "add-box", onclick() { const b = infoBlock(); e.blocks.push(b); redraw(b.bid); } }, "+ 설명 추가"),
+    h("button", { type: "button", class: "add-box", onclick() { const b = questionBlock(); e.blocks.push(b); redraw(b.bid); } }, "+ 질문 추가"),
     msg,
-    editorButtons(saveActivity, msg, "「" + (e.title || autoTitle()) + "」을(를) 지울까요? 학생 응답도 함께 지워집니다."));
+    editorButtons(saveAll, msg, null));
+}
+
+// 설명 칸: 제목(비우면 설명문 첫 줄)과 설명문. 학생은 답하지 않는다
+function infoEdit(b, n, del) {
+  const title = h("input", { type: "text", maxlength: 100, value: b.title, placeholder: "비우면 설명문 첫 줄이 제목이 됩니다", "data-focus": b.bid, oninput() { b.title = title.value; } });
+  const body = h("textarea", { rows: 5, maxlength: 5000, placeholder: "설명과 링크를 입력하세요. https:// 주소는 학생 화면에서 클릭할 수 있습니다.", oninput() { b.text = body.value; } }, b.text || "");
+  return h("article", { class: "blk info-edit stack" },
+    h("div", { class: "blk-top" }, h("strong", {}, "설명 " + n), del),
+    h("label", {}, "제목", title),
+    h("label", {}, "설명문", body));
+}
+
+// 질문 칸: 익명 · 객관식|서술형 · 퀴즈, 항목(+ 항목 추가), 퀴즈면 정답·해설·제출 뒤 보여 주기
+function questionEdit(b, n, del, redraw) {
+  const q = b.q;
+  const choice = isChoice(q);
+  // 객관식 ↔ 서술형. 서술형은 자동 채점하지 않으므로 퀴즈도 꺼진다
+  const setType = (toChoice) => {
+    if (toChoice === choice) return;
+    q.type = toChoice ? "choice" : "long";
+    if (toChoice) q.options = q.options && q.options.length ? q.options : ["", ""];
+    else { q.quiz = false; delete q.explain; }
+    delete q.answer;
+    redraw();
+  };
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "질문 종류" },
+    h("button", { type: "button", class: choice ? "on" : "", "aria-pressed": String(choice), onclick() { setType(true); } }, "객관식"),
+    h("button", { type: "button", class: choice ? "" : "on", "aria-pressed": String(!choice), onclick() { setType(false); } }, "서술형"));
+  const quizBtn = h("button", {
+    type: "button", class: "quiz-toggle" + (q.quiz ? " on" : ""), "aria-pressed": String(!!q.quiz), disabled: !choice,
+    title: choice ? "정답을 정하면 학생이 제출할 때 자동으로 채점합니다." : "객관식 질문만 퀴즈로 채점할 수 있습니다.",
+    onclick() { q.quiz = !q.quiz; if (!q.quiz) { delete q.answer; delete q.explain; } redraw(); },
+  }, "퀴즈");
+  const anon = toggleBox("익명", q.anon, (on) => { q.anon = on; }, "anon-tog");
+  anon.title = "켜 두면 학생에게 공개할 때 이 질문의 답에 이름이 보이지 않습니다.";
+  // 서술형은 질문 칸을 크게 해 객관식(항목 두 개)과 높이를 맞춘다(종류를 바꿔도 아래가 밀리지 않게)
+  const text = choice
+    ? h("input", { type: "text", maxlength: 300, value: q.text, placeholder: "질문을 입력하세요", "data-focus": b.bid, oninput() { q.text = text.value; } })
+    : h("textarea", { class: "q-long", maxlength: 300, placeholder: "질문을 입력하세요", "data-focus": b.bid, oninput() { q.text = text.value; } }, q.text || "");
+  const answers = () => [].concat(q.answer ?? []);
+  const optRows = choice ? q.options.map((o, j) => {
+    const input = h("input", { type: "text", maxlength: 200, value: o, placeholder: "항목 " + (j + 1), "data-focus": q.id + "-" + j, "aria-label": (j + 1) + "번 항목",
+      oninput() {
+        // 정답으로 고른 항목의 글을 고치면 정답도 따라 바뀐다
+        const old = q.options[j];
+        q.options[j] = input.value;
+        if (q.answer != null) q.answer = Array.isArray(q.answer) ? q.answer.map((x) => (x === old ? input.value : x)) : q.answer === old ? input.value : q.answer;
+      } });
+    const pick = q.quiz ? h("label", { class: "check ans-pick" },
+      h("input", {
+        type: q.type === "multi" ? "checkbox" : "radio", name: "ans-" + q.id, checked: o !== "" && answers().includes(o),
+        onchange(ev) {
+          const v = q.options[j];
+          if (q.type !== "multi") { q.answer = v; return; }
+          const now = new Set(answers());
+          if (ev.target.checked) now.add(v); else now.delete(v);
+          const list = q.options.filter((x) => now.has(x));
+          if (list.length) q.answer = list; else delete q.answer;
+        },
+      }), "정답") : null;
+    // 항목이 두 개뿐이면 지울 수 없다(연한 회색 상자로 보임)
+    const few = q.options.length <= 2;
+    const del = h("button", { type: "button", class: "opt-del", "aria-label": (j + 1) + "번 항목 지우기", disabled: few,
+      title: few ? "항목은 두 개 이상 있어야 합니다." : "이 항목 지우기",
+      onclick() {
+        const [gone] = q.options.splice(j, 1);
+        if (q.answer != null) {
+          const left = answers().filter((x) => x !== gone);
+          if (!left.length) delete q.answer; else q.answer = q.type === "multi" ? left : left[0];
+        }
+        redraw();
+      } }, "×");
+    return h("div", { class: "opt-row" }, pick, input, del);
+  }) : null;
+  const multi = choice ? toggleBox("복수 선택", q.type === "multi", (on) => {
+    q.type = on ? "multi" : "choice";
+    if (q.answer != null) q.answer = on ? answers() : answers()[0];
+    redraw();
+  }) : null;
+  const explain = q.quiz ? h("input", { type: "text", maxlength: 300, value: q.explain || "", placeholder: "해설 (선택)", oninput() { q.explain = explain.value.trim() || undefined; } }) : null;
+  return h("article", { class: "blk q-edit stack" },
+    h("div", { class: "blk-top" }, h("strong", {}, "질문 " + n), del),
+    h("div", { class: "q-head" }, anon, seg, quizBtn),
+    h("label", {}, "질문", text),
+    choice ? h("div", { class: "opt-list" }, h("span", { class: "field-name" }, "항목" + (q.quiz ? " (정답을 고르세요)" : "")), optRows,
+      h("div", { class: "row between" }, multi,
+        h("button", { class: "ghost", type: "button", onclick() { q.options.push(""); redraw(q.id + "-" + (q.options.length - 1)); } }, "+ 항목 추가"))) : null,
+    explain ? h("label", {}, "해설", explain) : null,
+    q.quiz ? toggleBox("제출 뒤 정답·해설 보여 주기", b.show_answer, (on) => { b.show_answer = on; }, "show-ans") : null);
 }
 
 const isChoice = (q) => q.type === "choice" || q.type === "multi";

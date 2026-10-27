@@ -253,6 +253,10 @@ function simFrame(html, title) {
 const SIM_PLACE_DEFAULT = { x: 0.55, y: 0.1, w: 0.4, h: 0.55 };
 const clamp01 = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const isOverSim = (a) => a.kind === "sim" && !a.sim_full && !!a.sim_place;
+// 「모든 페이지」로 정한 얹기·크게 시뮬레이션은 카드 목록(언제든) 대신 모든 쪽의 슬라이드에 붙는다
+const allPagesSim = (a) => a.kind === "sim" && a.page == null && (!!a.sim_full || isOverSim(a));
+// 이 쪽 슬라이드에 붙는 시뮬레이션인지(쪽이 정해진 것이 먼저, 그다음 모든 페이지)
+const simOnSlide = (a, n) => onPage(a, n) || allPagesSim(a);
 
 // 얹는 칸(layer)을 슬라이드 그림이 실제로 보이는 자리에 맞춘다(전체 화면에서 그림이 가운데로 줄어들 때도)
 function syncSimLayer(layer, img) {
