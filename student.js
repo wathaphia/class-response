@@ -601,7 +601,7 @@ function zoom() {
     return loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html)));
   }
   if (shell.zoom) return;
-  const big = h("img", { src: shell.img.src, alt: shell.img.alt });
+  const big = h("img", { src: slideSrc(state.lesson, viewing), alt: shell.img.alt });   // 크게 볼 때만 큰 그림(1280px)을 받는다
   const box = h("div", { class: "slide-zoom", onclick: close }, big, h("p", {}, "눌러서 닫기 · 휴대폰은 가로로 돌리면 더 크게 보입니다"));
   function close() {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -646,12 +646,13 @@ function render(pageChanged) {
       shell.slideBox.querySelector(".pptx-frame")?.remove();
       shell.pptKey = "";
       shell.img.hidden = false;
-      src = slideSrc(L, viewing);
+      src = slideSrc(L, viewing, true);
       const last = shell.lastPage || viewing;
       swapSlide(shell.img, src, slideFx(L), slideNo(L, last) === slideNo(L, viewing) ? (last === viewing ? 1 : 0) : Math.sign(viewing - last));
       shell.lastPage = viewing;
     }
-    if (shell.zoom && shell.zoom.getAttribute("src") !== src) shell.zoom.src = src;
+    const big = src && slideSrc(L, viewing);
+    if (shell.zoom && big && shell.zoom.getAttribute("src") !== big) shell.zoom.src = big;
     shell.img.alt = "슬라이드 " + viewing;
     shell.where.textContent = slideLabel(L, viewing);
     shell.prev.disabled = viewing <= 1;

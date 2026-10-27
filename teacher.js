@@ -340,7 +340,7 @@ async function drawManage() {
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
       // 첫 슬라이드(끌기를 방해하지 않게 그림 자체는 끌 수 없게)
       l.slide_count && !isPptx(l)
-        ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
+        ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
         : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"));
     dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
     return el;
@@ -2303,7 +2303,7 @@ function slidesCard() {
   const thumbs = h("div", { class: "thumbs" });
   for (let i = 1; i <= lesson.slide_count; i++) {
     const preview = h("div", { class: "thumb-preview" });
-    const image = h("img", { class: "thumb-photo", src: slideSrc(lesson, i), alt: i + "쪽", loading: "lazy" });
+    const image = h("img", { class: "thumb-photo", src: slideSrc(lesson, i, true), alt: i + "쪽", loading: "lazy" });
     const hitbox = h("button", {
       class: "thumb-hitbox", type: "button", "aria-label": i + "쪽 선택", "aria-pressed": selectedSlides.has(i),
       onclick() { toggleSlideSelection(i, figure, checkbox, hitbox); },
@@ -2404,19 +2404,14 @@ async function uploadPptx(file, progress) {
   const pages = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length;
   if (!pages || pages > 300) throw new Error("PPTX에서 슬라이드를 읽지 못했거나 300장을 넘습니다.");
   const folder = slideFolder(lesson);
+  const old = { home: slideHome(lesson), shared: sharedSlides(lesson) };
+  const store = await newSlideStore();
   progress(0, 1, "PPTX 올리는 중");
-  const objectPath = folder + "deck.pptx";
-  const { error } = await sb.storage.from("slides").upload(objectPath, file, {
-    upsert: true, contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", cacheControl: "31536000",
-  });
-  if (error) throw error;
-  const { data } = sb.storage.from("slides").getPublicUrl(objectPath);
-  const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + data.publicUrl + "?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", lesson.id);
+  await store.put(folder + "deck.pptx", file, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + store.base + folder + "deck.pptx?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", lesson.id);
   if (updateError) throw updateError;
   // 교체 전 PDF/JPG가 남지 않게 이 수업 전용 폴더의 이미지 파일만 정리한다.
-  const { data: old } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
-  const images = (old || []).filter((o) => /^\d+\.jpg$/.test(o.name)).map((o) => folder + o.name);
-  if (images.length) await sb.storage.from("slides").remove(images);
+  await cleanSlideFolder(old, store, folder, (n) => !/^\d+s?\.jpg$/.test(n));
   progress(1, 1, "올리는 중");
   return pages;
 }
@@ -2433,11 +2428,23 @@ async function loadPdfJs() {
 const SLIDE_WIDTH = 1280;
 const SLIDE_QUALITY = 0.72;
 
+// 학생 기기·썸네일용 작은 그림(n s.jpg): 휴대폰·태블릿 화면에는 1024px이면 충분하고 1280px보다 약 35% 작다
+const SMALL_WIDTH = 1024;
+
 function canvasToJpeg(canvas) {
   return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("그림으로 바꾸지 못했습니다"))), "image/jpeg", SLIDE_QUALITY));
 }
+// 한 쪽 → { big: 1280px, small: 1024px } JPG
+async function slidePair(canvas) {
+  const scale = Math.min(1, SMALL_WIDTH / canvas.width);
+  const c = h("canvas", { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(canvas, 0, 0, c.width, c.height);
+  return { big: await canvasToJpeg(canvas), small: await canvasToJpeg(c) };
+}
 
-// 파일들을 쪽별 JPG 묶음으로 바꾼다
+// 파일들을 쪽별 JPG 묶음({ big, small })으로 바꾼다
 async function toSlideImages(files, progress) {
   const pdfs = files.filter((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
   if (pdfs.length > 1) throw new Error("PDF는 한 번에 하나만 올릴 수 있습니다.");
@@ -2455,7 +2462,7 @@ async function toSlideImages(files, progress) {
       ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
-      out.push(await canvasToJpeg(canvas));
+      out.push(await slidePair(canvas));
     }
     return out;
   }
@@ -2471,17 +2478,84 @@ async function toSlideImages(files, progress) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    out.push(await canvasToJpeg(canvas));
+    out.push(await slidePair(canvas));
   }
   return out;
 }
 
 const slideFolder = (l) => me.id + "/" + l.id + "/";
 
-// 슬라이드 그림이 들어 있는 폴더(주소에서 읽는다). 다른 교사가 올렸거나 복제한 수업이면 원래 수업의 폴더다.
-function slideFolderOf(l) {
-  const m = /\/public\/slides\/(.+\/)\{n\}/.exec(l.slide_dir || "");
-  return m ? decodeURIComponent(m[1]) : null;
+// ---------- 슬라이드 저장소 ----------
+// 새로 올리는 그림은 Cloudflare R2(Worker의 /s/)에 둔다: 학생 기기로 내려가는 전송량이 무료다.
+// R2가 아직 연결되지 않았으면 예전처럼 Supabase Storage(무료 전송량 월 5GB)에 둔다.
+// 이미 올린 수업은 주소(slide_dir)가 가리키는 저장소를 그대로 쓴다.
+const SB_SLIDES = SB_URL + "/storage/v1/object/public/slides/";
+const R2_SLIDES = typeof TURN_URL === "string" && TURN_URL.trim() ? TURN_URL.trim().replace(/\/+$/, "") + "/s/" : "";
+let r2Ready = null;
+const newSlideStore = async () => {
+  r2Ready ??= R2_SLIDES ? fetch(R2_SLIDES + "ping", { cache: "no-store" }).then((r) => r.ok, () => false) : Promise.resolve(false);
+  return (await r2Ready) ? r2Store : sbStore;
+};
+async function r2Call(method, path, body, type) {
+  const { data } = await sb.auth.getSession();
+  const r = await fetch(R2_SLIDES + path, {
+    method, body, headers: { Authorization: "Bearer " + (data.session ? data.session.access_token : ""), "content-type": type || "application/json" },
+  });
+  if (!r.ok) throw new Error("슬라이드 저장소(R2) 응답 " + r.status);
+  return r.json();
+}
+const r2Store = {
+  base: R2_SLIDES,
+  put: (path, blob, type) => r2Call("PUT", path, blob, type),
+  list: async (folder) => (await r2Call("POST", "", JSON.stringify({ op: "list", prefix: folder }))).names.map((o) => o.name),
+  async remove(paths) { for (let i = 0; i < paths.length; i += 1000) await r2Call("POST", "", JSON.stringify({ op: "delete", keys: paths.slice(i, i + 1000) })); },
+  move: (from, to) => r2Call("POST", "", JSON.stringify({ op: "move", from, to })),
+};
+const sbStore = {
+  base: SB_SLIDES,
+  async put(path, blob, type) {
+    // 주소에 ?v=올린시각 이 붙어 1년 캐시해도 새 그림이 보인다
+    const { error } = await sb.storage.from("slides").upload(path, blob, { upsert: true, contentType: type, cacheControl: "31536000" });
+    if (error) throw error;
+  },
+  async list(folder) {
+    const { data, error } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
+    if (error) throw error;
+    return (data || []).map((o) => o.name);
+  },
+  async remove(paths) {
+    if (!paths.length) return;
+    const { error } = await sb.storage.from("slides").remove(paths);
+    if (error) throw error;
+  },
+  async move(from, to) {
+    const { error } = await sb.storage.from("slides").move(from, to);
+    if (error) throw error;
+  },
+};
+
+// 슬라이드 그림이 들어 있는 저장소와 폴더(주소에서 읽는다). 다른 교사가 올렸거나 복제한 수업이면 원래 수업의 폴더다.
+function slideHome(l) {
+  const dir = (l.slide_dir || "").replace(/^pptx:/, "").split("?")[0];
+  const store = R2_SLIDES && dir.startsWith(R2_SLIDES) ? r2Store : dir.startsWith(SB_SLIDES) ? sbStore : null;
+  const m = store && /^(.+\/)(?:\{n\}\.jpg|deck\.pptx)$/.exec(decodeURIComponent(dir.slice(store.base.length)));
+  return m ? { store, folder: m[1] } : null;
+}
+// 같은 그림을 쓰는 다른 수업(복제)이 있는지
+const sharedSlides = (l) => lessons.some((x) => x.id !== l.id && (x.slide_dir || "").split("?")[0] === (l.slide_dir || "").split("?")[0]);
+
+// 새로 올린 뒤 이 수업 폴더에 남은 예전 파일을 지운다. 저장소를 옮겼으면(Supabase → R2) 예전 저장소의 파일은 모두 지운다.
+async function cleanSlideFolder(old, store, folder, keep) {
+  try {
+    const gone = (await store.list(folder)).filter((n) => !keep(n)).map((n) => folder + n);
+    if (gone.length) await store.remove(gone);
+    if (old.home && old.home.store !== store && old.home.folder === folder && !old.shared) {
+      const all = await old.home.store.list(folder);
+      if (all.length) await old.home.store.remove(all.map((n) => folder + n));
+    }
+  } catch (e) {
+    console.warn("예전 슬라이드 파일 정리 실패", e);
+  }
 }
 
 // 슬라이드 한 쪽 지우기: 그 쪽 그림을 지우고 뒤쪽 그림을 한 칸씩 앞으로 당긴다.
@@ -2511,10 +2585,11 @@ function toggleSlideSelection(page, figure, checkbox, hitbox) {
 async function deleteSlide(target, status) {
   if (slideBusy) return;
   const targets = target == null ? [] : [...new Set(Array.isArray(target) ? target : [target])].sort((a, b) => a - b);
-  const folder = slideFolderOf(lesson);
-  if (!folder) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
+  const home = slideHome(lesson);
+  if (!home || isPptx(lesson)) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
+  const folder = home.folder;
   const base = lesson.slide_dir.split("?")[0];
-  if (folder !== slideFolder(lesson) || lessons.some((x) => x.id !== lesson.id && (x.slide_dir || "").split("?")[0] === base)) {
+  if (folder !== slideFolder(lesson) || sharedSlides(lesson)) {
     return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n이 수업에서 슬라이드 파일을 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
   }
   if (targets.length) {
@@ -2522,26 +2597,28 @@ async function deleteSlide(target, status) {
   }
   slideBusy = true;
   document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
-  const st = sb.storage.from("slides");
+  const st = home.store;
   try {
     status.textContent = "슬라이드 목록을 확인하는 중…";
-    const listed = await st.list(folder.replace(/\/$/, ""), { limit: 1000 });
-    if (listed.error) throw listed.error;
-    let nums = (listed.data || []).map((o) => /^(\d+)\.jpg$/.exec(o.name)).filter(Boolean).map((m) => +m[1]).sort((x, y) => x - y);
+    const names = await st.list(folder);
+    let nums = names.map((n) => /^(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]).sort((x, y) => x - y);
+    // 작은 그림(3s.jpg)도 큰 그림과 함께 지우고 옮긴다
+    const smalls = new Set(names.map((n) => /^(\d+)s\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]));
     if (targets.length) {
       const missing = targets.filter((n) => !nums.includes(n));
       if (missing.length) throw new Error(missing.join(", ") + "쪽 그림이 이미 없습니다. 「번호 다시 맞추기」를 눌러 주세요.");
       status.textContent = targets.length + "장의 슬라이드를 지우는 중…";
-      const r = await st.remove(targets.map((n) => folder + n + ".jpg"));
-      if (r.error) throw r.error;
+      await st.remove(targets.flatMap((n) => [folder + n + ".jpg", ...(smalls.has(n) ? [folder + n + "s.jpg"] : [])]));
+      for (const n of targets) smalls.delete(n);
       nums = nums.filter((x) => !targets.includes(x));
     }
+    const small = /[?&]sm=1/.test(lesson.slide_dir) && nums.every((n) => smalls.has(n));
     // 남은 그림을 1, 2, 3 … 으로 당긴다(작은 번호부터 옮기므로 옮길 자리는 늘 비어 있다)
     for (const [i, num] of nums.entries()) {
       if (num === i + 1) continue;
       status.textContent = "슬라이드 번호를 맞추는 중 " + (i + 1) + " / " + nums.length;
-      const r = await st.move(folder + num + ".jpg", folder + (i + 1) + ".jpg");
-      if (r.error) throw r.error;
+      await st.move(folder + num + ".jpg", folder + (i + 1) + ".jpg");
+      if (smalls.has(num)) await st.move(folder + num + "s.jpg", folder + (i + 1) + "s.jpg");
     }
     const left = nums.length;
     // 단계 그림 수업: 남은 그림으로 슬라이드마다 단계 수를 다시 센다. 단계가 모두 지워진 슬라이드는 빠지고,
@@ -2574,7 +2651,7 @@ async function deleteSlide(target, status) {
     }
     const pageNow = lesson.page - targets.filter((n) => n < lesson.page).length;
     // 이름이 바뀐 그림을 브라우저가 예전 것으로 보이지 않게. 원본 PPTX(deck)는 더 이상 쪽이 맞지 않으므로 뺀다
-    const dir = withFx(base + "?v=" + Date.now() + (anim ? "&anim=" + anim : ""), slideFx(lesson));
+    const dir = withFx(base + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));
     const u = await sb.from("lessons").update({ slide_dir: left ? dir : "", slide_count: left, page: Math.min(Math.max(pageNow, 1), Math.max(left, 1)) }).eq("id", lesson.id);
     if (u.error) throw u.error;
     selectedSlides.clear();
@@ -2598,34 +2675,31 @@ async function uploadSlides(files, progress) {
   }
   const images = await toSlideImages(files, progress);
   const folder = slideFolder(lesson);
-  for (const [i, blob] of images.entries()) {
+  const old = { home: slideHome(lesson), shared: sharedSlides(lesson) };
+  const store = await newSlideStore();
+  for (const [i, pair] of images.entries()) {
     progress(i, images.length, "올리는 중");
-    const { error } = await sb.storage.from("slides").upload(folder + (i + 1) + ".jpg", blob, { upsert: true, contentType: "image/jpeg", cacheControl: "31536000" });   // 주소에 ?v=올린시각 이 붙어 1년 캐시해도 새 그림이 보인다
-    if (error) throw error;
+    await store.put(folder + (i + 1) + ".jpg", pair.big, "image/jpeg");
+    await store.put(folder + (i + 1) + "s.jpg", pair.small, "image/jpeg");
   }
   progress(images.length, images.length, "올리는 중");
-  // 전보다 쪽 수가 줄었으면 남은 그림을 지운다
-  const { data: old } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
-  const extra = (old || []).map((o) => o.name).filter((n) => parseInt(n, 10) > images.length).map((n) => folder + n);
-  if (extra.length) await sb.storage.from("slides").remove(extra);
-  const dir = withFx(SB_URL + "/storage/v1/object/public/slides/" + folder + "{n}.jpg?v=" + Date.now(), slideFx(lesson));
+  const dir = withFx(store.base + folder + "{n}.jpg?v=" + Date.now() + "&sm=1", slideFx(lesson));
   const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", lesson.id);
   if (error) throw error;
-  await sb.storage.from("slides").remove([folder + "deck.pptx"]);
+  // 전보다 쪽 수가 줄었으면 남은 그림과 예전 원본 PPTX를 지운다
+  await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return !!m && +m[1] <= images.length; });
   return images.length;
 }
 
 // 수업을 지울 때 그 수업의 슬라이드 그림도 지운다(복제한 다른 수업이 같은 그림을 쓰면 남긴다)
 async function removeSlideFiles(l) {
   if (!l.slide_count || !l.slide_dir.includes("/" + l.id + "/")) return;
-  if (lessons.some((x) => x.id !== l.id && x.slide_dir.split("?")[0] === l.slide_dir.split("?")[0])) return;
+  if (sharedSlides(l)) return;
   // 그림을 올린 교사의 폴더(교사가 여러 명일 수 있으므로 주소에서 읽는다)
-  const m = /\/public\/slides\/(.+\/)\{n\}/.exec(l.slide_dir);
-  const ppt = isPptx(l) && /\/object\/public\/slides\/(.+)\/deck\.pptx/.exec(l.slide_dir);
-  if (!m && !ppt) return;
-  const folder = decodeURIComponent(m ? m[1] : ppt[1] + "/");
-  const { data } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
-  if (data && data.length) await sb.storage.from("slides").remove(data.map((o) => folder + o.name));
+  const home = slideHome(l);
+  if (!home) return;
+  const names = await home.store.list(home.folder);
+  if (names.length) await home.store.remove(names.map((n) => home.folder + n));
 }
 
 // ---------- CSV ----------
