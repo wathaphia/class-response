@@ -408,6 +408,7 @@ async function drawManage() {
 // 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프와 표로 보여 준다.
 // 받는 곳은 셋: Supabase 함수 resource_usage(DB 안 숫자), Worker /usage(Supabase 관리 API·Cloudflare 숫자), GitHub 공개 API.
 // 탭을 열면 5분 넘게 지난 것만, 「동기화」를 누르면 모두 다시 받는다. 탭을 열어 두면 DB 안 숫자(접속 중 학생 등)만 30초마다 새로 받는다
+// (창이 가려져 있으면 받지 않고, 다시 보일 때 받는다)
 // (Worker는 KV 목록 읽기 하루 1,000번, GitHub는 이 PC에서 시간당 60번 한도라 저절로 다시 받지 않는다).
 const GITHUB_REPO = "wathaphia/class-response";
 const MB = 1024 * 1024, GB = 1024 * MB;
@@ -473,10 +474,11 @@ function etcTick() {
   clearTimeout(etcTimer);
   etcTimer = setTimeout(async () => {
     if (tab !== "etc") return;
-    await syncUsage(["db"]);
+    if (!document.hidden) await syncUsage(["db"]);
     etcTick();
   }, ETC_POLL_MS);
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && tab === "etc") { syncUsage(["db"]); etcTick(); } });
 
 function usageAmount(n, fmt) {
   if (fmt === "days") return n + "일";
@@ -516,6 +518,37 @@ const usageTable = (head, rows) => h("div", { class: "table-wrap usage-table" },
   h("table", {}, h("thead", {}, h("tr", {}, head.map((x) => h("th", {}, x)))), h("tbody", {}, rows.map((r) => h("tr", {}, r.map((x) => h("td", {}, x)))))));
 const usageBlock = (title, ...kids) => h("div", { class: "usage-block" }, h("h4", {}, title), ...kids);
 
+// 이번 달 전송량을 지금까지의 시간당 평균으로 월말까지 늘려 본다(6시간 넘게 모였을 때만)
+function egressProjection(m) {
+  if (!m || !m.hours || m.hours < 6 || !m.until) return null;
+  const until = Date.parse(m.until), d = new Date(until);
+  const left = Math.max(0, (Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - until) / 3600000);
+  return { bytes: m.bytes + m.bytes / m.hours * left, cached: m.cached + m.cached / m.hours * left };
+}
+const EGRESS_SRC = { site: "사이트(학생·교사 화면)", test: "브라우저 시험(이 PC)", tool: "올리기 도구(PowerShell)", other: "기타(Office 뷰어 등)" };
+// 무료 5GB가 두 가지(전송량·캐시 전송량)라 따로 본다: 날마다 얼마나, 누가, 무엇이 많이 나갔는지
+function egressView(m, ep, e24, top) {
+  const amt = (n) => usageAmount(n || 0, "bytes");
+  const days = m && m.days ? Object.entries(m.days).sort((a, b) => b[0].localeCompare(a[0])) : [];
+  const srcs = m && m.srcs ? Object.entries(m.srcs).sort((a, b) => (b[1].bytes + b[1].cached) - (a[1].bytes + a[1].cached)) : [];
+  const fileName = (p) => p.replace(/^\/storage\/v1\/object\/public\/slides\/\*\/\*\//, "슬라이드 ").replace(/^\/rest\/v1\/rpc\//, "함수 ").replace(/^\/rest\/v1\//, "표 ");
+  return h("div", { class: "usage-blocks" },
+    usageBlock("전송량 한눈에(무료 각 5GB)",
+      usageTable(["", "전송량", "캐시 전송량"], [
+        ["이번 달 지금까지", m ? amt(m.bytes) : "—", m ? amt(m.cached) : "—"],
+        ["월말 예상", ep ? amt(ep.bytes) : "—", ep ? amt(ep.cached) : "—"],
+        ["최근 24시간", e24 ? amt(e24.bytes) : "—", e24 ? amt(e24.cached) : "—"],
+        ["한도까지 남음", m ? amt(Math.max(0, 5 * GB - m.bytes)) : "—", m ? amt(Math.max(0, 5 * GB - m.cached)) : "—"],
+      ]),
+      e24 && e24.unsized ? h("p", { class: "muted small" }, "최근 24시간 요청 " + e24.requests.toLocaleString() + "건 중 " + e24.unsized.toLocaleString() + "건은 크기가 기록되지 않아 「전송량」에서 빠졌습니다.") : null),
+    days.length ? usageBlock("날마다 전송량(UTC 날짜)",
+      usageTable(["날짜", "전송량", "캐시 전송량"], days.map(([d, v]) => [d.slice(5).replace("-", "/"), amt(v.bytes), amt(v.cached)]))) : null,
+    srcs.length ? usageBlock("누가 받았나(이번 달)",
+      usageTable(["어디서", "전송량", "캐시 전송량"], srcs.map(([k, v]) => [EGRESS_SRC[k] || k, amt(v.bytes), amt(v.cached)]))) : null,
+    top && top.length ? usageBlock("최근 24시간 많이 나간 것",
+      usageTable(["주소", "요청", "전송량"], top.filter((x) => x.bytes > 0).map((x) => [fileName(x.path), x.requests.toLocaleString() + "건", amt(x.bytes)]))) : null);
+}
+
 // Supabase: DB 안 숫자(db) + Worker가 관리 API로 모은 전송량·요청 수·서비스 상태(worker.supabase)
 function supabaseView() {
   const d = usage.db && usage.db.data, w = usage.worker && usage.worker.data, s = w && w.supabase;
@@ -524,14 +557,17 @@ function supabaseView() {
   const m = s && s.egressMonth;
   const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
   const since = m && Date.parse(m.from) > monthStart.getTime() + 3600000 ? shortTime(m.from) + "부터 집계" : null;
+  const ep = egressProjection(m);
   // 무료 프로젝트는 7일 동안 요청이 없으면 잠든다: 최근 7일 요청 기록 중 마지막으로 요청이 있었던 날로 센다
   const lastDay = s && s.apiCounts && [...s.apiCounts].reverse().find((x) => x.total_rest_requests + x.total_auth_requests + x.total_storage_requests + x.total_realtime_requests > 0);
   const idle = lastDay ? Math.max(0, Math.floor((Date.now() - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
     { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일(슬라이드 그림·PPTX)" },
-    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"), hint: since || "CDN 캐시를 거치지 않은 응답" },
-    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"), hint: (since ? since + " · " : "") + "CDN 캐시에서 나간 슬라이드 그림 등" },
+    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+      hint: (ep ? "월말 예상 " + usageAmount(ep.bytes, "bytes") + " · " : "") + (since || "CDN 캐시를 거치지 않은 응답") },
+    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+      hint: (ep ? "월말 예상 " + usageAmount(ep.cached, "bytes") + " · " : "") + (since ? since + " · " : "") + "CDN 캐시에서 나간 슬라이드 그림 등" },
     { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
     { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
     { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
@@ -540,8 +576,12 @@ function supabaseView() {
   const KIND = { rest: "데이터", storage: "파일", auth: "로그인", realtime: "실시간", other: "기타" };
   const HEALTH = { db: "데이터베이스", auth: "로그인", rest: "데이터 API", realtime: "실시간", storage: "파일 저장소" };
   const e24 = s && s.egress24h;
+  const stale = s && (!s.egressLast || Date.now() - Date.parse(s.egressLast) > 3 * 3600000);
   return [
     h("div", { class: "usage-grid" }, items.map(usageRing)),
+    s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
+      + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다.") : null,
+    s ? egressView(m, ep, e24, s.top24h) : null,
     s && s.health ? h("div", { class: "usage-tags start" }, h("span", { class: "small" }, "서비스 상태"),
       s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
     h("div", { class: "usage-blocks" },
@@ -557,7 +597,7 @@ function supabaseView() {
         usageTable(["표", "줄 수", "크기"], d.tables.map((t) => [t.name, Number(t.rows).toLocaleString(), usageAmount(t.bytes, "bytes")]))) : null),
     h("p", { class: "small" }, "학생 " + d.students + "명 · 수업 " + d.lessons + "개 · 응답 " + d.responses + "개"),
     h("p", { class: "muted small" }, (noApi === "관리 토큰 필요" ? "전송량·요청 수·서비스 상태는 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행). " : "")
-      + "전송량은 응답 크기가 적힌 것만 더해 실제보다 조금 적게 나옵니다. 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
+      + "전송량은 응답 크기가 적힌 것만 더합니다. 데이터 API의 압축 응답과 실시간 연결은 크기가 기록되지 않아 빠지므로 「전송량」은 실제보다 적게 나옵니다(슬라이드 그림인 「캐시 전송량」은 정확함). 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
       + (s && s.errors && s.errors.length ? " (일부 못 받음: " + s.errors.join(", ") + ")" : "")),
   ];
 }
