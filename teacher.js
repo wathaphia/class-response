@@ -716,7 +716,8 @@ function activityPreview(a) {
 }
 
 // 오른쪽 활동 목록이 바뀌었는지 가리는 표시(시뮬레이션 html은 길이만 본다)
-const buildListKey = () => lesson.id + "|" + JSON.stringify(activities.map((a) => ({ ...a, html: (a.html || "").length })));
+// 활동 칸 하나의 내용 열쇠. 쪽·순서는 빼서, 쪽만 옮기거나 순서만 바꾸면 칸을 새로 만들지 않는다
+const rowKey = (a) => JSON.stringify({ ...a, html: (a.html || "").length, page: 0, page_to: 0, sort: 0 });
 
 // 활동 칸의 「수정/수정 중」 표시만 지금 편집 중인 활동에 맞춘다
 function markEditingRow(row, a) {
@@ -813,58 +814,87 @@ function drawBuild() {
     } }, h("strong", {}, "시뮬레이션")),
     // 설명 및 질문: 설명 칸·질문 칸을 여러 개 만들고, 저장하면 칸마다 활동 하나가 된다
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "compose", page: startPage, page_to: null, blocks: [questionBlock()] };
+      editing = { kind: "compose", page: startPage, page_to: null, blocks: [] };
       drawBuild();
     } }, h("strong", {}, "설명 및 질문")));
   const asideKids = [h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds), editing ? editor() : null];
   const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
-  const key = buildListKey();
+  const listTitle = "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "");
   const box = main.querySelector(".build");
-  // 활동 목록이 그대로면 왼쪽만 다시 그린다. 오른쪽을 다시 붙이면 시뮬레이션 칸(iframe)이 처음부터 다시 실행되어 깜빡인다.
-  if (box && box.dataset.list === key) {
+  // 같은 수업이면 왼쪽만 다시 그리고 오른쪽 활동 칸은 그대로 두고 맞춘다(syncRows).
+  // 오른쪽을 다시 붙이면 시뮬레이션 칸(iframe)이 처음부터 다시 실행되어 깜빡인다.
+  if (box && box.dataset.lesson === String(lesson.id)) {
     const aside = box.querySelector(":scope > aside");
     const y = aside.scrollTop;
     aside.replaceChildren(...asideKids.filter(Boolean));
     aside.scrollTop = y;
+    box.querySelector(".act-list h2").textContent = listTitle;
     box.querySelector(".act-hint").replaceChildren(...[hint()].filter(Boolean));
-    box.querySelectorAll(".act-row").forEach((row, i) => markEditingRow(row, activities[i]));
+    syncRows(box.querySelector(".act-grid"));
     return;
   }
-  const list = activities.length ? activities.map((a) => {
-    const row = h("div", { class: "act-row" },
-      h("div", { class: "act-head stack" },
-        // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
-        h("div", { class: "act-id" },
-          pageCell(a),
-          h("div", { class: "act-name" },
-            h("p", { class: "muted small" }, activityName(a)),
-            h("h3", {}, a.title))),
-        h("div", { class: "act-btns" },
-          a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
-          h("button", { type: "button", class: "act-edit",
-            onclick() {
-              const copy = JSON.parse(JSON.stringify(a));
-              editing = copy.kind === "sim" ? copy : toCompose(copy);
-              drawBuild();
-              main.querySelector(".editor")?.scrollIntoView({ block: "start" });
-            } }))),
-      h("div", { class: "act-body" }, activityPreview(a)));
-    markEditingRow(row, a);
-    dragRow(row, a);
-    return row;
-  }) : h("p", { class: "muted small" }, "아직 활동이 없습니다.");
+  const grid = h("div", { class: "act-grid" });
+  syncRows(grid);
   // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
   const keep = [".build > aside", ".act-scroll"].map((q) => main.querySelector(q)?.scrollTop || 0);
   main.classList.add("build-page");
-  main.replaceChildren(h("div", { class: "build", "data-list": key },
+  main.replaceChildren(h("div", { class: "build", "data-lesson": lesson.id },
     h("aside", { class: "stack" }, asideKids),
     h("div", { class: "build-main stack" },
       h("section", { class: "card stack act-list" },
-        h("div", { class: "row between" }, h("h2", {}, "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "")),
+        h("div", { class: "row between" }, h("h2", {}, listTitle),
           h("div", { class: "act-hint" }, hint())),
-        h("div", { class: "act-scroll" }, h("div", { class: "act-grid" }, list))))));
+        h("div", { class: "act-scroll" }, grid)))));
   [".build > aside", ".act-scroll"].forEach((q, i) => { const el = main.querySelector(q); if (el) el.scrollTop = keep[i]; });
   pinBuild();
+}
+
+// 활동 목록 칸을 activities에 맞춘다. 내용이 그대로인 칸은 쪽 칸만 새로 그리고, 순서는 CSS order로만 바꾼다
+// (칸을 DOM에서 옮기거나 다시 만들면 그 안의 시뮬레이션이 처음부터 다시 불러와진다)
+function syncRows(grid) {
+  const old = new Map([...grid.querySelectorAll(":scope > .act-row")].map((r) => [r.dataset.id, r]));
+  grid.querySelector(":scope > .act-empty")?.remove();
+  activities.forEach((a, i) => {
+    const key = rowKey(a);
+    let row = old.get(String(a.id));
+    old.delete(String(a.id));
+    if (row && row.dataset.key === key) row.querySelector(".act-page").replaceWith(pageCell(a));
+    else {
+      const fresh = activityRow(a);
+      if (row) row.replaceWith(fresh); else grid.append(fresh);
+      row = fresh;
+    }
+    row.act = a;
+    row.dataset.key = key;
+    row.style.order = i;
+    markEditingRow(row, a);
+  });
+  old.forEach((r) => r.remove());
+  if (!activities.length) grid.append(h("p", { class: "muted small act-empty" }, "아직 활동이 없습니다."));
+}
+
+function activityRow(a) {
+  const row = h("div", { class: "act-row", "data-id": a.id },
+    h("div", { class: "act-head stack" },
+      // 맨 위: 쪽(크게) | 종류(위)·제목(아래)
+      h("div", { class: "act-id" },
+        pageCell(a),
+        h("div", { class: "act-name" },
+          h("p", { class: "muted small" }, activityName(a)),
+          h("h3", {}, a.title))),
+      h("div", { class: "act-btns" },
+        a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
+        h("button", { type: "button", class: "act-edit",
+          onclick() {
+            // 칸을 다시 쓰므로 지금 활동(row.act)을 고친다
+            const copy = JSON.parse(JSON.stringify(row.act));
+            editing = copy.kind === "sim" ? copy : toCompose(copy);
+            drawBuild();
+            main.querySelector(".editor")?.scrollIntoView({ block: "start" });
+          } }))),
+    h("div", { class: "act-body" }, activityPreview(a)));
+  dragRow(row, a);
+  return row;
 }
 
 // 만들기 탭을 넓은 화면에서 창 높이에 맞춘다: 페이지는 스크롤되지 않고, 왼쪽(새로 만들기·편집기)과
@@ -1024,8 +1054,8 @@ function toCompose(a) {
     q.quiz = a.kind === "quiz" && q.answer != null;
     q.anon = isAnon(a, q);
     if (isChoice(q) && !(q.options && q.options.length)) q.options = ["", ""];
-    // 직접 정한 제목만 남긴다(질문 글과 같으면 질문 글을 따라감)
-    blocks.push(questionBlock({ id: i === 0 ? a.id : null, kind: a.kind, show_answer: a.show_answer, title: i === 0 && a.title !== q.text ? a.title : "", q }));
+    // 첫 칸은 활동의 제목을 그대로 보여 준다. 나머지 칸은 비워 두어 저장할 때 「질문 n」이 된다
+    blocks.push(questionBlock({ id: i === 0 ? a.id : null, kind: a.kind, show_answer: a.show_answer, title: i === 0 ? a.title || "" : "", q }));
   });
   return { ...base, blocks };
 }
@@ -1035,6 +1065,9 @@ function composeEditor() {
   const msg = h("p", { class: "error" });
   const redraw = (focus) => { drawBuild(); if (focus) main.querySelector('.editor [data-focus="' + focus + '"]')?.focus(); };
   const hasResponses = e.blocks.some((b) => b.id && responses.some((r) => r.activity_id === b.id));
+  // 제목을 비운 질문은 「질문 n」. n은 이 수업에 이미 있는 질문(이 편집기 칸 말고) 다음 번호부터
+  const qBase = activities.filter((a) => a.kind !== "sim" && !isInfoActivity(a) && !e.blocks.some((b) => b.id === a.id)).length;
+  const autoTitle = (n) => "질문 " + (qBase + n);
   let qn = 0, inN = 0;
   const blockEls = e.blocks.map((b) => {
     // 칸 오른쪽 위 「삭제」: 저장한 칸이면 그 활동을 바로 지운다
@@ -1048,7 +1081,7 @@ function composeEditor() {
       e.blocks = e.blocks.filter((x) => x !== b);
       redraw();
     } }, "삭제");
-    return b.type === "info" ? infoEdit(b, ++inN, del) : questionEdit(b, ++qn, del, redraw);
+    return b.type === "info" ? infoEdit(b, ++inN, del) : questionEdit(b, autoTitle(++qn), del, redraw);
   });
 
   async function saveAll() {
@@ -1071,14 +1104,15 @@ function composeEditor() {
       qi++;
       const q = b.q;
       if (blankQ(q)) continue;
+      const title = (b.title || "").trim() || autoTitle(qi), name = "「" + title + "」";
       q.text = (q.text || "").trim();
-      if (!q.text) { msg.textContent = "질문 " + qi + "을 입력하세요."; return; }
+      if (!q.text) { msg.textContent = name + "의 질문을 입력하세요."; return; }
       if (isChoice(q)) {
         const opts = q.options.map((x) => x.trim()).filter(Boolean);
-        if (opts.length < 2) { msg.textContent = "질문 " + qi + "의 항목을 두 개 이상 적으세요."; return; }
-        if (new Set(opts).size !== opts.length) { msg.textContent = "질문 " + qi + "에 같은 항목이 두 번 있습니다."; return; }
+        if (opts.length < 2) { msg.textContent = name + "의 항목을 두 개 이상 적으세요."; return; }
+        if (new Set(opts).size !== opts.length) { msg.textContent = name + "에 같은 항목이 두 번 있습니다."; return; }
         const right = [].concat(q.answer ?? []).map((x) => String(x).trim()).filter((x) => opts.includes(x));
-        if (q.quiz && !right.length) { msg.textContent = "질문 " + qi + "(퀴즈)의 정답을 고르세요."; return; }
+        if (q.quiz && !right.length) { msg.textContent = name + "(퀴즈)의 정답을 고르세요."; return; }
         q.options = opts;
         if (q.quiz) q.answer = q.type === "multi" ? right : right[0];
         else { delete q.answer; delete q.explain; }
@@ -1086,7 +1120,7 @@ function composeEditor() {
       const { quiz, ...clean } = q;
       // 퀴즈를 켠 질문은 퀴즈(한 번만 제출, 서버에서 채점). 아니면 예전 종류(슬라이드 질문·설문)를 그대로 둔다
       // named는 예전 화면을 위해 남긴다. 실제 익명 여부는 질문의 anon
-      rows.push([b, { kind: quiz ? "quiz" : b.kind === "slide" ? "slide" : "survey", title: (b.title || "").trim() || q.text.slice(0, 100),
+      rows.push([b, { kind: quiz ? "quiz" : b.kind === "slide" ? "slide" : "survey", title,
         show_answer: !!b.show_answer, named: !q.anon, questions: [clean] }]);
     }
     if (!rows.length) { msg.textContent = "설명이나 질문을 입력하세요."; return; }
@@ -1102,6 +1136,7 @@ function composeEditor() {
       if (!s) return;
       b.id = s.id;
       if (b.type === "info") b.qid = row.questions[0].id;
+      else b.title = row.title; // 자동으로 붙인 「질문 n」도 칸에 남겨, 다시 저장해도 번호가 바뀌지 않게
     }
     e.blocks = e.blocks.filter((b) => b.id);
     const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
@@ -1131,9 +1166,11 @@ function infoEdit(b, n, del) {
     h("label", {}, "설명문", body));
 }
 
-// 질문 칸: 익명 · 객관식|서술형 · 퀴즈, 항목(+ 항목 추가), 퀴즈면 정답·해설·제출 뒤 보여 주기
-function questionEdit(b, n, del, redraw) {
+// 질문 칸: 위 줄은 제목(비우면 auto, 예: 「질문 1」이 제목이 됨)과 삭제. 그 아래 익명 · 객관식|서술형 · 퀴즈, 항목(+ 항목 추가), 퀴즈면 정답·해설·제출 뒤 보여 주기
+function questionEdit(b, auto, del, redraw) {
   const q = b.q;
+  const title = h("input", { type: "text", class: "blk-title", maxlength: 100, value: b.title || "", placeholder: auto, "aria-label": "질문 제목",
+    title: "비우면 「" + auto + "」이 제목이 됩니다.", oninput() { b.title = title.value; } });
   const choice = isChoice(q);
   // 객관식 ↔ 서술형. 서술형은 자동 채점하지 않으므로 퀴즈도 꺼진다
   const setType = (toChoice) => {
@@ -1200,7 +1237,7 @@ function questionEdit(b, n, del, redraw) {
   }) : null;
   const explain = q.quiz ? h("input", { type: "text", maxlength: 300, value: q.explain || "", placeholder: "해설 (선택)", oninput() { q.explain = explain.value.trim() || undefined; } }) : null;
   return h("article", { class: "blk q-edit stack" },
-    h("div", { class: "blk-top" }, h("strong", {}, "질문 " + n), del),
+    h("div", { class: "blk-top" }, title, del),
     h("div", { class: "q-head" }, anon, seg, quizBtn),
     h("label", {}, "질문", text),
     choice ? h("div", { class: "opt-list" }, h("span", { class: "field-name" }, "항목" + (q.quiz ? " (정답을 고르세요)" : "")), optRows,
