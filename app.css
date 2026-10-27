@@ -321,3 +321,5 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .fx-head { flex-direction: row; align-items: center; }
 .fx-head h2 { margin: 0; }
 .fx-head .grow { flex: 1 1 12rem; }
+/* 애니메이션 이전·다음 화살표 */
+.pager .arrow { min-width: 3.2rem; font-size: 1.1rem; padding-inline: .8rem; }
