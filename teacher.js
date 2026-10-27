@@ -1493,13 +1493,17 @@ async function readRtcStats(watch) {
   for (const r of watch.rtc.values()) {
     if (!r.pc || r.pc.connectionState !== "connected") continue;
     let fps = 0, rtt = 0, jb = 0, relay = false;
-    (await r.pc.getStats()).forEach((x) => {
+    const stats = await r.pc.getStats();
+    stats.forEach((x) => {
       if (x.type === "inbound-rtp" && x.kind === "video") {
         fps = x.framesPerSecond || 0;
         if (x.jitterBufferEmittedCount) jb = (x.jitterBufferDelay / x.jitterBufferEmittedCount) * 1000;
       }
-      if (x.type === "candidate-pair" && x.nominated && x.state === "succeeded") rtt = (x.currentRoundTripTime || 0) * 1000;
-      if (x.type === "remote-candidate" && x.candidateType === "relay") relay = true;
+      // 실제로 쓰는 연결 쌍의 양 끝 중 하나라도 중계 서버면 「중계」(후보 목록에 중계가 있다는 것만으로는 아님)
+      if (x.type === "candidate-pair" && x.nominated && x.state === "succeeded") {
+        rtt = (x.currentRoundTripTime || 0) * 1000;
+        relay = [x.localCandidateId, x.remoteCandidateId].some((id) => stats.get(id)?.candidateType === "relay");
+      }
     });
     watch.videoText = "영상 " + Math.round(fps) + " FPS · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
     watch.simInfo.textContent = watch.videoText;
@@ -1554,7 +1558,7 @@ async function watchStudentScreen(s) {
       srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
         + "<style>body{margin:0;padding:8px;background:#f6f7fb}body *{pointer-events:none}</style><body></body>" });
     const ready = new Promise((ok) => frame.addEventListener("load", ok, { once: true }));
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const pc = new RTCPeerConnection({ iceServers: await teacherIce(), iceTransportPolicy: forceRelay() ? "relay" : "all" });
     const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, frame, video,
       h("p", { class: "muted small" }, "학생의 수업 화면(보고 있는 쪽, 쓰고 있는 답)은 바뀔 때마다, 시뮬레이션은 초당 최대 5장으로 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
       const back = grid && grid.tiles.get(s.id);
@@ -1583,7 +1587,7 @@ async function watchStudentScreen(s) {
 
 // ---------- 실시간 화면 일괄 미리보기 ----------
 // 학생 관리 표의 「일괄 미리보기」 열에 화면 보기에 동의한 학생들의 수업 화면을 작게(320×180, 240p 미만) 띄운다.
-// 학생은 가벼운 방식으로 보낸다: 시뮬레이션 캔버스는 WebRTC 영상 10 FPS·높이 240 이하(약 150 kbps),
+// 학생은 가벼운 방식으로 보낸다: 시뮬레이션 캔버스는 WebRTC 영상 6 FPS·높이 180 이하(약 70 kbps, 중계 서버 우선),
 // 영상이 막히면 그림 초당 2장(가로 320). 수업 화면(쪽·답)은 바뀔 때만. 화면 내용은 교사만 듣는 채널(:t)로 받는다.
 let grid = null;   // { code, ch, ready, keep, tiles: Map(학생 id → 칸) }
 
