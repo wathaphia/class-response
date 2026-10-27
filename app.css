@@ -184,13 +184,19 @@ main.lesson .slide { cursor: zoom-in; }
 /* 교사: 만들기 */
 .build { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
 .build > aside { flex: 1 1 280px; min-width: 0; }
-.build > .card { flex: 999 1 560px; min-width: 0; }
+.build > .build-main { flex: 999 1 560px; min-width: 0; }
+.act-row { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); align-items: start; }
+.act-row.on { background: var(--accent-soft); border-radius: 12px; padding: 1rem; outline: 2px solid var(--accent); }
+.act-head { gap: .4rem; }
+.act-head h3 { margin: 0; overflow-wrap: anywhere; }
+.act-head button { align-self: flex-start; }
+.act-body { min-width: 0; }
+.preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
+.preview-options li.right { color: var(--ok); }
 .kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .4rem; }
 .kind { display: grid; gap: .1rem; padding: .6rem .4rem; min-height: 64px; background: #fff; border: 1px solid var(--field); text-align: center; }
 .kind span { font-size: .78rem; color: var(--muted); }
 .kind:hover { border-color: var(--accent); }
-.act-item { display: grid; text-align: left; gap: .1rem; padding: .5rem .75rem; background: #fff; border: 1px solid var(--line); }
-.act-item.on { border: 2px solid var(--accent); background: var(--accent-soft); }
 .q-edit { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; }
 
 /* 슬라이드 미리보기 */
@@ -225,6 +231,9 @@ td.actions { white-space: nowrap; text-align: right; }
 .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); }
 .modal-body { padding: 1.25rem; overflow: auto; }
 
+@media (max-width: 720px) {
+  .act-row { grid-template-columns: 1fr; }
+}
 @media (max-width: 520px) {
   .kinds { grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: minmax(0, 1fr) 3rem; }
