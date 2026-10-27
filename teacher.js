@@ -284,7 +284,9 @@ function refreshRun() {
       run.stage.querySelector(".pptx-frame")?.remove();
       run.pptKey = "";
       run.img.hidden = false;
-      run.img.src = slideSrc(L, L.page);
+      const last = run.lastPage || L.page;
+      swapSlide(run.img, slideSrc(L, L.page), slideFx(L), slideNo(L, last) === slideNo(L, L.page) ? (last === L.page ? 1 : 0) : Math.sign(L.page - last));
+      run.lastPage = L.page;
       run.img.alt = "슬라이드 " + L.page;
     }
     const pos = slidePos(L, L.page);
@@ -694,13 +696,14 @@ function flash(text) {
 
 // ---------- 학생 관리 ----------
 function ensureTeacherScreenChannel() {
-  if (screenChannel && screenChannelKey === lesson.id) return screenChannelReady;
+  const key = screenChannelName(lesson.code);
+  if (screenChannel && screenChannelKey === key) return screenChannelReady;
   if (screenChannel) {
     for (const watch of [...screenWatchers.values()]) watch.close();
     sb.removeChannel(screenChannel);
   }
-  screenChannelKey = lesson.id;
-  screenChannel = sb.channel("class-screen:" + lesson.id, { config: { broadcast: { self: false } } });
+  screenChannelKey = key;
+  screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
   screenChannelReady = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("화면 공유 연결을 준비하지 못했습니다. 새로고침해 주세요.")), 10000);
@@ -721,7 +724,9 @@ async function handleTeacherScreenSignal(message) {
   const watch = screenWatchers.get(message.from);
   if (!watch) return;
   try {
-    if (message.type === "offer" && message.sdp) {
+    if (message.type === "mirror") {
+      await showMirror(watch, message);
+    } else if (message.type === "offer" && message.sdp) {
       await watch.pc.setRemoteDescription(message.sdp);
       for (const candidate of watch.queued) await watch.pc.addIceCandidate(candidate);
       watch.queued = [];
@@ -731,36 +736,74 @@ async function handleTeacherScreenSignal(message) {
     } else if (message.type === "candidate" && message.candidate) {
       if (watch.pc.remoteDescription) await watch.pc.addIceCandidate(message.candidate);
       else watch.queued.push(message.candidate);
-    } else if (message.type === "stopped") {
-      watch.status.textContent = "학생이 화면 공유를 중지했습니다.";
+    } else if (message.type === "video-stopped") {
       watch.video.srcObject = null;
+      watch.video.hidden = true;
+    } else if (message.type === "stopped") {
+      watch.status.textContent = "학생이 보여 주기를 멈췄거나 거절했습니다. 다시 요청하려면 창을 닫고 다시 여세요.";
+      watch.video.srcObject = null;
+      watch.video.hidden = true;
     }
   } catch (e) {
     watch.status.textContent = "화면 연결 오류: " + e.message;
   }
 }
 
+// 학생이 보낸 수업 화면을 그린다. 스크립트·외부 문서·이벤트 속성을 걷어 내고 넣는다.
+function cleanMirror(html, doc) {
+  const d = new DOMParser().parseFromString(html, "text/html");
+  d.querySelectorAll("script, iframe, object, embed, base, meta, link, style, frame").forEach((el) => el.remove());
+  d.querySelectorAll("*").forEach((el) => [...el.attributes].forEach((a) => {
+    const bad = /^on/i.test(a.name) || /^\s*javascript:/i.test(a.value) || (/^\s*data:/i.test(a.value) && a.name !== "src");
+    if (bad) el.removeAttribute(a.name);
+  }));
+  return [...d.body.childNodes].map((n) => doc.importNode(n, true));
+}
+
+async function showMirror(watch, m) {
+  await watch.ready;
+  const doc = watch.frame.contentDocument;
+  if (!doc || !doc.body) return;
+  if (typeof m.html === "string" && m.html !== watch.html) {
+    watch.html = m.html;
+    doc.body.replaceChildren(...cleanMirror(m.html, doc));
+  }
+  const el = doc.scrollingElement;
+  if (el && typeof m.scroll === "number") el.scrollTop = m.scroll * (el.scrollHeight - el.clientHeight);
+  watch.frame.style.maxWidth = m.narrow ? "420px" : "";
+  watch.status.replaceChildren(
+    h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱이나 탭으로 나가 있음" : "수업 화면을 보고 있음"),
+    m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신");
+}
+
 async function watchStudentScreen(s) {
   if (screenWatchers.size) return alert("실시간 화면은 한 번에 한 명씩 볼 수 있습니다. 먼저 열린 화면 창을 닫아 주세요.");
   try {
     await ensureTeacherScreenChannel();
-    const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, controls: true });
-    const status = h("p", { class: "muted small" }, "학생에게 화면 공유 요청을 보냈습니다. 학생이 공유를 허용할 때까지 기다립니다.");
+    const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, muted: true, controls: true, hidden: true });
+    const status = h("p", { class: "muted small" }, "학생 화면에 요청을 보냈습니다. 학생이 「허용」을 누를 때까지 기다립니다.");
+    // 학생이 보낸 화면은 스크립트를 쓸 수 없는 iframe 안에만 그린다(allow-scripts 없음)
+    const frame = h("iframe", { class: "mirror-frame", sandbox: "allow-same-origin", title: nameOf(s) + " 수업 화면",
+      srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
+        + "<style>body{margin:0;padding:8px;background:#f6f7fb}body *{pointer-events:none}</style><body></body>" });
+    const ready = new Promise((ok) => frame.addEventListener("load", ok, { once: true }));
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, video, status,
-      h("p", { class: "muted small" }, "지연과 데이터 사용량을 줄이기 위해 최대 640×360, 초당 8프레임으로 받습니다. 연결되지 않으면 학교 네트워크가 P2P 연결을 막았을 수 있습니다.")), () => {
-      sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id });
+    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, frame, video,
+      h("p", { class: "muted small" }, "학생이 허용하면 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)이 몇 초마다 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
+      sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
       pc.close();
       screenWatchers.delete(s.id);
+      screenWatchers.delete(screenKey(s));
     });
-    const watch = { pc, video, status, queued: [], close };
+    const watch = { pc, video, status, frame, ready, html: "", queued: [], close };
     screenWatchers.set(s.id, watch);
-    pc.ontrack = (e) => { video.srcObject = e.streams[0]; status.textContent = "실시간 화면을 보고 있습니다."; };
-    pc.onicecandidate = (e) => e.candidate && sendTeacherScreenSignal({ type: "candidate", from: "teacher", to: s.id, candidate: e.candidate });
+    screenWatchers.set(screenKey(s), watch);   // 예전 setup.sql 이면 학생이 학번·이름으로 답한다
+    pc.ontrack = (e) => { video.srcObject = e.streams[0]; video.hidden = false; };
+    pc.onicecandidate = (e) => e.candidate && sendTeacherScreenSignal({ type: "candidate", from: "teacher", to: s.id, key: screenKey(s), candidate: e.candidate });
     pc.onconnectionstatechange = () => {
       if (["failed", "disconnected"].includes(pc.connectionState)) status.textContent = "연결이 끊겼습니다. 학생에게 다시 요청해 주세요.";
     };
-    await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id });
+    await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id, key: screenKey(s) });
   } catch (e) {
     alert(e.message || e);
   }
@@ -820,7 +863,7 @@ function drawStudents() {
   main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", {}, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 화면 공유를 직접 허용해야 볼 수 있으며, 한 번에 한 명씩 저화질로 연결합니다.")),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 「허용」을 눌러야 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)만 보입니다. 노트북·태블릿·휴대폰 모두 되고, 한 번에 한 명씩 봅니다.")),
     students.length ? h("div", { class: "table-wrap" }, h("table", {},
       h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
@@ -898,6 +941,12 @@ function drawSettings() {
         h("button", { class: "ghost danger", type: "button", onclick: remove }, "수업 지우기"))) : null));
 }
 
+// 단계 그림 미리보기 이름: "3쪽" 또는 "3쪽 · 2/4"
+function thumbLabel(i) {
+  const p = slidePos(lesson, i);
+  return p.slide + "쪽" + (p.steps > 1 ? " · " + p.step + "/" + p.steps : "");
+}
+
 // 슬라이드 올리기: PPTX 한 개는 그대로, PDF 한 개 또는 그림 여러 장은 쪽마다 JPG로 바꿔 Storage에 올린다.
 function slidesCard() {
   const file = h("input", { type: "file", accept: ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg", multiple: true });
@@ -945,18 +994,29 @@ function slidesCard() {
     const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : "") },
       preview,
       h("label", { class: "thumb-check" }, checkbox, "선택"),
-      h("figcaption", {}, h("span", {}, i + "쪽"),
+      h("figcaption", {}, h("span", {}, slideSteps(lesson) ? thumbLabel(i) : i + "쪽"),
         h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], status); } }, "삭제")));
     thumbs.append(figure);
   }
   const anim = !!slideSteps(lesson);
-  const ppt = isPptx(lesson) || anim;   // 쪽 미리보기·삭제를 쓰지 않는 자료
+  const ppt = isPptx(lesson);   // Office 뷰어로 보여 주는 자료: 쪽 미리보기·삭제·전환 효과 없음
+  const fxPick = h("select", {
+    "aria-label": "슬라이드 전환 효과",
+    async onchange() {
+      const { error } = await sb.from("lessons").update({ slide_dir: withFx(lesson.slide_dir, fxPick.value) }).eq("id", lesson.id);
+      if (error) return alert("바꾸지 못했습니다: " + error.message);
+      flash("전환 효과: " + SLIDE_FX[fxPick.value]);
+      await loadLessons(lesson.id);
+    },
+  }, Object.entries(SLIDE_FX).map(([k, name]) => h("option", { value: k, selected: k === slideFx(lesson) }, name)));
   return h("section", { class: "card stack" },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
     h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), bar, status,
-    anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 다시 올리세요.") : null,
-    ppt && !anim ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
+    anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
+    lesson.slide_count && !ppt ? h("label", { class: "row" }, h("span", {}, "슬라이드 전환 효과"), fxPick,
+      h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")) : null,
+    ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null,
     lesson.slide_count && !ppt ? h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
       h("span", { class: "muted small grow" }, "미리보기에 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
@@ -1118,12 +1178,26 @@ async function deleteSlide(target, status) {
       if (r.error) throw r.error;
     }
     const left = nums.length;
+    // 단계 그림 수업: 남은 그림으로 슬라이드마다 단계 수를 다시 센다. 단계가 모두 지워진 슬라이드는 빠지고,
+    // 질문의 쪽 번호(= 슬라이드 번호)는 빠진 슬라이드만큼 당긴다.
+    const steps = slideSteps(lesson);
+    let anim = "", gone = targets, total = left;
+    if (steps) {
+      const owner = steps.flatMap((n, s) => Array(n).fill(s + 1));   // 그림 번호 → 슬라이드 번호
+      if (nums.every((n) => n <= owner.length)) {
+        const keep = steps.map(() => 0);
+        for (const n of nums) keep[owner[n - 1] - 1]++;
+        gone = keep.map((k, s) => (k ? 0 : s + 1)).filter(Boolean);
+        anim = keep.filter(Boolean).map((k) => Math.min(k - 1, 35).toString(36)).join("");
+        total = anim.length;
+      }
+    }
     if (targets.length) {
-      const shift = (pg) => (pg == null ? pg : pg - targets.filter((n) => n < pg).length);
+      const shift = (pg) => (pg == null ? pg : pg - gone.filter((n) => n < pg).length);
       for (const a of activities) {
         if (a.page == null) continue;
-        const page = Math.min(shift(a.page), Math.max(left, 1));
-        let to = a.page_to > a.page ? Math.min(shift(a.page_to), Math.max(left, 1)) : a.page_to ?? null;
+        const page = Math.min(shift(a.page), Math.max(total, 1));
+        let to = a.page_to > a.page ? Math.min(shift(a.page_to), Math.max(total, 1)) : a.page_to ?? null;
         if (to != null && to <= page) to = null;
         if (page === a.page && to === (a.page_to ?? null)) continue;
         const change = { page };
@@ -1133,7 +1207,8 @@ async function deleteSlide(target, status) {
       }
     }
     const pageNow = lesson.page - targets.filter((n) => n < lesson.page).length;
-    const dir = base + "?v=" + Date.now();   // 이름이 바뀐 그림을 브라우저가 예전 것으로 보이지 않게
+    // 이름이 바뀐 그림을 브라우저가 예전 것으로 보이지 않게. 원본 PPTX(deck)는 더 이상 쪽이 맞지 않으므로 뺀다
+    const dir = withFx(base + "?v=" + Date.now() + (anim ? "&anim=" + anim : ""), slideFx(lesson));
     const u = await sb.from("lessons").update({ slide_dir: left ? dir : "", slide_count: left, page: Math.min(Math.max(pageNow, 1), Math.max(left, 1)) }).eq("id", lesson.id);
     if (u.error) throw u.error;
     selectedSlides.clear();
@@ -1167,7 +1242,7 @@ async function uploadSlides(files, progress) {
   const { data: old } = await sb.storage.from("slides").list(folder.replace(/\/$/, ""), { limit: 1000 });
   const extra = (old || []).map((o) => o.name).filter((n) => parseInt(n, 10) > images.length).map((n) => folder + n);
   if (extra.length) await sb.storage.from("slides").remove(extra);
-  const dir = SB_URL + "/storage/v1/object/public/slides/" + folder + "{n}.jpg?v=" + Date.now();
+  const dir = withFx(SB_URL + "/storage/v1/object/public/slides/" + folder + "{n}.jpg?v=" + Date.now(), slideFx(lesson));
   const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", lesson.id);
   if (error) throw error;
   await sb.storage.from("slides").remove([folder + "deck.pptx"]);

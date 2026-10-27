@@ -66,6 +66,38 @@ function slideLabel(lesson, page) {
   const p = slidePos(lesson, page);
   return p.slide + " / " + p.total + (p.steps > 1 ? " · 애니메이션 " + p.step + "/" + p.steps : "");
 }
+// 실시간 화면 신호에서 학생을 알아보는 이름(학생 id를 모를 때 씀)
+const screenKey = (s) => "k:" + s.class_no + ":" + s.name;
+const screenChannelName = (code) => (code ? "class-screen:" + String(code).trim().toUpperCase() : "");
+
+// 슬라이드 전환 효과: slide_dir 끝의 fx=… (없으면 페이드)
+const SLIDE_FX = { fade: "페이드", push: "밀어내기", zoom: "확대", none: "없음" };
+function slideFx(lesson) {
+  const m = /[?&]fx=(\w+)/.exec(lesson.slide_dir || "");
+  return m && SLIDE_FX[m[1]] ? m[1] : "fade";
+}
+function withFx(dir, fx) {
+  const base = dir.replace(/([?&])fx=\w+&?/, "$1").replace(/[?&]$/, "");
+  return fx === "fade" || !base ? base : base + (base.includes("?") ? "&" : "?") + "fx=" + fx;
+}
+// 슬라이드 그림을 바꾸며 전환 효과를 준다. dir: 1 앞으로, -1 뒤로, 0 같은 슬라이드 안의 애니메이션 단계
+// 새 그림을 먼저 받아 둔 뒤 바꿔서, 효과 도중에 예전 그림이 비치지 않게 한다.
+function swapSlide(img, src, fx, dir) {
+  if (img.dataset.want === src || (!img.dataset.want && img.getAttribute("src") === src)) return;
+  img.dataset.want = src;
+  const show = () => {
+    if (img.dataset.want !== src) return;
+    img.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev");
+    img.src = src;
+    const cls = dir === 0 ? "fx-step" : fx === "none" ? "" : fx === "push" ? (dir > 0 ? "fx-push-next" : "fx-push-prev") : "fx-" + fx;
+    if (cls) { void img.offsetWidth; img.classList.add(cls); }
+  };
+  if (!img.getAttribute("src")) return show();
+  const pre = new Image();
+  pre.src = src;
+  (pre.decode ? pre.decode() : Promise.resolve()).catch(() => {}).then(show);
+}
+
 // 단계 그림과 함께 올린 원본 PPTX(같은 폴더의 deck.pptx) 주소
 function deckUrl(lesson) {
   return /[?&]deck=1/.test(lesson.slide_dir || "") ? lesson.slide_dir.split("?")[0].replace(/\{n\}\.jpg$/, "deck.pptx") : null;
