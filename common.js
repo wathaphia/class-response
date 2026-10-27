@@ -135,7 +135,7 @@ try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:ice&&ice.len
 st.getTracks().forEach(function(t){pc.addTrack(t,st);});
 pc.onicecandidate=function(e){if(e.candidate)parent.postMessage({craRtc:"ice",candidate:e.candidate.toJSON()},"*");};
 pc.createOffer().then(function(o){return pc.setLocalDescription(o);}).then(function(){
-pc.getSenders().forEach(function(s){var p=s.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];p.encodings[0].maxBitrate=1500000;p.encodings[0].maxFramerate=30;s.setParameters(p).catch(function(){});});
+pc.getSenders().forEach(function(s){var p=s.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];p.encodings[0].maxBitrate=1000000;p.encodings[0].maxFramerate=30;s.setParameters(p).catch(function(){});});
 parent.postMessage({craRtc:"offer",sdp:pc.localDescription.toJSON(),idx:vidIdx},"*");}).catch(function(){});}catch(e){rtcStop();}}
 function snap(){var d=document,canv=d.querySelectorAll("canvas"),data={},root=d.documentElement.cloneNode(true),cc=root.querySelectorAll("canvas");
 for(var i=0;i<canv.length;i++){var c=canv[i],url="";
