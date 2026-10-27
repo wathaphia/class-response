@@ -670,12 +670,13 @@ function simCard(a) {
     const f = simFrame(null, a.title);
     c.el.replaceChildren(
       h("div", { class: "card-head" }, h("h2", {}, a.title), h("span", { class: "badge" }, "시뮬레이션")),
-      h("p", { class: "muted small" }, "직접 조작해 보세요. 화면이 작으면 「화면 가득 보기」를 누르세요."),
+      h("div", { class: "row" }, simPlayButton(f)),
+      h("p", { class: "muted small" }, "▶ 재생을 눌러 시작하고, 직접 조작해 보세요. 화면이 작으면 「화면 가득 보기」를 누르세요."),
       h("div", { class: "row wrap" },
         h("button", { class: "primary", type: "button", onclick() { loadSim(a).then((html) => showFloatingSim(a.title, withSimAgent(html), a.id + ":" + a.html_ver)); } }, "화면에 띄우기"),
         h("button", { class: "ghost", type: "button", onclick() { loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html))); } }, "화면 가득 보기")),
-      f);
-    loadSim(a).then((html) => { if (c.key === key) f.srcdoc = withSimAgent(html); })
+      simScaled(f));
+    loadSim(a).then((html) => { if (c.key === key) f.srcdoc = withSimPause(withSimAgent(html)); })
       .catch(() => f.replaceWith(h("p", { class: "error" }, "시뮬레이션을 불러오지 못했습니다. 새로고침해 보세요.")));
   }
   return c.el;

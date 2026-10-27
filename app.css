@@ -248,6 +248,10 @@ td.actions { white-space: nowrap; text-align: right; }
 /* 시뮬레이션 */
 .sim-frame { display: block; width: 100%; aspect-ratio: 16 / 10; min-height: 320px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .sim-stage .sim-frame { aspect-ratio: 16 / 9; }
+/* 넓은 화면(1120×630, common.js SIM_VIEW)으로 그린 시뮬레이션을 칸 너비에 맞게 줄여 넣는다 */
+.sim-scale { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.sim-scale > .sim-frame { position: absolute; left: 0; top: 0; width: 1120px; height: 630px; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; transform: scale(var(--s, .4)); transform-origin: 0 0; }
+.sim-play { min-width: 7.5em; }
 main.lesson.split .sim-stage .sim-frame { max-height: calc(100vh - 9.5rem); }
 .sim-full { position: fixed; inset: 0; z-index: 45; background: #fff; display: flex; flex-direction: column; }
 .sim-full-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .5rem 1rem; border-bottom: 1px solid var(--line); }
