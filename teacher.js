@@ -18,6 +18,7 @@ let passwordRecovery = false;
 let screenChannel = null;
 let screenChannelKey = "";
 let screenChannelReady = null;
+let screenDataCh = null;   // 학생이 보내는 화면 내용·신호를 받는 교사 전용 채널(:t)
 const screenWatchers = new Map();
 
 if (!sb) notConfigured(app);
@@ -1320,18 +1321,23 @@ function ensureTeacherScreenChannel() {
   if (screenChannel) {
     for (const watch of [...screenWatchers.values()]) watch.close();
     sb.removeChannel(screenChannel);
+    sb.removeChannel(screenDataCh);
   }
   screenChannelKey = key;
+  // 수업 채널: 교사 → 학생 신호와 접속 상태. 학생이 보내는 것은 교사 전용 채널(:t)로만 온다.
   screenChannel = sb.channel(key, { config: { broadcast: { self: false } } });
-  screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
+  screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));   // 새로고침 전 예전 학생 화면용
   screenChannel.on("presence", { event: "sync" }, updatePresence);
-  screenChannelReady = new Promise((resolve, reject) => {
+  screenDataCh = sb.channel(screenDataChannelName(lesson.code), { config: { broadcast: { self: false } } });
+  screenDataCh.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
+  const join = (ch) => new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("화면 공유 연결을 준비하지 못했습니다. 새로고침해 주세요.")), 10000);
-    screenChannel.subscribe((status) => {
-      if (status === "SUBSCRIBED") { clearTimeout(timeout); resolve(screenChannel); }
+    ch.subscribe((status) => {
+      if (status === "SUBSCRIBED") { clearTimeout(timeout); resolve(); }
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { clearTimeout(timeout); reject(new Error("화면 공유 채널에 연결하지 못했습니다.")); }
     });
   });
+  screenChannelReady = Promise.all([join(screenChannel), join(screenDataCh)]).then(() => screenChannel);
   return screenChannelReady;
 }
 
@@ -1589,23 +1595,17 @@ async function watchStudentScreen(s) {
 // 학생 관리 표의 「일괄 미리보기」 열에 화면 보기에 동의한 학생들의 수업 화면을 작게(320×180, 240p 미만) 띄운다.
 // 학생은 가벼운 방식으로 보낸다: 시뮬레이션 캔버스는 WebRTC 영상 6 FPS·높이 180 이하(약 70 kbps, 중계 서버 우선),
 // 영상이 막히면 그림 초당 2장(가로 320). 수업 화면(쪽·답)은 바뀔 때만. 화면 내용은 교사만 듣는 채널(:t)로 받는다.
-let grid = null;   // { code, ch, ready, keep, tiles: Map(학생 id → 칸) }
+let grid = null;   // { code, ready, keep, tiles: Map(학생 id → 칸) }
 
 function startGrid() {
-  const ch = sb.channel(screenDataChannelName(lesson.code), { config: { broadcast: { self: false } } });
-  ch.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
-  const subscribed = new Promise((ok, no) => ch.subscribe((st) => {
-    if (st === "SUBSCRIBED") ok();
-    if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") no(new Error("일괄 미리보기 채널에 연결하지 못했습니다."));
-  }));
-  grid = { code: lesson.code, ch, tiles: new Map(), ready: false };
+  grid = { code: lesson.code, tiles: new Map(), ready: false };
   const g = grid;
   // 학생 화면이 「아직 보고 있음」을 알 수 있게 15초마다 한 번(모두에게 한 메시지)
   g.keep = setInterval(() => {
     const ids = [...g.tiles.values()].filter((t) => t.asked).flatMap((t) => [t.s.id, screenKey(t.s)]);
     if (ids.length) sendTeacherScreenSignal({ type: "grid-keep", from: "teacher", to: "grid", ids }).catch(() => {});
   }, 15000);
-  Promise.all([ensureTeacherScreenChannel(), subscribed]).then(() => {
+  ensureTeacherScreenChannel().then(() => {
     if (grid !== g) return;
     g.ready = true;
     drawStudents();
@@ -1621,7 +1621,6 @@ function stopGrid() {
     tileReset(t);
     if (t.asked && !screenWatchers.has(t.s.id)) sendTeacherScreenSignal({ type: "stop", from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
   }
-  sb.removeChannel(g.ch);
 }
 
 function dropTile(t) {

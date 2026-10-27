@@ -467,9 +467,9 @@ function sendMirror() {
   sendScreenData(msg).catch(() => {});
 }
 
-// 화면 내용 보내기: 일괄 미리보기면 교사만 듣는 채널로, 아니면 수업 채널로
+// 교사에게 보내는 것(화면 내용·영상 연결 신호)은 모두 교사만 듣는 채널로 HTTP로 보낸다.
+// 수업 채널로 보내면 같은 수업의 다른 학생 기기도 전부 받아서 버리게 된다.
 async function sendScreenData(payload) {
-  if (!mirrorLite) return sendScreenSignal(payload);
   const key = screenDataChannelName(state.lesson.code || code);
   if (!screenDataChannel || screenDataChannel.key !== key) {
     if (screenDataChannel) sb.removeChannel(screenDataChannel.ch);
@@ -479,8 +479,8 @@ async function sendScreenData(payload) {
 }
 
 async function sendScreenSignal(payload) {
-  if (!screenChannel) return;
-  await screenChannel.send({ type: "broadcast", event: "signal", payload });
+  if (!state) return;
+  await sendScreenData(payload);
 }
 
 async function handleScreenSignal(message) {

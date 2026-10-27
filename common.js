@@ -83,7 +83,7 @@ function slideLabel(lesson, page) {
 // 실시간 화면 신호에서 학생을 알아보는 이름(학생 id를 모를 때 씀)
 const screenKey = (s) => "k:" + s.class_no + ":" + s.name;
 const screenChannelName = (code) => (code ? "class-screen:" + String(code).trim().toUpperCase() : "");
-// 일괄 미리보기에서 학생 화면 내용을 받는 채널: 교사만 구독하고 학생은 HTTP로 보내기만 한다(다른 학생 기기로 퍼지지 않음)
+// 학생 화면 내용·신호를 받는 채널: 교사만 구독하고 학생은 HTTP로 보내기만 한다(다른 학생 기기로 퍼지지 않음)
 const screenDataChannelName = (code) => (code ? screenChannelName(code) + ":t" : "");
 
 // 슬라이드 전환 효과: slide_dir 끝의 fx=… (없으면 페이드)
