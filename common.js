@@ -83,6 +83,8 @@ function slideLabel(lesson, page) {
 // 실시간 화면 신호에서 학생을 알아보는 이름(학생 id를 모를 때 씀)
 const screenKey = (s) => "k:" + s.class_no + ":" + s.name;
 const screenChannelName = (code) => (code ? "class-screen:" + String(code).trim().toUpperCase() : "");
+// 일괄 미리보기에서 학생 화면 내용을 받는 채널: 교사만 구독하고 학생은 HTTP로 보내기만 한다(다른 학생 기기로 퍼지지 않음)
+const screenDataChannelName = (code) => (code ? screenChannelName(code) + ":t" : "");
 
 // 슬라이드 전환 효과: slide_dir 끝의 fx=… (없으면 페이드)
 const SLIDE_FX = { fade: "페이드", push: "밀어내기", zoom: "확대", none: "없음" };
@@ -157,15 +159,16 @@ async function iceServers(auth) {
 // 밀린 장면이 쌓이지 않아 지연이 늘지 않는다(최신 장면만 보냄).
 const SIM_AGENT = `<script>(function(){if(window.__craAgent)return;window.__craAgent=1;
 var SI=setInterval,CI=clearInterval,DN=Date.now;
-var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0,pc=null,vidIdx=-1,vidOk=false;
+var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0,pc=null,vidIdx=-1,vidOk=false,lite=false;
 function bigCanvas(){var cs=document.querySelectorAll("canvas"),b=-1,a=0;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),s=r.width*r.height;if(s>a){a=s;b=i;}}return b;}
 function rtcStop(){vidOk=false;if(pc){try{pc.close();}catch(e){}pc=null;}}
-function rtcStart(ice,relay){rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
-try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:ice&&ice.length?ice:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}],iceTransportPolicy:relay?"relay":"all"});
+function rtcStart(ice,relay,o){o=o||{};rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
+var fps=o.fps||30,down=o.h&&c.height>o.h?c.height/o.h:1;
+try{var st=c.captureStream(fps);pc=new RTCPeerConnection({iceServers:ice&&ice.length?ice:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}],iceTransportPolicy:relay?"relay":"all"});
 st.getTracks().forEach(function(t){pc.addTrack(t,st);});
 pc.onicecandidate=function(e){if(e.candidate)parent.postMessage({craRtc:"ice",candidate:e.candidate.toJSON()},"*");};
 pc.createOffer().then(function(o){return pc.setLocalDescription(o);}).then(function(){
-pc.getSenders().forEach(function(s){var p=s.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];p.encodings[0].maxBitrate=1000000;p.encodings[0].maxFramerate=30;s.setParameters(p).catch(function(){});});
+pc.getSenders().forEach(function(s){var p=s.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];p.encodings[0].maxBitrate=o.br||1000000;p.encodings[0].maxFramerate=fps;if(down>1)p.encodings[0].scaleResolutionDownBy=down;s.setParameters(p).catch(function(){});});
 parent.postMessage({craRtc:"offer",sdp:pc.localDescription.toJSON(),idx:vidIdx},"*");}).catch(function(){});}catch(e){rtcStop();}}
 function snap(){var d=document,canv=d.querySelectorAll("canvas"),data={},root=d.documentElement.cloneNode(true),cc=root.querySelectorAll("canvas");
 for(var i=0;i<canv.length;i++){var c=canv[i],url="";
@@ -182,12 +185,13 @@ else if(a.type!=="password")b.setAttribute("value",a.value);}
 var sc=root.querySelectorAll("script");for(var m=0;m<sc.length;m++)sc[m].parentNode.removeChild(sc[m]);
 var head=root.querySelector("head"),body=root.querySelector("body"),hh=head?head.innerHTML:"",bh=body?body.innerHTML:"",bs=body?(body.getAttribute("style")||""):"";
 var msg={craSim:1,canvases:data,w:innerWidth,h:innerHeight,sx:scrollX,sy:scrollY,t:DN()},key=hh+"|#|"+bh+"|#|"+bs;
-if(key!==lastKey){msg.head=hh;msg.body=bh;msg.bs=bs;lastKey=key;}return msg;}
-function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=false;return;}parent.postMessage(m,"*");}
+var same=key===lastKey;if(!same){msg.head=hh;msg.body=bh;msg.bs=bs;lastKey=key;}
+if(lite&&same&&!Object.keys(data).length)return null;return msg;}
+function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=false;return;}if(!m){busy=false;return;}parent.postMessage(m,"*");}
 addEventListener("message",function(e){var m=e.data||{};if(e.source!==parent)return;
-if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;CI(timer);timer=SI(tick,m.every||200);tick();}
+if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";lite=!!m.lite;if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;CI(timer);timer=SI(tick,m.every||200);tick();}
 else if(m.craMirror==="stop"){on=false;CI(timer);rtcStop();}
-else if(m.craRtc==="start"){rtcStart(m.ice,m.relay);}
+else if(m.craRtc==="start"){rtcStart(m.ice,m.relay,m.opt);}
 else if(m.craRtc==="answer"&&pc){pc.setRemoteDescription(m.sdp).catch(function(){});}
 else if(m.craRtc==="ice"&&pc&&m.candidate){pc.addIceCandidate(m.candidate).catch(function(){});}
 else if(m.craRtc==="ok"){vidOk=true;}

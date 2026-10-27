@@ -205,6 +205,19 @@ const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentB
 const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.page + "~" + a.page_to + "쪽" : a.page + "쪽";
 
 // ---------- 틀 ----------
+// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 수업 설정 조절기 · 전체 수업 관리 폴더
+const TAB_ICONS = {
+  run: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+  build: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>',
+  students: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M15.5 5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  manage: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+};
+function tabIcon(k) {
+  const el = h("span", { class: "tab-icon", "aria-hidden": "true" });
+  el.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + TAB_ICONS[k] + "</svg>";
+  return el;
+}
 function draw() {
   clearTimeout(timer);
   const pick = h("select", {
@@ -225,10 +238,11 @@ function draw() {
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
         type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "manage",
         onclick() { tab = k; localStorage.setItem("cra-tab", k); draw(); },
-      }, label))),
+      }, tabIcon(k), h("span", {}, label)))),
       h("button", { class: "link", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃")),
     main);
   if (!lesson && tab !== "manage") tab = "settings";
+  if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
   ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, manage: drawManage })[tab]();
   schedule();
 }
@@ -1328,7 +1342,11 @@ async function sendTeacherScreenSignal(payload) {
 async function handleTeacherScreenSignal(message) {
   if (!message || message.to !== "teacher") return;
   const watch = screenWatchers.get(message.from);
-  if (!watch) return;
+  if (!watch) {
+    const t = grid && grid.tiles.get(message.from);
+    if (t) gridSignal(t, message).catch(() => {});
+    return;
+  }
   try {
     if (message.type === "mirror") {
       await showMirror(watch, message);
@@ -1450,7 +1468,7 @@ async function simRtc(watch, m) {
       s.stream = e.streams[0] || new MediaStream([e.track]);
       s.vidIdx = m.idx;
       watch.sims.set(m.k, s);
-      paintSim(watch, m.k);
+      (watch.paint || paintSim)(watch, m.k);
     };
     pc.onicecandidate = (e) => e.candidate && send("ice", { candidate: e.candidate.toJSON() });
     pc.onconnectionstatechange = () => {
@@ -1524,6 +1542,8 @@ async function showMirror(watch, m) {
 
 async function watchStudentScreen(s) {
   if (screenWatchers.size) return alert("실시간 화면은 한 번에 한 명씩 볼 수 있습니다. 먼저 열린 화면 창을 닫아 주세요.");
+  const tile = grid && grid.tiles.get(s.id);
+  if (tile) tileReset(tile, "크게 보는 중");   // 크게 보는 동안 학생은 원래 화질로 보내고, 닫으면 작은 화면으로 돌아온다
   try {
     await ensureTeacherScreenChannel();
     const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, muted: true, controls: true, hidden: true });
@@ -1537,7 +1557,9 @@ async function watchStudentScreen(s) {
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, frame, video,
       h("p", { class: "muted small" }, "학생의 수업 화면(보고 있는 쪽, 쓰고 있는 답)은 바뀔 때마다, 시뮬레이션은 초당 최대 5장으로 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
-      sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
+      const back = grid && grid.tiles.get(s.id);
+      if (back) { tileReset(back, "작은 화면으로 돌아오는 중…"); askTile(back); }
+      else sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
       pc.close();
       clearInterval(watch.statsTimer);
       for (const r of watch.rtc.values()) r.pc?.close();
@@ -1559,6 +1581,157 @@ async function watchStudentScreen(s) {
   }
 }
 
+// ---------- 실시간 화면 일괄 미리보기 ----------
+// 학생 관리 표의 「일괄 미리보기」 열에 화면 보기에 동의한 학생들의 수업 화면을 작게(320×180, 240p 미만) 띄운다.
+// 학생은 가벼운 방식으로 보낸다: 시뮬레이션 캔버스는 WebRTC 영상 10 FPS·높이 240 이하(약 150 kbps),
+// 영상이 막히면 그림 초당 2장(가로 320). 수업 화면(쪽·답)은 바뀔 때만. 화면 내용은 교사만 듣는 채널(:t)로 받는다.
+let grid = null;   // { code, ch, ready, keep, tiles: Map(학생 id → 칸) }
+
+function startGrid() {
+  const ch = sb.channel(screenDataChannelName(lesson.code), { config: { broadcast: { self: false } } });
+  ch.on("broadcast", { event: "signal" }, ({ payload }) => handleTeacherScreenSignal(payload));
+  const subscribed = new Promise((ok, no) => ch.subscribe((st) => {
+    if (st === "SUBSCRIBED") ok();
+    if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") no(new Error("일괄 미리보기 채널에 연결하지 못했습니다."));
+  }));
+  grid = { code: lesson.code, ch, tiles: new Map(), ready: false };
+  const g = grid;
+  // 학생 화면이 「아직 보고 있음」을 알 수 있게 15초마다 한 번(모두에게 한 메시지)
+  g.keep = setInterval(() => {
+    const ids = [...g.tiles.values()].filter((t) => t.asked).flatMap((t) => [t.s.id, screenKey(t.s)]);
+    if (ids.length) sendTeacherScreenSignal({ type: "grid-keep", from: "teacher", to: "grid", ids }).catch(() => {});
+  }, 15000);
+  Promise.all([ensureTeacherScreenChannel(), subscribed]).then(() => {
+    if (grid !== g) return;
+    g.ready = true;
+    drawStudents();
+  }).catch((e) => { if (grid === g) { stopGrid(); drawStudents(); alert(e.message || e); } });
+}
+
+function stopGrid() {
+  if (!grid) return;
+  const g = grid;
+  grid = null;
+  clearInterval(g.keep);
+  for (const t of g.tiles.values()) {
+    tileReset(t);
+    if (t.asked && !screenWatchers.has(t.s.id)) sendTeacherScreenSignal({ type: "stop", from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
+  }
+  sb.removeChannel(g.ch);
+}
+
+function dropTile(t) {
+  tileReset(t);
+  grid.tiles.delete(t.s.id);
+  if (t.asked && !screenWatchers.has(t.s.id)) sendTeacherScreenSignal({ type: "stop", from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
+}
+
+// 영상 연결을 닫고 받은 화면을 비운다(크게 보기로 넘길 때, 끌 때)
+function tileReset(t, text) {
+  for (const r of t.rtc.values()) r.pc?.close();
+  t.rtc.clear();
+  t.sims.clear();
+  t.seen = 0;
+  if (text) t.cap.textContent = text;
+}
+
+function askTile(t) {
+  t.asked = Date.now();
+  sendTeacherScreenSignal({ type: "request", lite: true, from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
+}
+
+function gridTile(s) {
+  let t = grid.tiles.get(s.id);
+  if (t) { t.s = s; return t; }
+  const frame = h("iframe", { class: "tile-frame", sandbox: "allow-same-origin", tabindex: "-1", "aria-hidden": "true",
+    srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
+      + "<style>html{overflow:hidden}body{margin:0;padding:8px;background:#f6f7fb}body.narrow{max-width:420px;margin:0 auto}"
+      + ".sim-mirror img,.sim-mirror video{display:block;width:100%;max-height:540px;object-fit:contain;background:#000;border-radius:8px}"
+      + ".sim-mirror p{padding:1.5rem;text-align:center;color:#5b6475;background:#fff;border:1px dashed #c9d1de;border-radius:8px}"
+      + "body *{pointer-events:none}</style><body></body>" });
+  const cap = h("span", { class: "tile-cap" }, "연결 중…");
+  t = { s, frame, cap, html: "", drawn: null, scroll: 0, narrow: false, sims: new Map(), rtc: new Map(), seen: 0, asked: 0, videoText: "", simInfo: h("span") };
+  t.paint = () => paintTile(t);
+  frame.addEventListener("load", () => { t.loaded = true; t.drawn = null; paintTile(t); });
+  t.el = h("div", { class: "live-tile" },
+    h("div", { class: "tile-view" }, frame,
+      h("button", { class: "tile-hit", type: "button", title: nameOf(s) + " 화면 크게 보기", "aria-label": nameOf(s) + " 화면 크게 보기", onclick() { watchStudentScreen(t.s); } },
+        h("span", {}, "⤢ 크게 보기"))),
+    cap);
+  grid.tiles.set(s.id, t);
+  return t;
+}
+
+async function gridSignal(t, m) {
+  t.seen = Date.now();
+  t.el.classList.remove("stale");
+  if (m.type === "mirror") {
+    if (typeof m.html === "string") t.html = m.html;
+    t.scroll = typeof m.scroll === "number" ? m.scroll : 0;
+    t.narrow = !!m.narrow;
+    t.cap.replaceChildren(h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱·탭" : "수업 화면"),
+      m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString());
+    paintTile(t);
+  } else if (m.type === "sim") {
+    const sm = t.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };
+    Object.assign(sm.canvases, m.canvases || {});
+    t.sims.set(m.k, sm);
+    paintTile(t);
+  } else if (m.type === "sim-rtc") {
+    await simRtc(t, m);
+  } else if (m.type === "stopped") {
+    tileReset(t, "학생이 보여 주기를 멈췄습니다");
+    t.html = "";
+    paintTile(t);
+  }
+}
+
+// 받은 수업 화면을 작은 칸에 그린다: 1000px 너비로 그려 320px로 줄인다. 시뮬레이션 자리에는 영상(없으면 가장 큰 캔버스 그림).
+function paintTile(t) {
+  const doc = t.loaded && t.frame.contentDocument;
+  if (!doc || !doc.body) return;
+  if (t.drawn !== t.html) {
+    doc.body.replaceChildren(...(t.html ? cleanMirror(t.html, doc) : []));
+    t.drawn = t.html;
+  }
+  doc.body.classList.toggle("narrow", t.narrow);
+  doc.querySelectorAll(".sim-mirror[data-k]").forEach((hole) => {
+    const sm = t.sims.get(Number(hole.dataset.k));
+    if (sm && sm.stream) {
+      let v = hole.querySelector("video");
+      if (!v) { v = doc.createElement("video"); v.muted = true; v.autoplay = true; v.playsInline = true; hole.replaceChildren(v); }
+      if (v.srcObject !== sm.stream) v.srcObject = sm.stream;
+      if (v.paused) v.play().catch(() => {});
+      return;
+    }
+    const urls = sm ? Object.values(sm.canvases).filter(Boolean) : [];
+    const url = urls.sort((a, b) => b.length - a.length)[0];
+    if (url) {
+      let img = hole.querySelector("img");
+      if (!img) { img = doc.createElement("img"); hole.replaceChildren(img); }
+      if (img.getAttribute("src") !== url) img.setAttribute("src", url);
+    } else if (!hole.querySelector("p")) {
+      hole.replaceChildren(Object.assign(doc.createElement("p"), { textContent: "시뮬레이션" }));
+    }
+  });
+  const el = doc.scrollingElement;
+  if (el) el.scrollTop = t.scroll * (el.scrollHeight - el.clientHeight);
+}
+
+// 미리보기 칸: 동의한 학생마다 하나. 접속 중인데 8초 넘게 소식이 없으면 다시 요청한다.
+function gridCell(s, now) {
+  if (s.monitor !== true) {
+    const t = grid.tiles.get(s.id);
+    if (t) dropTile(t);
+    return h("span", { class: "muted small" }, "동의하지 않아 볼 수 없음");
+  }
+  const t = gridTile(s);
+  if (grid.ready && !screenWatchers.has(s.id) && presenceOf(s) !== "off" && now - t.seen > 8000 && now - t.asked > 8000) askTile(t);
+  if (presenceOf(s) === "off" && !t.seen) t.cap.textContent = "접속 안 함";
+  if (t.seen && now - t.seen > 12000) { t.el.classList.add("stale"); t.cap.textContent = "응답 없음 · 다시 요청 중"; }
+  return t.el;
+}
+
 function drawStudents() {
   const now = Date.now();
   const rows = students.map((s) => {
@@ -1574,6 +1747,7 @@ function drawStudents() {
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
         : h("span", { class: "tag info" }, "아직 안 정함")),
+      h("td", { class: "grid-cell", "data-sid": s.id }),
       h("td", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
         h("button", {
@@ -1613,13 +1787,37 @@ function drawStudents() {
           },
         }, "계정 삭제")));
   });
+  if (grid) for (const t of [...grid.tiles.values()]) if (!students.some((s) => s.id === t.s.id)) dropTile(t);
+  const ids = students.map((s) => s.id).join();
+  const cells = new Map(grid ? students.map((s) => [s.id, gridCell(s, now)]) : []);
+  // 미리보기 중이고 학생 목록이 그대로면 미리보기 칸은 그대로 두고 나머지 칸만 바꾼다(iframe을 옮기면 다시 불러온다)
+  const old = grid && main.querySelector(".students-table");
+  if (old && old.dataset.ids === ids && old.dataset.grid === "1") {
+    const oldRows = [...old.tBodies[0].rows];
+    rows.forEach((row, i) => {
+      const was = oldRows[i];
+      was.className = row.className;
+      [...row.cells].forEach((td, j) => {
+        if (!td.classList.contains("grid-cell")) was.cells[j].replaceWith(td);
+        else if (was.cells[j].firstChild !== cells.get(td.dataset.sid)) was.cells[j].replaceChildren(cells.get(td.dataset.sid));
+      });
+    });
+    main.querySelector(".students-count").textContent = "학생 " + students.length + "명";
+    return;
+  }
+  for (const td of rows.flatMap((row) => [...row.cells])) if (td.dataset.sid && cells.has(td.dataset.sid)) td.append(cells.get(td.dataset.sid));
+  const gridHead = h("th", { class: "grid-head" }, h("button", {
+    class: grid ? "grid-toggle on" : "grid-toggle", type: "button", "aria-pressed": grid ? "true" : "false",
+    title: "화면 보기에 동의한 학생들의 수업 화면을 작게(240p 미만) 한꺼번에 봅니다",
+    onclick() { if (grid) stopGrid(); else startGrid(); drawStudents(); },
+  }, grid ? "■ 일괄 미리보기 끄기" : "▦ 실시간 화면 일괄 미리보기"));
   main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
-      h("h2", {}, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 한 번에 한 명씩 봅니다."),
+      h("h2", { class: "students-count" }, "학생 " + students.length + "명"),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 크게 보기는 한 번에 한 명, 「일괄 미리보기」는 동의한 학생 모두를 작게(240p 미만, 시뮬레이션 영상 10 FPS) 함께 봅니다. 칸을 누르면 크게 봅니다."),
       h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
-    students.length ? h("div", { class: "table-wrap" }, h("table", {},
-      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", "화면 보기", ""].map((t) => h("th", {}, t)))),
+    students.length ? h("div", { class: "table-wrap" }, h("table", { class: "students-table", "data-ids": ids, "data-grid": grid ? "1" : "" },
+      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
 }
 

@@ -29,6 +29,12 @@ let mirrorBeat = null;
 let lastMirror = "";                 // 마지막으로 보낸 수업 화면(같으면 다시 보내지 않음)
 const simStarted = new WeakMap();    // 촬영을 시작한 시뮬레이션 칸 → 그때의 srcdoc 길이
 let simQ = 0.6, simW = 640;          // 시뮬레이션 그림 화질·최대 너비(메시지 크기에 따라 자동 조절)
+// 일괄 미리보기(lite): 교사가 여러 학생을 작게 함께 볼 때. 시뮬레이션 영상 10 FPS·높이 240 이하, 그림은 초당 2장·가로 320.
+// 화면 내용은 교사만 듣는 채널로 HTTP 전송한다. 교사 화면이 15초마다 「계속」을 보내지 않으면(창을 닫는 등) 45초 뒤 스스로 멈춘다.
+let mirrorLite = false;
+let liteKeep = 0;
+let screenDataChannel = null;
+const LITE = { every: 500, maxW: 320, q: 0.4, rtc: { fps: 10, br: 150000, h: 240 } };
 
 if (!sb) notConfigured(app);
 else start();
@@ -317,8 +323,9 @@ function renderScreenNotice() {
       h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "동의 안 함")];
   } else if (choice === "yes") {
     text = screenPc ? "PC 화면을 선생님께 공유 중입니다. 언제든 끌 수 있습니다."
+      : mirrorOn && mirrorLite ? "● 선생님이 지금 여러 학생의 수업 화면을 작게 함께 보고 있습니다."
       : mirrorOn ? "● 선생님이 지금 이 수업 화면을 보고 있습니다." : "선생님이 수업 중 이 화면을 볼 수 있습니다(동의함).";
-    buttons = [mirrorOn && canScreen ? h("button", { class: "ghost", type: "button", onclick: startScreenShare }, "PC 화면 전체 공유") : null,
+    buttons = [mirrorOn && !mirrorLite && canScreen ? h("button", { class: "ghost", type: "button", onclick: startScreenShare }, "PC 화면 전체 공유") : null,
       h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "보기 허용 끄기")];
   } else if (screenPending) {
     text = "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면만 보입니다.";
@@ -334,7 +341,9 @@ function renderScreenNotice() {
   shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
 }
 
-function startMirror() {
+function startMirror(lite = false) {
+  mirrorLite = lite;
+  liteKeep = Date.now();
   screenPending = false;
   mirrorOn = true;
   lastMirror = "";
@@ -347,6 +356,7 @@ function startMirror() {
 function stopMirror(send = true) {
   const was = mirrorOn || screenPending;
   mirrorOn = false;
+  mirrorLite = false;
   screenPending = false;
   clearInterval(mirrorBeat);
   clearTimeout(mirrorTimer);
@@ -371,10 +381,11 @@ function startSimAgents() {
     if (simStarted.get(f) === f.srcdoc.length) continue;
     simStarted.set(f, f.srcdoc.length);
     const start = () => {
-      f.contentWindow?.postMessage({ craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
+      f.contentWindow?.postMessage(mirrorLite ? { craMirror: "start", every: LITE.every, maxW: LITE.maxW, q: LITE.q, lite: true }
+        : { craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
       // 캔버스가 있으면 영상(WebRTC)으로도 보낸다. 중계 서버 접속 정보는 학생 토큰으로 받는다.
       iceServers({ body: { token, code: state.lesson.code || code } })
-        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: forceRelay() }, "*"));
+        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: forceRelay(), opt: mirrorLite ? LITE.rtc : null }, "*"));
     };
     f.addEventListener("load", () => { if (mirrorOn) start(); });
     start();
@@ -394,10 +405,11 @@ window.addEventListener("message", async (e) => {
   const ack = { craAck: 1 };
   if (size > 150000) { simQ = Math.max(0.3, simQ - 0.1); simW = Math.max(320, Math.round(simW * 0.8)); }
   else if (size < 50000 && simQ < 0.6) { simQ = Math.min(0.6, simQ + 0.05); simW = Math.min(640, simW + 40); }
-  ack.q = simQ; ack.maxW = simW;
+  ack.q = mirrorLite ? Math.min(simQ, LITE.q) : simQ;
+  ack.maxW = mirrorLite ? Math.min(simW, LITE.maxW) : simW;
   if (size > 230000) return e.source.postMessage({ ...ack, resend: 1 }, "*");   // 너무 크면 버리고 줄인 크기로 다시
   const { craSim, ...frame } = m;
-  try { await sendScreenSignal({ type: "sim", from: screenStudentId, to: "teacher", k, ...frame }); } catch {}
+  try { await sendScreenData({ type: "sim", from: screenStudentId, to: "teacher", k, ...frame }); } catch {}
   e.source.postMessage(ack, "*");
 });
 ["input", "change", "click", "scroll"].forEach((t) => document.addEventListener(t, queueMirror, { capture: true, passive: true }));
@@ -439,6 +451,7 @@ function mirrorSnapshot() {
 // 화면이 그대로면 무거운 화면 내용은 빼고 상태만 보낸다(4초마다 살아 있음 알림)
 function sendMirror() {
   if (!mirrorOn || !state) return;
+  if (mirrorLite && Date.now() - liteKeep > 45000) return stopMirror(false);   // 교사가 일괄 미리보기를 닫았다
   startSimAgents();
   const max = document.documentElement.scrollHeight - innerHeight;
   const html = mirrorSnapshot();
@@ -448,7 +461,18 @@ function sendMirror() {
     scroll: max > 0 ? scrollY / max : 0, narrow: innerWidth < 700, t: Date.now(),
   };
   if (html !== lastMirror) { msg.html = html; lastMirror = html; }
-  sendScreenSignal(msg);
+  sendScreenData(msg).catch(() => {});
+}
+
+// 화면 내용 보내기: 일괄 미리보기면 교사만 듣는 채널로, 아니면 수업 채널로
+async function sendScreenData(payload) {
+  if (!mirrorLite) return sendScreenSignal(payload);
+  const key = screenDataChannelName(state.lesson.code || code);
+  if (!screenDataChannel || screenDataChannel.key !== key) {
+    if (screenDataChannel) sb.removeChannel(screenDataChannel.ch);
+    screenDataChannel = { key, ch: sb.channel(key) };   // 구독하지 않는다(다른 학생 화면을 받지 않음)
+  }
+  await screenDataChannel.ch.httpSend("signal", payload);
 }
 
 async function sendScreenSignal(payload) {
@@ -457,10 +481,23 @@ async function sendScreenSignal(payload) {
 }
 
 async function handleScreenSignal(message) {
+  if (message && message.type === "grid-keep") {   // 일괄 미리보기가 아직 열려 있음
+    if (mirrorLite && (message.ids || []).includes(screenStudentId)) liteKeep = Date.now();
+    return;
+  }
   if (!message || (message.to !== screenStudentId && message.key !== screenKey(state.me))) return;
   if (message.type === "request") {
-    if (mirrorOn) { lastMirror = ""; simFrames().forEach((f) => simStarted.delete(f)); return sendMirror(); }   // 새로 연 교사 창에 전부 다시
-    if (monitorChoice() === "yes") return startMirror();   // 수업 중 보기에 동의한 학생은 묻지 않고 바로
+    const lite = !!message.lite;
+    if (mirrorOn) {   // 새로 연 교사 창에 전부 다시(크게 보기 ↔ 일괄 미리보기면 방식도 바꾼다)
+      mirrorLite = lite;
+      liteKeep = Date.now();
+      lastMirror = "";
+      simFrames().forEach((f) => simStarted.delete(f));
+      renderScreenNotice();
+      return sendMirror();
+    }
+    if (monitorChoice() === "yes") return startMirror(lite);   // 수업 중 보기에 동의한 학생은 묻지 않고 바로
+    if (lite) return;   // 일괄 미리보기는 동의한 학생만. 동의하지 않은 학생에게는 묻지 않는다
     screenPending = true;
     renderScreenNotice();
     return;
