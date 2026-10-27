@@ -451,6 +451,14 @@ function activityName(activity) {
   return isInfoActivity(activity) ? "설명 카드" : KIND_NAME[activity.kind];
 }
 
+// 공개할 때 이름을 숨기는지: 질문마다 「익명」(기본 켜짐). anon이 없는 예전 질문은 활동 전체의 named를 따른다
+const isAnon = (activity, q) => q.anon ?? !activity.named;
+function nameModeText(activity) {
+  const qs = (activity.questions || []).filter((q) => q.type !== "info");
+  const named = qs.filter((q) => !isAnon(activity, q)).length;
+  return !named ? "이름 없이" : named === qs.length ? "이름과 함께" : "익명 질문은 이름 없이";
+}
+
 // 응답 모아 보기: 고르는 질문은 막대, 글은 목록. docs = [{ name, answers }]
 function summaryView(questions, docs, opts) {
   opts = opts || {};

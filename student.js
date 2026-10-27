@@ -706,7 +706,7 @@ function cardFor(a) {
     c.others.replaceChildren(...(a.shared ? [
       h("div", { class: "others" },
         h("h3", {}, "친구들의 응답"),
-        h("p", { class: "muted small" }, "선생님이 공개했습니다 · " + (a.named ? "이름과 함께" : "이름 없이") + " · " + a.others.length + "명"),
+        h("p", { class: "muted small" }, "선생님이 공개했습니다 · " + nameModeText(a) + " · " + (a.others_n ?? a.others.length) + "명"),
         summaryView(a.questions, a.others)),
     ] : []));
   }

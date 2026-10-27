@@ -278,12 +278,26 @@ begin
           else (select coalesce(jsonb_agg(q - 'answer' - 'explain'), '[]'::jsonb) from jsonb_array_elements(a.questions) q)
         end,
         'mine', r.answers, 'score', r.score, 'total', r.total, 'saved_at', r.updated_at,
+        -- 공개한 응답. 익명은 질문마다 정한다(questions[].anon, 없으면 예전처럼 활동의 named를 따름).
+        -- 한 학생의 답을 「이름 붙은 질문」과 「익명 질문」 두 묶음으로 나누고, 익명 묶음은 이름 없이 다른 순서로 섞어
+        -- 이름 붙은 답과 이어 맞춰 누가 썼는지 알아낼 수 없게 한다.
         'others', case when a.shared then (
-          select coalesce(jsonb_agg(jsonb_build_object(
-                   'name', case when a.named then o.class_no || ' ' || o.name end,
-                   'answers', x.answers) order by x.updated_at), '[]'::jsonb)
-          from responses x join students o on o.id = x.student_id
-          where x.activity_id = a.id) end
+          with ids as (
+            select q ->> 'id' as id, case when q ? 'anon' then (q ->> 'anon') <> 'true' else a.named end as named
+            from jsonb_array_elements(a.questions) q
+          ), parts as (
+            select x.updated_at::text as at, md5(x.student_id::text || x.activity_id::text) as mix, o.class_no || ' ' || o.name as nm,
+                   (select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) from jsonb_each(x.answers) e join ids on ids.id = e.key and ids.named) as named_a,
+                   (select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) from jsonb_each(x.answers) e join ids on ids.id = e.key and not ids.named) as anon_a
+            from responses x join students o on o.id = x.student_id
+            where x.activity_id = a.id
+          )
+          select coalesce(jsonb_agg(d order by g, k), '[]'::jsonb) from (
+            select jsonb_build_object('name', nm, 'answers', named_a) as d, 0 as g, at as k from parts where named_a <> '{}'::jsonb
+            union all
+            select jsonb_build_object('name', null, 'answers', anon_a), 1, mix from parts where anon_a <> '{}'::jsonb
+          ) t) end,
+        'others_n', case when a.shared then (select count(*) from responses x where x.activity_id = a.id) end
       ) order by a.page nulls last, a.sort, a.created_at)
       from activities a
       left join responses r on r.activity_id = a.id and r.student_id = s.id
