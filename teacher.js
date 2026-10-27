@@ -726,6 +726,8 @@ async function handleTeacherScreenSignal(message) {
   try {
     if (message.type === "mirror") {
       await showMirror(watch, message);
+    } else if (message.type === "sim") {
+      await takeSimFrame(watch, message);
     } else if (message.type === "offer" && message.sdp) {
       await watch.pc.setRemoteDescription(message.sdp);
       for (const candidate of watch.queued) await watch.pc.addIceCandidate(candidate);
@@ -749,15 +751,76 @@ async function handleTeacherScreenSignal(message) {
   }
 }
 
-// 학생이 보낸 수업 화면을 그린다. 스크립트·외부 문서·이벤트 속성을 걷어 내고 넣는다.
-function cleanMirror(html, doc) {
+// 학생이 보낸 화면을 그리기 전에 스크립트·외부 문서·이벤트 속성을 걷어 낸다.
+// keepStyle: 시뮬레이션은 자기 스타일(style·link)이 있어야 모양이 맞으므로 남긴다.
+function cleanDoc(html, keepStyle) {
   const d = new DOMParser().parseFromString(html, "text/html");
-  d.querySelectorAll("script, iframe, object, embed, base, meta, link, style, frame").forEach((el) => el.remove());
+  d.querySelectorAll("script, iframe, object, embed, base, meta, frame" + (keepStyle ? "" : ", link, style")).forEach((el) => el.remove());
   d.querySelectorAll("*").forEach((el) => [...el.attributes].forEach((a) => {
     const bad = /^on/i.test(a.name) || /^\s*javascript:/i.test(a.value) || (/^\s*data:/i.test(a.value) && a.name !== "src");
     if (bad) el.removeAttribute(a.name);
   }));
-  return [...d.body.childNodes].map((n) => doc.importNode(n, true));
+  return d;
+}
+function cleanMirror(html, doc) {
+  return [...cleanDoc(html, false).body.childNodes].map((n) => doc.importNode(n, true));
+}
+
+// 학생 시뮬레이션 장면: k번 시뮬레이션의 마지막 상태를 기억해 두고, 수업 화면이 다시 그려져 자리가 새로 생겨도 바로 다시 칠한다.
+// 장면마다 문서를 새로 불러오지 않고 내용·그림만 바꿔 깜박임과 지연을 줄인다.
+function simView(watch, k) {
+  const doc = watch.frame.contentDocument;
+  const hole = doc && doc.querySelector('.sim-mirror[data-k="' + k + '"]');
+  if (!hole) return null;
+  let v = hole.querySelector("iframe");
+  if (!v) {
+    v = doc.createElement("iframe");
+    v.setAttribute("sandbox", "allow-same-origin");   // 스크립트는 막고 교사 화면이 내용만 넣는다
+    v.setAttribute("srcdoc", '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
+    v.style.cssText = "border:0;display:block;background:#fff;transform-origin:0 0";
+    hole.style.cssText = "overflow:hidden;border:1px solid #d0d7e2;border-radius:8px;background:#fff;min-height:60px";
+    hole.append(v);
+    v.addEventListener("load", () => { v.dataset.ready = "1"; paintSim(watch, k); }, { once: true });
+  }
+  return v;
+}
+
+function paintSim(watch, k) {
+  const s = watch.sims.get(k);
+  const v = s && simView(watch, k);
+  if (!v || !v.dataset.ready || !v.contentDocument) return;
+  const d = v.contentDocument;
+  if (v.dataset.ver !== String(s.ver)) {
+    const c = cleanDoc("<!doctype html><html><head>" + (s.head || "") + "</head><body>" + (s.body || "") + "</body></html>", true);
+    d.head.innerHTML = c.head.innerHTML;
+    d.body.innerHTML = c.body.innerHTML;
+    d.body.setAttribute("style", s.bs || "");
+    v.dataset.ver = String(s.ver);
+  }
+  for (const [i, url] of Object.entries(s.canvases)) {
+    d.querySelectorAll('img[data-cra-canvas="' + i + '"]').forEach((img) => { if (img.getAttribute("src") !== url) img.setAttribute("src", url); });
+  }
+  const scale = Math.min(1, (v.parentNode.clientWidth || 400) / (s.w || 400));
+  v.style.width = s.w + "px";
+  v.style.height = s.h + "px";
+  v.style.transform = "scale(" + scale + ")";
+  v.parentNode.style.height = Math.round(s.h * scale) + "px";
+  if (d.scrollingElement) { d.scrollingElement.scrollTop = s.sy || 0; d.scrollingElement.scrollLeft = s.sx || 0; }
+}
+
+async function takeSimFrame(watch, m) {
+  const s = watch.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };
+  if (typeof m.body === "string") { s.head = m.head; s.body = m.body; s.bs = m.bs; s.ver++; }
+  Object.assign(s.canvases, m.canvases || {});
+  Object.assign(s, { w: m.w, h: m.h, sx: m.sx, sy: m.sy });
+  const now = Date.now();
+  s.times = s.times.filter((t) => now - t < 2000).concat(now);
+  watch.sims.set(m.k, s);
+  await watch.ready;
+  paintSim(watch, m.k);
+  const lag = m.t ? (now - m.t) / 1000 : null;
+  watch.simInfo.textContent = "시뮬레이션 " + (s.times.length / 2).toFixed(1) + "장/초"
+    + (lag != null && lag >= 0 && lag < 60 ? " · 지연 약 " + lag.toFixed(1) + "초" : "");
 }
 
 async function showMirror(watch, m) {
@@ -767,13 +830,14 @@ async function showMirror(watch, m) {
   if (typeof m.html === "string" && m.html !== watch.html) {
     watch.html = m.html;
     doc.body.replaceChildren(...cleanMirror(m.html, doc));
+    for (const k of watch.sims.keys()) paintSim(watch, k);   // 새로 생긴 자리에 시뮬레이션 다시 칠하기
   }
   const el = doc.scrollingElement;
   if (el && typeof m.scroll === "number") el.scrollTop = m.scroll * (el.scrollHeight - el.clientHeight);
   watch.frame.style.maxWidth = m.narrow ? "420px" : "";
   watch.status.replaceChildren(
     h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱이나 탭으로 나가 있음" : "수업 화면을 보고 있음"),
-    m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신");
+    m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신 · ", watch.simInfo);
 }
 
 async function watchStudentScreen(s) {
@@ -781,7 +845,8 @@ async function watchStudentScreen(s) {
   try {
     await ensureTeacherScreenChannel();
     const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, muted: true, controls: true, hidden: true });
-    const status = h("p", { class: "muted small" }, "학생 화면에 요청을 보냈습니다. 학생이 「허용」을 누를 때까지 기다립니다.");
+    const status = h("p", { class: "muted small" }, "학생 화면에 요청을 보냈습니다. 수업 중 보기에 동의한 학생은 바로 보이고, 아니면 학생이 허용할 때까지 기다립니다.");
+    const simInfo = h("span", {});
     // 학생이 보낸 화면은 스크립트를 쓸 수 없는 iframe 안에만 그린다(allow-scripts 없음)
     const frame = h("iframe", { class: "mirror-frame", sandbox: "allow-same-origin", title: nameOf(s) + " 수업 화면",
       srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
@@ -789,13 +854,13 @@ async function watchStudentScreen(s) {
     const ready = new Promise((ok) => frame.addEventListener("load", ok, { once: true }));
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, frame, video,
-      h("p", { class: "muted small" }, "학생이 허용하면 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)이 몇 초마다 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
+      h("p", { class: "muted small" }, "학생의 수업 화면(보고 있는 쪽, 쓰고 있는 답)은 바뀔 때마다, 시뮬레이션은 초당 최대 5장으로 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
       sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
       pc.close();
       screenWatchers.delete(s.id);
       screenWatchers.delete(screenKey(s));
     });
-    const watch = { pc, video, status, frame, ready, html: "", queued: [], close };
+    const watch = { pc, video, status, frame, ready, html: "", sims: new Map(), simInfo, queued: [], close };
     screenWatchers.set(s.id, watch);
     screenWatchers.set(screenKey(s), watch);   // 예전 setup.sql 이면 학생이 학번·이름으로 답한다
     pc.ontrack = (e) => { video.srcObject = e.streams[0]; video.hidden = false; };

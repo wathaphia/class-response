@@ -26,6 +26,9 @@ let screenQueuedCandidates = [];
 let mirrorOn = false;
 let mirrorTimer = null;
 let mirrorBeat = null;
+let lastMirror = "";                 // 마지막으로 보낸 수업 화면(같으면 다시 보내지 않음)
+const simStarted = new WeakMap();    // 촬영을 시작한 시뮬레이션 칸 → 그때의 srcdoc 길이
+let simQ = 0.6, simW = 640;          // 시뮬레이션 그림 화질·최대 너비(메시지 크기에 따라 자동 조절)
 
 if (!sb) notConfigured(app);
 else start();
@@ -261,25 +264,47 @@ function ensureScreenChannel() {
   screenChannel.subscribe();
 }
 
+// 수업 중 화면 보기 동의: 수업에 처음 들어올 때 한 번 묻고 이 기기에 기억한다("yes"/"no"). 언제든 끌 수 있다.
+const monitorKey = () => "cra-monitor:" + String(state?.lesson.code || code || "").toUpperCase();
+function monitorChoice() { try { return localStorage.getItem(monitorKey()); } catch { return null; } }
+function setMonitorChoice(v) {
+  try { localStorage.setItem(monitorKey(), v); } catch {}
+  if (v === "no") { stopMirror(); if (screenPc) stopScreenShare(); }
+  renderScreenNotice();
+}
+
 function renderScreenNotice() {
   if (!shell || !shell.screenNotice) return;
-  const sharing = mirrorOn || screenPc;
-  shell.screenNotice.hidden = !screenPending && !sharing;
+  const choice = monitorChoice();
   const canScreen = !!navigator.mediaDevices?.getDisplayMedia && !screenPc;
-  shell.screenNotice.replaceChildren(
-    h("span", {}, !sharing ? "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면(보고 있는 쪽, 쓰고 있는 답)만 보입니다."
-      : screenPc ? "PC 화면을 선생님께 공유 중입니다. 브라우저의 공유 표시를 확인하고, 언제든 중지할 수 있습니다."
-      : "이 수업 화면을 선생님께 보여 주는 중입니다. 다른 앱이나 탭의 내용은 보이지 않습니다."),
-    h("span", { class: "row" },
-      !sharing ? h("button", { class: "primary", type: "button", onclick: startMirror }, "허용") : null,
-      !sharing ? h("button", { class: "ghost", type: "button", onclick() { stopMirror(); } }, "거절") : null,
-      mirrorOn && canScreen ? h("button", { class: "ghost", type: "button", onclick: startScreenShare }, "PC 화면 전체 공유") : null,
-      sharing ? h("button", { class: "ghost", type: "button", onclick() { stopMirror(); stopScreenShare(); } }, "그만 보여 주기") : null));
+  let text, buttons;
+  if (!choice) {
+    text = "이 수업에서는 수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있습니다. 다른 앱이나 탭은 보이지 않습니다. 동의할까요?";
+    buttons = [h("button", { class: "primary", type: "button", onclick() { setMonitorChoice("yes"); if (screenPending) startMirror(); } }, "동의"),
+      h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "동의 안 함")];
+  } else if (choice === "yes") {
+    text = screenPc ? "PC 화면을 선생님께 공유 중입니다. 언제든 끌 수 있습니다."
+      : mirrorOn ? "● 선생님이 지금 이 수업 화면을 보고 있습니다." : "선생님이 수업 중 이 화면을 볼 수 있습니다(동의함).";
+    buttons = [mirrorOn && canScreen ? h("button", { class: "ghost", type: "button", onclick: startScreenShare }, "PC 화면 전체 공유") : null,
+      h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "보기 허용 끄기")];
+  } else if (screenPending) {
+    text = "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면만 보입니다.";
+    buttons = [h("button", { class: "primary", type: "button", onclick: startMirror }, "이번만 허용"),
+      h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("yes"); startMirror(); } }, "수업 내내 허용"),
+      h("button", { class: "ghost", type: "button", onclick() { stopMirror(); } }, "거절")];
+  } else if (mirrorOn || screenPc) {
+    text = "● 이 수업 화면을 선생님께 보여 주는 중입니다.";
+    buttons = [h("button", { class: "ghost", type: "button", onclick() { stopMirror(); if (screenPc) stopScreenShare(); } }, "그만 보여 주기")];
+  }
+  shell.screenNotice.hidden = !text;
+  shell.screenNotice.classList.toggle("live", !!(mirrorOn || screenPc));
+  shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
 }
 
 function startMirror() {
   screenPending = false;
   mirrorOn = true;
+  lastMirror = "";
   clearInterval(mirrorBeat);
   mirrorBeat = setInterval(sendMirror, 4000);
   renderScreenNotice();
@@ -293,14 +318,46 @@ function stopMirror(send = true) {
   clearInterval(mirrorBeat);
   clearTimeout(mirrorTimer);
   mirrorBeat = mirrorTimer = null;
+  simFrames().forEach((f) => f.contentWindow?.postMessage({ craMirror: "stop" }, "*"));
   if (send && was) sendScreenSignal({ type: "stopped", from: screenStudentId, to: "teacher" });
   renderScreenNotice();
 }
 
+// 바꾼 직후 0.25초 안에 보내고, 그 사이 변화는 한 번으로 모은다
 function queueMirror() {
   if (!mirrorOn || mirrorTimer) return;
-  mirrorTimer = setTimeout(() => { mirrorTimer = null; sendMirror(); }, 600);
+  mirrorTimer = setTimeout(() => { mirrorTimer = null; sendMirror(); }, 250);
 }
+
+// ---- 시뮬레이션 화면 전달 ----
+// 시뮬레이션 안의 촬영기(SIM_AGENT)가 보낸 장면을 교사에게 넘기고, 다 보낸 뒤에야 다음 장면을 달라고 답한다.
+// 메시지가 크면 해상도·화질을 낮추고, 작으면 조금씩 되돌린다.
+function simFrames() { return [...document.querySelectorAll("iframe.sim-frame")]; }
+function startSimAgents() {
+  for (const f of simFrames()) {
+    if (simStarted.get(f) === f.srcdoc.length) continue;
+    simStarted.set(f, f.srcdoc.length);
+    const start = () => f.contentWindow?.postMessage({ craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
+    f.addEventListener("load", () => { if (mirrorOn) start(); });
+    start();
+  }
+}
+window.addEventListener("message", async (e) => {
+  const m = e.data;
+  if (!m || !m.craSim) return;
+  const k = simFrames().findIndex((f) => f.contentWindow === e.source);
+  if (k < 0) return;
+  if (!mirrorOn) return e.source.postMessage({ craMirror: "stop" }, "*");
+  const size = JSON.stringify(m).length;
+  const ack = { craAck: 1 };
+  if (size > 150000) { simQ = Math.max(0.3, simQ - 0.1); simW = Math.max(320, Math.round(simW * 0.8)); }
+  else if (size < 50000 && simQ < 0.6) { simQ = Math.min(0.6, simQ + 0.05); simW = Math.min(640, simW + 40); }
+  ack.q = simQ; ack.maxW = simW;
+  if (size > 230000) return e.source.postMessage({ ...ack, resend: 1 }, "*");   // 너무 크면 버리고 줄인 크기로 다시
+  const { craSim, ...frame } = m;
+  try { await sendScreenSignal({ type: "sim", from: screenStudentId, to: "teacher", k, ...frame }); } catch {}
+  e.source.postMessage(ack, "*");
+});
 ["input", "change", "click", "scroll"].forEach((t) => document.addEventListener(t, queueMirror, { capture: true, passive: true }));
 document.addEventListener("visibilitychange", () => { if (mirrorOn) sendMirror(); });
 
@@ -320,18 +377,33 @@ function mirrorSnapshot() {
   });
   clone.querySelectorAll(".screen-share-note").forEach((el) => el.remove());
   clone.querySelectorAll(".slide").forEach((el) => el.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"));   // 갱신마다 전환 효과가 다시 돌지 않게
-  clone.querySelectorAll("iframe").forEach((el) => el.replaceWith(h("p", { class: "card muted" }, "[시뮬레이션 화면]")));
+  // 시뮬레이션 자리는 번호만 남긴다. 교사 화면이 그 자리에 시뮬레이션 장면을 그린다.
+  const all = simFrames();
+  const inMain = [...main.querySelectorAll("iframe")];
+  clone.querySelectorAll("iframe").forEach((el, i) => {
+    const k = all.indexOf(inMain[i]);
+    el.replaceWith(k >= 0 ? h("div", { class: "sim-mirror", "data-k": k }) : h("p", { class: "card muted" }, "[화면]"));
+  });
+  // 수업 화면 밖에 띄운 시뮬레이션(떠 있는 창·화면 가득)은 맨 위에 붙인다
+  all.forEach((f, k) => {
+    if (!main.contains(f)) clone.prepend(h("section", { class: "card" }, h("p", { class: "muted small" }, "학생이 띄운 시뮬레이션"), h("div", { class: "sim-mirror", "data-k": k })));
+  });
   return clone.outerHTML;
 }
 
+// 화면이 그대로면 무거운 화면 내용은 빼고 상태만 보낸다(4초마다 살아 있음 알림)
 function sendMirror() {
   if (!mirrorOn || !state) return;
+  startSimAgents();
   const max = document.documentElement.scrollHeight - innerHeight;
-  sendScreenSignal({
-    type: "mirror", from: screenStudentId, to: "teacher", html: mirrorSnapshot(),
+  const html = mirrorSnapshot();
+  const msg = {
+    type: "mirror", from: screenStudentId, to: "teacher",
     where: state.lesson.slide_count ? slideLabel(state.lesson, viewing) : "", away: document.hidden,
-    scroll: max > 0 ? scrollY / max : 0, narrow: innerWidth < 700,
-  });
+    scroll: max > 0 ? scrollY / max : 0, narrow: innerWidth < 700, t: Date.now(),
+  };
+  if (html !== lastMirror) { msg.html = html; lastMirror = html; }
+  sendScreenSignal(msg);
 }
 
 async function sendScreenSignal(payload) {
@@ -342,7 +414,8 @@ async function sendScreenSignal(payload) {
 async function handleScreenSignal(message) {
   if (!message || (message.to !== screenStudentId && message.key !== screenKey(state.me))) return;
   if (message.type === "request") {
-    if (mirrorOn) return sendMirror();   // 이미 허용했으면 바로 다시 보낸다
+    if (mirrorOn) { lastMirror = ""; simFrames().forEach((f) => simStarted.delete(f)); return sendMirror(); }   // 새로 연 교사 창에 전부 다시
+    if (monitorChoice() === "yes") return startMirror();   // 수업 중 보기에 동의한 학생은 묻지 않고 바로
     screenPending = true;
     renderScreenNotice();
     return;
@@ -416,7 +489,7 @@ function zoom() {
   if (isPptx(state.lesson)) return openPptxFull(state.lesson, viewing);
   if (shell.stageSim) {
     const a = shell.stageSim;
-    return loadSim(a).then((html) => openSimFull(a.title, html));
+    return loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html)));
   }
   if (shell.zoom) return;
   const big = h("img", { src: shell.img.src, alt: shell.img.alt });
@@ -525,7 +598,7 @@ function showStageSim(a) {
   if (!a) return;
   const f = simFrame(null, a.title);
   shell.simStage.append(f);
-  loadSim(a).then((html) => { if (shell.stageKey === key) f.srcdoc = html; })
+  loadSim(a).then((html) => { if (shell.stageKey === key) f.srcdoc = withSimAgent(html); })
     .catch(() => shell.simStage.replaceChildren(h("p", { class: "error" }, "시뮬레이션을 불러오지 못했습니다. 새로고침해 보세요.")));
 }
 
@@ -544,10 +617,10 @@ function simCard(a) {
       h("div", { class: "card-head" }, h("h2", {}, a.title), h("span", { class: "badge" }, "시뮬레이션")),
       h("p", { class: "muted small" }, "직접 조작해 보세요. 화면이 작으면 「화면 가득 보기」를 누르세요."),
       h("div", { class: "row wrap" },
-        h("button", { class: "primary", type: "button", onclick() { loadSim(a).then((html) => showFloatingSim(a.title, html, a.id + ":" + a.html_ver)); } }, "화면에 띄우기"),
-        h("button", { class: "ghost", type: "button", onclick() { loadSim(a).then((html) => openSimFull(a.title, html)); } }, "화면 가득 보기")),
+        h("button", { class: "primary", type: "button", onclick() { loadSim(a).then((html) => showFloatingSim(a.title, withSimAgent(html), a.id + ":" + a.html_ver)); } }, "화면에 띄우기"),
+        h("button", { class: "ghost", type: "button", onclick() { loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html))); } }, "화면 가득 보기")),
       f);
-    loadSim(a).then((html) => { if (c.key === key) f.srcdoc = html; })
+    loadSim(a).then((html) => { if (c.key === key) f.srcdoc = withSimAgent(html); })
       .catch(() => f.replaceWith(h("p", { class: "error" }, "시뮬레이션을 불러오지 못했습니다. 새로고침해 보세요.")));
   }
   return c.el;
