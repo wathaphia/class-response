@@ -1,4 +1,4 @@
-// 교사 화면(버전 2): 로그인 → 수업 고르기 → [수업 진행] [질문·설문 만들기] [학생 관리] [수업 설정]
+// 교사 화면(버전 2): 로그인 → 수업 고르기 → [수업 진행] [자료 추가] [학생 관리] [수업 설정]
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 
 const app = document.getElementById("app");
@@ -216,7 +216,7 @@ function draw() {
     },
   }, lessons.map((l) => h("option", { value: l.id, selected: lesson && l.id === lesson.id }, (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
     h("option", { value: "new", selected: !lesson }, "+ 새 수업 만들기"));
-  const tabs = [["run", "수업 진행"], ["build", "질문·설문 만들기"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"]];
+  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"]];
   if (!tabs.some(([k]) => k === tab)) tab = "run";
   main = h("main", { class: "wide" });
   app.replaceChildren(
@@ -541,7 +541,7 @@ function refreshRun() {
   });
   drawRoster(shown.filter((a) => a.kind !== "sim"));
   run.panel.replaceChildren(...(shown.length ? shown.map(runBlock)
-    : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「질문·설문 만들기」에서 추가하세요.")]));
+    : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「자료 추가」에서 추가하세요.")]));
 }
 
 addEventListener("resize", () => { if (run && run.simLayer) syncSimLayer(run.simLayer, run.img); });
@@ -604,7 +604,7 @@ function runBlock(a) {
       h("button", { class: "primary", type: "button", onclick() { showFloatingSim(a.title, a.html, a.id + ":" + (a.html || "").length); } }, "화면에 띄우기"),
       h("button", { class: "ghost", type: "button", onclick() { openSimFull(a.title, a.html); } }, "크게 실행")),
     lesson.slide_count && (a.sim_place || a.sim_full) && a.page == null
-      ? h("p", { class: "error small" }, "쪽이 정해지지 않아 슬라이드에 붙지 않습니다. 「질문·설문 만들기」에서 이 시뮬레이션을 고쳐 쪽 번호를 정하고 저장하세요.") : null,
+      ? h("p", { class: "error small" }, "쪽이 정해지지 않아 슬라이드에 붙지 않습니다. 「자료 추가」에서 이 시뮬레이션을 고쳐 쪽 번호를 정하고 저장하세요.") : null,
     h("p", { class: "pill" }, !lesson.slide_count ? "학생 화면: 카드로 보임" : a.sim_full ? "학생 화면: 슬라이드 자리에 크게 보임"
       : a.sim_place ? "학생 화면: 슬라이드 위에 얹어 보임(왼쪽 화면에서 끌어 옮기기)" : "학생 화면: 슬라이드 아래 카드로 보임"));
   if (isInfoActivity(a)) return h("section", { class: "card stack" },
@@ -684,7 +684,7 @@ function showJoin() {
   else qr.textContent = "QR을 만들지 못했습니다(인터넷 연결 확인).";
 }
 
-// ---------- 질문·설문 만들기 ----------
+// ---------- 자료 추가 ----------
 const newId = () => Math.random().toString(36).slice(2, 8);
 const newQuestion = (type) => ({ id: newId(), type: type || "choice", text: "", options: ["", ""] });
 
