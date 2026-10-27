@@ -123,7 +123,7 @@ main.lesson textarea, main.lesson input[type=text] { font-size: 1.05rem; }
 .pager { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .where { font-weight: 700; min-width: 4.5rem; text-align: center; }
 .stage { position: relative; aspect-ratio: 16 / 9; background: #fff; border-radius: 12px; }
-.stage:fullscreen { display: flex; align-items: center; justify-content: center; background: #000; }
+.stage:fullscreen { max-width: none !important; display: flex; align-items: center; justify-content: center; background: #000; }
 .stage:fullscreen .slide { border: 0; border-radius: 0; max-height: 100vh; }
 main.lesson .slide { cursor: zoom-in; }
 /* 학생: 슬라이드를 누르면 화면 가득 */
@@ -169,7 +169,8 @@ main.lesson .slide { cursor: zoom-in; }
   main.wide.run-page { padding-bottom: 0; }
   main.wide.run-page ~ .credit { padding: .5rem 16px; }
   .run.pinned { flex-wrap: nowrap; align-items: stretch; }
-  .run.pinned > .run-left { overflow-y: auto; }
+  .run.pinned > .run-left { overflow: hidden; gap: .6rem; }
+  .run.pinned > .run-left > * { flex-shrink: 0; }
   .run.pinned > .run-right { overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
   .run.pinned > .run-right > * { flex-shrink: 0; }
 }

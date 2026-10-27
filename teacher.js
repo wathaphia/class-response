@@ -428,11 +428,12 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
-        h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
-      h("div", { class: "row" },
+      // 접속 QR·CSV 버튼도 화살표 줄에 함께 둔다(왼쪽이 창 한 화면에 들어가도록 줄 수를 줄임)
+      h(hasSlides ? "nav" : "div", { class: hasSlides ? "pager" : "row" },
+        hasSlides ? [prev, where, next, h("span", { class: "spacer" })] : null,
         h("button", { class: "ghost", type: "button", onclick: showJoin }, "학생 접속 주소·QR"),
-        h("button", { class: "ghost", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV")),
+        h("button", { class: "ghost", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV"),
+        hasSlides ? [deckBtn, h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")] : null),
       hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
         ? "학생 화면은 여기서 띄운 쪽과 애니메이션 단계를 따라갑니다. 키보드 ← → 는 PowerPoint처럼 애니메이션을 하나씩 넘깁니다."
         : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null),
@@ -453,17 +454,31 @@ function pinRun() {
   if (!box) return;
   const head = app.querySelector(".top");
   const credit = document.querySelector(".credit");
+  const left = box.querySelector(".run-left");
+  const stage = left && left.querySelector(".stage");
   const fit = () => {
     if (!box.isConnected) return;
-    if (!matchMedia("(min-width: 1100px)").matches) { box.classList.remove("pinned"); box.style.height = ""; return; }
+    if (!matchMedia("(min-width: 1100px)").matches) {
+      box.classList.remove("pinned"); box.style.height = "";
+      if (stage) stage.style.maxWidth = "";
+      return;
+    }
     box.classList.add("pinned");
     // 머리말, main 위쪽 여백(1rem), 맨 아래 만든 사람 줄을 뺀 나머지
     const used = (head ? head.getBoundingClientRect().height : 0) + 16 + (credit ? credit.getBoundingClientRect().height : 0);
     box.style.height = Math.max(320, Math.floor(innerHeight - used)) + "px";
+    // 왼쪽이 스크롤 없이 한 화면에 들어가도록, 화살표·버튼·안내 줄을 뺀 높이에 맞춰 슬라이드(16:9) 너비를 줄인다
+    if (stage) {
+      const others = [...left.children].filter((el) => el !== stage);
+      const gap = parseFloat(getComputedStyle(left).rowGap) || 0;
+      const rest = others.reduce((s, el) => s + el.getBoundingClientRect().height, 0) + gap * others.length;
+      stage.style.maxWidth = Math.max(240, Math.floor((left.clientHeight - rest - 2) * 16 / 9)) + "px";
+    }
   };
   const ro = new ResizeObserver(fit);
   if (head) ro.observe(head);
   if (credit) ro.observe(credit);
+  if (left) for (const el of left.children) if (el !== stage) ro.observe(el);
   addEventListener("resize", fit);
   runPin = { ro, fit };
   fit();
