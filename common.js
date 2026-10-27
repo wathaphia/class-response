@@ -120,6 +120,8 @@ function deckUrl(lesson) {
 // 중계 서버(TURN) 접속 정보를 받는다(로그인한 교사나 수업에 들어온 학생만 받을 수 있음). 없거나 실패하면 무료 STUN만 쓴다.
 const STUN_ONLY = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
 let iceCache = null;
+// 시험용: 이 브라우저에서 localStorage 「cra-force-relay」=1 이면 중계 서버만 쓴다(중계 경로가 되는지 확인할 때)
+function forceRelay() { try { return localStorage.getItem("cra-force-relay") === "1"; } catch { return false; } }
 async function iceServers(auth) {
   const url = typeof TURN_URL === "string" ? TURN_URL.trim() : "";
   if (!url) return STUN_ONLY;
@@ -143,8 +145,8 @@ const SIM_AGENT = `<script>(function(){if(window.__craAgent)return;window.__craA
 var on=false,busy=false,last={},lastKey="",maxW=640,q=0.6,timer=0,pc=null,vidIdx=-1,vidOk=false;
 function bigCanvas(){var cs=document.querySelectorAll("canvas"),b=-1,a=0;for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),s=r.width*r.height;if(s>a){a=s;b=i;}}return b;}
 function rtcStop(){vidOk=false;if(pc){try{pc.close();}catch(e){}pc=null;}}
-function rtcStart(ice){rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
-try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:ice&&ice.length?ice:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}]});
+function rtcStart(ice,relay){rtcStop();vidIdx=bigCanvas();var c=document.querySelectorAll("canvas")[vidIdx];if(!c||!c.captureStream||!window.RTCPeerConnection)return;
+try{var st=c.captureStream(30);pc=new RTCPeerConnection({iceServers:ice&&ice.length?ice:[{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}],iceTransportPolicy:relay?"relay":"all"});
 st.getTracks().forEach(function(t){pc.addTrack(t,st);});
 pc.onicecandidate=function(e){if(e.candidate)parent.postMessage({craRtc:"ice",candidate:e.candidate.toJSON()},"*");};
 pc.createOffer().then(function(o){return pc.setLocalDescription(o);}).then(function(){
@@ -170,7 +172,7 @@ function tick(){if(!on||busy)return;busy=true;var m;try{m=snap();}catch(e){busy=
 addEventListener("message",function(e){var m=e.data||{};if(e.source!==parent)return;
 if(m.craMirror==="start"){on=true;busy=false;last={};lastKey="";if(m.maxW)maxW=m.maxW;if(m.q)q=m.q;clearInterval(timer);timer=setInterval(tick,m.every||200);tick();}
 else if(m.craMirror==="stop"){on=false;clearInterval(timer);rtcStop();}
-else if(m.craRtc==="start"){rtcStart(m.ice);}
+else if(m.craRtc==="start"){rtcStart(m.ice,m.relay);}
 else if(m.craRtc==="answer"&&pc){pc.setRemoteDescription(m.sdp).catch(function(){});}
 else if(m.craRtc==="ice"&&pc&&m.candidate){pc.addIceCandidate(m.candidate).catch(function(){});}
 else if(m.craRtc==="ok"){vidOk=true;}

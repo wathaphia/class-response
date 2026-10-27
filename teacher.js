@@ -867,7 +867,7 @@ async function simRtc(watch, m) {
     watch.rtc.get(m.k)?.pc?.close();
     const r = { pc: null, queued: [] };
     watch.rtc.set(m.k, r);   // 접속 정보를 받는 동안 온 연결 후보도 모아 둔다
-    const pc = new RTCPeerConnection({ iceServers: await teacherIce() });
+    const pc = new RTCPeerConnection({ iceServers: await teacherIce(), iceTransportPolicy: forceRelay() ? "relay" : "all" });
     r.pc = pc;
     pc.ontrack = (e) => {
       const s = watch.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };

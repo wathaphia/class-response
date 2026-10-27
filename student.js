@@ -369,7 +369,7 @@ function startSimAgents() {
       f.contentWindow?.postMessage({ craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
       // 캔버스가 있으면 영상(WebRTC)으로도 보낸다. 중계 서버 접속 정보는 학생 토큰으로 받는다.
       iceServers({ body: { token, code: state.lesson.code || code } })
-        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice }, "*"));
+        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: forceRelay() }, "*"));
     };
     f.addEventListener("load", () => { if (mirrorOn) start(); });
     start();
