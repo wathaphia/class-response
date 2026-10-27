@@ -190,6 +190,12 @@ main.lesson .slide { cursor: zoom-in; }
 .act-head { gap: .4rem; }
 .act-head h3 { margin: 0; overflow-wrap: anywhere; }
 .act-head button { align-self: flex-start; }
+.act-id { display: grid; grid-template-columns: auto minmax(0, 1fr); border: 1px solid #e3e3e3; border-radius: 8px; }
+.act-page { display: flex; align-items: center; justify-content: center; padding: .4rem .7rem; font-size: 1.5rem; font-weight: 800; white-space: nowrap; border-right: 1px solid #e3e3e3; }
+.act-name { min-width: 0; display: flex; flex-direction: column; }
+.act-name > p { margin: 0; padding: .3rem .6rem; border-bottom: 1px solid #e3e3e3; }
+.act-name > h3 { padding: .3rem .6rem; }
+.act-btns { display: flex; flex-wrap: wrap; gap: .4rem; }
 .act-body { min-width: 0; }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
