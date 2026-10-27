@@ -33,6 +33,7 @@ let simQ = 0.6, simW = 640;          // 시뮬레이션 그림 화질·최대 �
 // 화면 내용은 교사만 듣는 채널로 HTTP 전송한다. 교사 화면이 15초마다 「계속」을 보내지 않으면(창을 닫는 등) 45초 뒤 스스로 멈춘다.
 let mirrorLite = false;
 let liteKeep = 0;
+let liteEvery = 500;                 // 일괄 미리보기 그림 간격(교사가 학생 수에 맞춰 정함)
 let screenDataChannel = null;
 const LITE = { every: 500, maxW: 320, q: 0.4, rtc: { fps: 10, br: 150000, h: 240 } };
 
@@ -381,7 +382,7 @@ function startSimAgents() {
     if (simStarted.get(f) === f.srcdoc.length) continue;
     simStarted.set(f, f.srcdoc.length);
     const start = () => {
-      f.contentWindow?.postMessage(mirrorLite ? { craMirror: "start", every: LITE.every, maxW: LITE.maxW, q: LITE.q, lite: true }
+      f.contentWindow?.postMessage(mirrorLite ? { craMirror: "start", every: liteEvery, maxW: LITE.maxW, q: LITE.q, lite: true }
         : { craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
       // 캔버스가 있으면 영상(WebRTC)으로도 보낸다. 중계 서버 접속 정보는 학생 토큰으로 받는다.
       iceServers({ body: { token, code: state.lesson.code || code } })
@@ -488,6 +489,7 @@ async function handleScreenSignal(message) {
   if (!message || (message.to !== screenStudentId && message.key !== screenKey(state.me))) return;
   if (message.type === "request") {
     const lite = !!message.lite;
+    if (lite) liteEvery = Math.min(5000, Math.max(LITE.every, Number(message.every) || LITE.every));
     if (mirrorOn) {   // 새로 연 교사 창에 전부 다시(크게 보기 ↔ 일괄 미리보기면 방식도 바꾼다)
       mirrorLite = lite;
       liteKeep = Date.now();
