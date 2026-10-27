@@ -143,6 +143,20 @@ create policy teacher_all on students   for all to authenticated using (is_teach
 create policy teacher_all on responses  for all to authenticated using (is_teacher()) with check (is_teacher());
 create policy teacher_all on lesson_students for all to authenticated using (is_teacher()) with check (is_teacher());
 
+-- 전체 수업 관리: 교사가 만든 폴더와 수업 순서(끌어서 옮기기). 폴더를 지우면 안의 수업은 「폴더 없음」으로 나온다.
+create table if not exists lesson_folders (
+  id         uuid primary key default gen_random_uuid(),
+  owner      uuid not null default auth.uid(),
+  name       text not null check (length(name) between 1 and 60),
+  sort       int  not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table lesson_folders enable row level security;
+drop policy if exists teacher_all on lesson_folders;
+create policy teacher_all on lesson_folders for all to authenticated using (is_teacher()) with check (is_teacher());
+alter table lessons add column if not exists folder_id uuid references lesson_folders(id) on delete set null;
+alter table lessons add column if not exists sort int not null default 0;
+
 -- 새 수업 만들기: 겹치지 않는 수업 코드를 서버가 정한다(헷갈리는 0, O, 1, I 는 쓰지 않음)
 -- p_kind: 'lesson'(슬라이드 수업) 또는 'survey'(설문만)
 drop function if exists create_lesson(text);
