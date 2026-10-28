@@ -548,9 +548,12 @@ body.desk-locked { overflow: hidden; }
 @keyframes fx-out-push { to { opacity: 0; transform: translateX(-10%); } }
 @keyframes fx-out-push-prev { to { opacity: 0; transform: translateX(10%); } }
 @keyframes fx-out-push-box { to { opacity: 0; transform: translateX(calc(-1 * var(--fx-dx))); } }
-.slide-under.fx-out-step, .sim-over.fx-out-step { animation: fx-out .25s ease-out forwards; }
-.slide-under.fx-out-fade, .sim-over.fx-out-fade { animation: fx-out .5s ease-out forwards; }
-.slide-under.fx-out-zoom, .sim-over.fx-out-zoom { animation: fx-out-zoom .5s cubic-bezier(.2, .8, .2, 1) forwards; }
+/* 옛 그림은 새 그림이 다 덮을 때까지 불투명하게 둔다. 둘이 함께 흐려지면 중간에 바탕이 비쳐 번쩍인다(단계·페이드) */
+.sim-over.fx-out-step { animation: fx-out .25s ease-out forwards; }
+.sim-over.fx-out-fade { animation: fx-out .5s ease-out forwards; }
+@keyframes fx-out-grow { to { transform: scale(1.08); } }
+.slide-under.fx-out-zoom { animation: fx-out-grow .5s cubic-bezier(.2, .8, .2, 1) forwards; }
+.sim-over.fx-out-zoom { animation: fx-out-zoom .5s cubic-bezier(.2, .8, .2, 1) forwards; }
 .slide-under.fx-out-push-next { animation: fx-out-push .45s cubic-bezier(.2, .8, .2, 1) forwards; }
 .slide-under.fx-out-push-prev { animation: fx-out-push-prev .45s cubic-bezier(.2, .8, .2, 1) forwards; }
 .sim-over.fx-out-push-next, .sim-over.fx-out-push-prev { animation: fx-out-push-box .45s cubic-bezier(.2, .8, .2, 1) forwards; }
