@@ -253,7 +253,7 @@ function withSimPause(html) {
 }
 
 // 재생/일시정지 버튼 하나. 시뮬레이션을 새로 불러오면 다시 멈춘 상태(▶ 재생)로 돌아간다.
-function simPlayButton(frame) {
+function simPlayButton(frame, onSet) {
   let playing = false;
   const b = h("button", { class: "ghost sim-play", type: "button", onclick() { set(!playing); } });
   function set(on) {
@@ -261,6 +261,7 @@ function simPlayButton(frame) {
     b.textContent = on ? "⏸ 일시정지" : "▶ 재생";
     b.setAttribute("aria-pressed", String(on));
     frame.contentWindow?.postMessage({ craPause: !on }, "*");
+    onSet?.(on);
   }
   frame.addEventListener("load", () => set(false));
   set(false);
@@ -328,7 +329,7 @@ function renderSimLayer(layer, list, opts) {
       }
       layer.append(box);
     }
-    box._a = a;
+    box._a = a; box._paused = opts.paused;
     const v = String(ver(a));
     if (box.dataset.ver !== v) {
       box.dataset.ver = v;
@@ -376,8 +377,8 @@ function simBoxFx(layer, box, cls) {
   box.addEventListener("animationend", () => box.classList.remove(cls), { once: true });
 }
 // 보이는 얹기 시뮬레이션은 계속 돌고, 숨긴 것은 멈춘다(다시 보이면 이어서)
-function simOverPause(box) {
-  box.querySelector("iframe")?.contentWindow?.postMessage({ craPause: box.classList.contains("off") }, "*");
+function simOverPause(box) {   // paused(a): 보이는 것도 멈출지(「슬라이드와 함께 보기」는 카드의 재생 버튼을 따른다)
+  box.querySelector("iframe")?.contentWindow?.postMessage({ craPause: box.classList.contains("off") || !!box._paused?.(box._a) }, "*");
 }
 function placeBox(box, p) {
   Object.assign(box.style, { left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: "" });

@@ -13,7 +13,9 @@ function buildSimFrame(a) {
   let s = buildSimFrames.get(a.id);
   if (!s || s.key !== key) {
     const f = simFrame(withSimPause(a.html || ""), a.title);
-    s = { key, box: simScaled(f), play: simPlayButton(f) };
+    s = { key, box: simScaled(f), playing: false };
+    // 작은 슬라이드 위의 같은 시뮬레이션도 이 버튼을 따라 돌고 멈춘다
+    s.play = simPlayButton(f, (on) => { s.playing = on; document.querySelectorAll('.act-slide .sim-over[data-sim="' + a.id + '"]').forEach(simOverPause); });
     buildSimFrames.set(a.id, s);
   }
   return s;
@@ -218,7 +220,7 @@ function layoutBySlide(grid) {
   const overs = on ? activities.filter(isOverSim) : [];
   grid.querySelectorAll(":scope > .act-slide .sim-layer").forEach((layer) => {
     const n = +layer.closest(".act-slide").dataset.n, list = overs.filter((a) => simOnSlide(a, n));
-    renderSimLayer(layer, list, { load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: false });
+    renderSimLayer(layer, list, { load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: false, paused: (a) => !buildSimFrame(a).playing });
   });
   const col = new Map();
   for (const a of activities) {
