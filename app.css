@@ -111,7 +111,7 @@ main.lesson textarea, main.lesson input[type=text] { font-size: 1.05rem; }
 @media (min-width: 960px) {
   main.lesson.split { grid-template-columns: minmax(0, 3fr) minmax(320px, 1fr); align-items: start; padding: .75rem 20px 3rem; }
   main.lesson.split .slide { max-height: calc(100vh - 9.5rem); }
-  main.lesson.split > .banner { grid-column: 1 / -1; }
+  main.lesson.split > .banner, main.lesson.split > .screen-share-note { grid-column: 1 / -1; }   /* 알림 띠는 한 줄 전체: 슬라이드 왼쪽·질문 오른쪽 자리를 밀지 않게 */
   main.lesson.split > .slide-box { position: sticky; top: 4.5rem; }
 }
 
