@@ -412,34 +412,46 @@ async function drawManage() {
 // (Worker는 KV 목록 읽기 하루 1,000번, GitHub는 이 PC에서 시간당 60번 한도라 저절로 다시 받지 않는다).
 const GITHUB_REPO = "wathaphia/class-response";
 const MB = 1024 * 1024, GB = 1024 * MB;
-const ETC_POLL_MS = 30000;
-const USAGE_STALE_MS = 5 * 60 * 1000;
-let usage = {};            // 받는 곳 이름 → { data, at } 또는 { error, at }
+// 동기화: 자동은 1시간마다(이 탭이 화면에 보일 때만), 「동기화」 버튼은 마지막 동기화 뒤 10분이 지나야 다시 누를 수 있다.
+// 받은 값은 이 브라우저에 남겨 두어(cra-usage) 새로 고침해도 다시 받지 않는다.
+const ETC_AUTO_MS = 60 * 60 * 1000;
+const ETC_MANUAL_MS = 10 * 60 * 1000;
+const ETC_CHECK_MS = 30000;
+let usage = {};            // 받는 곳 이름 → { data, at, net } 또는 { error, at, net }. net = 이 동기화가 브라우저에서 보낸 요청 수·받은 양
+try { usage = JSON.parse(localStorage.getItem("cra-usage")) || {}; } catch {}
 let usageBusy = false;
 let etcTimer = null;
 
-async function usageDb() {
+async function usageDb(net) {
+  net.requests++;
   const { data, error } = await sb.rpc("resource_usage");
   if (error) throw new Error(/resource_usage/.test(error.message) ? "Supabase SQL Editor에서 setup.sql을 한 번 더 실행하세요." : error.message);
+  net.bytes += JSON.stringify(data).length;
   return data;
 }
-async function usageWorker() {
+async function usageWorker(net) {
   const url = typeof TURN_URL === "string" ? TURN_URL.trim().replace(/\/$/, "") : "";
   if (!url) throw new Error("config.js에 TURN_URL이 없습니다.");
   const { data } = await sb.auth.getSession();
+  net.requests++;
   const r = await fetch(url + "/usage", {
     method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + (data.session ? data.session.access_token : "") }, body: "{}",
   });
   if (!r.ok) throw new Error("Worker 응답 " + r.status);
-  const d = await r.json();
+  const text = await r.text();
+  net.bytes += text.length;
+  const d = JSON.parse(text);
   if (!d.turn) throw new Error("Worker를 새로 배포해야 합니다(PC에서 class-tools\\usage-setup.ps1 실행).");
   return d;
 }
-async function usageGithub() {
+async function usageGithub(net) {
   const gh = async (path) => {
+    net.requests++;
     const r = await fetch("https://api.github.com" + path, { headers: { Accept: "application/vnd.github+json" } });
     if (!r.ok) throw new Error("GitHub 응답 " + r.status + (r.status === 403 ? "(이 PC 시간당 60번 한도, 잠시 뒤 다시)" : ""));
-    return r.json();
+    const text = await r.text();
+    net.bytes += text.length;
+    return JSON.parse(text);
   };
   const monthStart = new Date().toISOString().slice(0, 8) + "01";
   const [repo, rate, month, recent, alive] = await Promise.all([
@@ -449,40 +461,62 @@ async function usageGithub() {
     gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=6"),
     gh("/repos/" + GITHUB_REPO + "/actions/workflows/keep-alive.yml/runs?per_page=1"),
   ]);
-  return { repo, rate: rate.resources.core, runsThisMonth: month.total_count, recent: recent.workflow_runs, alive: alive.workflow_runs[0] };
+  // 브라우저에 남겨 둘 것만 추린다(실행 기록 하나가 수 KB라)
+  const run = (r) => r && { name: r.name, created_at: r.created_at, conclusion: r.conclusion, status: r.status };
+  return {
+    repo: { size: repo.size, pushed_at: repo.pushed_at, default_branch: repo.default_branch, open_issues_count: repo.open_issues_count },
+    rate: rate.resources.core, runsThisMonth: month.total_count, recent: recent.workflow_runs.map(run), alive: run(alive.workflow_runs[0]),
+  };
 }
 const USAGE_SOURCES = { db: usageDb, worker: usageWorker, github: usageGithub };
 
+const lastSync = () => Math.max(0, ...Object.values(usage).map((u) => u.at || 0));
+const staleSources = () => Object.keys(USAGE_SOURCES).filter((k) => !usage[k] || Date.now() - usage[k].at >= ETC_AUTO_MS);
+const manualWait = () => Math.max(0, lastSync() + ETC_MANUAL_MS - Date.now());
+
 async function syncUsage(names) {
+  if (usageBusy || !names.length) return;
   usageBusy = true;
   if (tab === "etc") paintEtc();
   await Promise.all(names.map(async (k) => {
-    try { usage[k] = { data: await USAGE_SOURCES[k](), at: Date.now() }; }
-    catch (e) { usage[k] = { error: e.message || String(e), at: Date.now() }; }
+    const net = { requests: 0, bytes: 0 };
+    try { usage[k] = { data: await USAGE_SOURCES[k](net), at: Date.now(), net }; }
+    catch (e) { usage[k] = { error: e.message || String(e), at: Date.now(), net }; }
   }));
   usageBusy = false;
+  try { localStorage.setItem("cra-usage", JSON.stringify(usage)); } catch {}
   if (tab === "etc") paintEtc();
 }
 
 function drawEtc() {
   paintEtc();
-  const stale = Object.keys(USAGE_SOURCES).filter((k) => !usage[k] || Date.now() - usage[k].at > USAGE_STALE_MS);
-  syncUsage(stale.includes("db") ? stale : ["db", ...stale]);
-  etcTick();
+  etcCheck();
 }
-function etcTick() {
+// 30초마다 시계만 본다(네트워크는 쓰지 않음): 1시간 지난 것이 있으면 자동 동기화, 아니면 버튼의 남은 시간만 고친다
+function etcCheck() {
   clearTimeout(etcTimer);
-  etcTimer = setTimeout(async () => {
-    if (tab !== "etc") return;
-    if (!document.hidden) await syncUsage(["db"]);
-    etcTick();
-  }, ETC_POLL_MS);
+  if (tab !== "etc") return;
+  if (!document.hidden && staleSources().length) syncUsage(staleSources());
+  else if (!usageBusy && main) { const b = main.querySelector(".sync-btn"); if (b) b.replaceWith(syncButton()); }
+  etcTimer = setTimeout(etcCheck, ETC_CHECK_MS);
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden && tab === "etc") { syncUsage(["db"]); etcTick(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && tab === "etc") etcCheck(); });
+
+function syncButton() {
+  const wait = manualWait();
+  const syncIcon = h("span", { class: "sync-icon" + (usageBusy ? " spin" : ""), "aria-hidden": "true" });
+  syncIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
+  return h("button", {
+    class: "primary sync-btn", type: "button", disabled: usageBusy || wait > 0,
+    title: wait > 0 ? "동기화는 10분에 한 번만 할 수 있습니다(무료 한도를 아끼려고)" : "지금 모든 사용량을 다시 받습니다",
+    onclick() { if (manualWait() <= 0) syncUsage(Object.keys(USAGE_SOURCES)); },
+  }, syncIcon, usageBusy ? "동기화 중…" : wait > 0 ? Math.ceil(wait / 60000) + "분 뒤 다시 동기화" : "동기화");
+}
 
 function usageAmount(n, fmt) {
   if (fmt === "days") return n + "일";
   if (fmt !== "bytes") return Number(n).toLocaleString();
+  if (n < 1024) return Math.round(n) + "B";
   if (n < MB) return (n / 1024).toFixed(0) + "KB";
   if (n < GB) return (n / MB).toFixed(1) + "MB";
   return (n / GB).toFixed(2) + "GB";
@@ -616,7 +650,7 @@ function supabaseView() {
   const idle = lastDay ? Math.max(0, Math.floor((Date.now() - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
-    { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일(슬라이드 그림·PPTX)" },
+    { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일 · 새 슬라이드는 Cloudflare R2에 저장(여기 남은 것은 예전 사본·PPTX)" },
     { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
       hint: (ep ? "월말 예상 " + usageAmount(ep.bytes, "bytes") + " · " : "") + (since || "CDN 캐시를 거치지 않은 응답") },
     { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
@@ -659,22 +693,82 @@ function cloudflareView() {
   const u = usage.worker;
   if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
   if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
-  const d = u.data, a = d.analytics;
+  const d = u.data, a = d.analytics, r2 = d.r2;
   const missing = a ? null : "분석 토큰 필요";
+  const daily = "한국 시간 오전 9시에 초기화";
   const items = [
     { label: "중계(TURN) 접속 발급", used: d.turn.issued, limit: d.turn.limit, period: "이번 달", hint: "오늘 " + (d.turn.today || 0) + "장 · 다 쓰면 직접 연결(STUN)만 씀" },
     { label: "중계(TURN) 전송량", used: a && a.turnBytesMonth, limit: 1000 * GB, fmt: "bytes", period: "이번 달", missing },
-    { label: "Worker 요청", used: a && a.workerRequestsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
-    { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
-    { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: "오늘", hint: "한국 시간 오전 9시에 초기화", missing },
+    { label: "Worker 요청", used: a && a.workerRequestsToday, limit: 100000, period: "오늘", hint: daily + " · 슬라이드 그림 1장도 1번", missing },
+    { label: "R2 슬라이드 저장", used: r2 && r2.bytes, limit: 10 * GB, fmt: "bytes", period: "누적", missing: r2 ? null : d.r2Error ? "못 받음" : "Worker 새로 배포 필요",
+      hint: r2 && r2.objects.toLocaleString() + "개 파일" + (r2.from === "list" ? "(버킷 목록으로 셈)" : "") },
+    { label: "R2 올리기·목록(Class A)", used: a && a.r2ClassAMonth, limit: 1000000, period: "이번 달", missing: a && a.r2ClassAMonth == null ? "Worker 새로 배포 필요" : missing, hint: "슬라이드 올리기 · 파일 목록" },
+    { label: "R2 읽기(Class B)", used: a && a.r2ClassBMonth, limit: 10000000, period: "이번 달", missing: a && a.r2ClassBMonth == null ? "Worker 새로 배포 필요" : missing, hint: "학생 기기가 슬라이드 그림을 받은 횟수 · 내보내는 전송량은 무료" },
+    { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: "오늘", hint: daily, missing },
+    { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: "오늘", hint: daily + " · 중계 접속 1장마다 2번", missing },
+    { label: "KV 목록", used: a && a.kvListsToday, limit: 1000, period: "오늘", missing: a && a.kvListsToday == null ? "Worker 새로 배포 필요" : missing, hint: daily + " · 기타 관리 동기화 1번마다 1번" },
+    { label: "KV 저장", used: a && a.kvBytes, limit: GB, fmt: "bytes", period: "누적", missing: a && a.kvBytes == null ? (a.kvListsToday == null ? "Worker 새로 배포 필요" : "아직 집계 없음") : missing,
+      hint: a && a.kvKeys != null ? a.kvKeys.toLocaleString() + "개 키 · 하루 한 번 집계" : "하루 한 번 집계" },
   ];
   const hist = (d.turn.history || []).slice().reverse();
   return [
     h("div", { class: "usage-grid" }, items.map(usageRing)),
     hist.length ? h("div", { class: "usage-blocks" }, usageBlock("달마다 중계 접속 발급",
       usageTable(["달", "발급", "한도 대비"], hist.map((x) => [x.month, x.issued.toLocaleString() + "장", Math.round(x.issued / d.turn.limit * 100) + "%"])))) : null,
-    a ? null : h("p", { class: "muted small" }, "중계 전송량·Worker 요청·KV 사용량은 Cloudflare 읽기 전용 분석 토큰이 있어야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행)."
+    a ? null : h("p", { class: "muted small" }, "중계 전송량·Worker 요청·R2 요청·KV 사용량은 Cloudflare 읽기 전용 분석 토큰이 있어야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행)."
       + (d.analyticsError && d.analyticsError !== "no token" ? " (" + d.analyticsError + ")" : "")),
+  ];
+}
+
+// 동기화 비용: 이 탭이 사용량을 받느라 무료 한도를 얼마나 쓰는지. 마지막 동기화에서 잰 값 × 하루 자동 동기화 횟수(이 탭을 하루 종일 켜 둔 최악의 경우).
+// Worker 매시 집계(cron)는 탭과 상관없이 하루 24번 돈다. 아직 Worker가 재지 않았으면 코드대로 센 값(CRON_COST)을 쓴다.
+const AUTO_PER_DAY = 86400000 / ETC_AUTO_MS;
+const CRON_COST = { kvRead: 2, kvList: 0, kvWrite: 2, r2ClassA: 0, sbRest: 0, sbApi: 1, cfApi: 0 };
+function syncCostView() {
+  const net = (k) => usage[k] && usage[k].net;
+  const db = net("db"), wk = net("worker"), gh = net("github");
+  if (!db && !wk && !gh) return h("p", { class: "muted small" }, usageBusy ? "불러오는 중…" : "아직 동기화한 적이 없습니다.");
+  const w = usage.worker && usage.worker.data;
+  const c = w && w.cost;
+  const m = w && w.supabase && w.supabase.egressMonth;
+  const cron = (m && m.cron) || CRON_COST;
+  const noCost = c ? null : "Worker 새로 배포 필요";
+  const day = (perSync, perCron = 0) => AUTO_PER_DAY * perSync + 24 * perCron;
+  const ghCounted = gh ? Math.max(0, gh.requests - 1) : 0;   // rate_limit 요청은 한도에 세지 않는다
+  const dbBytes = db ? db.bytes : 0;
+  const items = [
+    { label: "Worker 요청", used: day(wk ? 1 : 0, 1), limit: 100000, period: "하루", hint: "동기화 " + AUTO_PER_DAY + "번 + 매시 집계 24번" },
+    { label: "KV 읽기", used: c && day(c.kvRead, cron.kvRead), limit: 100000, period: "하루", missing: noCost },
+    { label: "KV 목록", used: c && day(c.kvList, cron.kvList), limit: 1000, period: "하루", missing: noCost },
+    { label: "KV 쓰기", used: c && day(c.kvWrite, cron.kvWrite), limit: 1000, period: "하루", missing: noCost, hint: "거의 다 매시 집계가 씀" },
+    { label: "R2 목록(Class A)", used: c && day(c.r2ClassA) * 30, limit: 1000000, period: "한 달", missing: noCost },
+    { label: "Supabase 전송량", used: day(dbBytes) * 30, limit: 5 * GB, fmt: "bytes", period: "한 달", hint: "DB 함수 응답 " + usageAmount(dbBytes, "bytes") + " × " + AUTO_PER_DAY * 30 + "번(압축 전)" },
+    { label: "GitHub API", used: ghCounted, limit: 60, period: "1시간", hint: "자동은 1시간에 1번 · 버튼을 10분마다 눌러도 최대 " + ghCounted * 6 + "건" },
+  ];
+  const n = (v) => (v == null ? "—" : Number(v).toLocaleString());
+  const times = (v, unit = "번") => (v == null ? "—" : n(v) + unit);
+  const rows = [
+    ["교사 브라우저 → Supabase DB 함수", "DB 크기·연결·학생 수 계산(Supabase 서버)", db ? times(db.requests, "건") + " · " + usageAmount(db.bytes, "bytes") : "—", db ? times(day(db.requests), "건") : "—"],
+    ["교사 브라우저 → Worker", "Cloudflare·Supabase 사용량 모으기", wk ? times(wk.requests, "건") + " · " + usageAmount(wk.bytes, "bytes") : "—", wk ? times(day(wk.requests), "건") : "—"],
+    ["└ Worker → KV 읽기 · 목록 · 쓰기", "TURN 장수·전송량 합계 읽기", c ? n(c.kvRead) + " · " + n(c.kvList) + " · " + n(c.kvWrite) : "—", c ? n(day(c.kvRead)) + " · " + n(day(c.kvList)) + " · " + n(day(c.kvWrite)) : "—"],
+    ["└ Worker → R2 목록", "슬라이드 저장량(분석에 아직 없을 때만)", c ? times(c.r2ClassA) : "—", c ? times(day(c.r2ClassA)) : "—"],
+    ["└ Worker → Supabase 교사 확인", "교사만 보게(데이터 API 1건)", c ? times(c.sbRest, "건") : "—", c ? times(day(c.sbRest), "건") : "—"],
+    ["└ Worker → Supabase 관리 API", "로그 집계·요청 수·서비스 상태(Supabase 서버 계산 · 프로젝트 전송량에 안 셈)", c ? times(c.sbApi, "건") : "—", c ? times(day(c.sbApi), "건") : "—"],
+    ["└ Worker → Cloudflare 분석", "Worker·KV·R2·TURN 사용량(Cloudflare 서버 계산)", c ? times(c.cfApi, "건") : "—", c ? times(day(c.cfApi), "건") : "—"],
+    ["교사 브라우저 → GitHub API", "저장소·자동 실행 정보(한도에 세는 것 " + ghCounted + "건)", gh ? times(gh.requests, "건") + " · " + usageAmount(gh.bytes, "bytes") : "—", gh ? times(day(gh.requests), "건") : "—"],
+  ];
+  return [
+    h("p", { class: "small" }, "자동 동기화는 1시간마다(이 탭이 열려 있고 화면에 보일 때만), 「동기화」 버튼은 마지막 동기화 뒤 10분이 지나야 다시 됩니다. "
+      + "계산은 각 서비스 서버가 하고(Supabase DB 함수 · Supabase 로그 · Cloudflare 분석) 이 브라우저는 받은 숫자로 그림만 그립니다. 학생 기기는 쓰지 않습니다."),
+    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    h("p", { class: "muted small" }, "원 그래프는 이 탭을 하루 종일 켜 둔 최악의 경우(자동 동기화 하루 " + AUTO_PER_DAY + "번 + 매시 집계 24번)가 무료 한도에서 차지하는 몫입니다."),
+    h("div", { class: "usage-blocks" },
+      h("div", { class: "usage-block wide" }, h("h4", {}, "동기화 1번에 드는 것(마지막 동기화에서 잼)"), usageTable(["어디로", "하는 일", "1번", "하루(자동 " + AUTO_PER_DAY + "번)"], rows)),
+      h("div", { class: "usage-block wide" }, h("h4", {}, "Worker 매시 집계(매시 5분 · 탭과 상관없음)"), usageTable(["무엇", "1번", "하루(24번)"], [
+        ["KV 읽기 · 쓰기", n(cron.kvRead) + " · " + n(cron.kvWrite), n(24 * cron.kvRead) + " · " + n(24 * cron.kvWrite)],
+        ["Supabase 관리 API(전송량 로그)", times(cron.sbApi, "건"), times(24 * cron.sbApi, "건")],
+        ["Worker 실행", "1번", "24번"],
+      ]), h("p", { class: "muted small" }, m && m.cron ? "마지막 집계 " + shortTime(m.cron.at) + "에 잰 값" : "아직 Worker가 재지 않아 코드대로 센 값입니다."))),
   ];
 }
 
@@ -704,9 +798,7 @@ function githubView() {
 
 function paintEtc() {
   if (tab !== "etc" || !main) return;
-  const times = Object.values(usage).map((u) => u.at);
-  const syncIcon = h("span", { class: "sync-icon" + (usageBusy ? " spin" : ""), "aria-hidden": "true" });
-  syncIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
+  const last = lastSync();
   const section = (name, what, body) => h("section", { class: "card stack usage-card" },
     h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)), body);
   main.replaceChildren(h("div", { class: "stack" },
@@ -715,12 +807,12 @@ function paintEtc() {
         h("h2", {}, "기타 관리"),
         h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상)")),
       h("div", { class: "row" },
-        times.length ? h("span", { class: "muted small" }, "마지막 동기화 " + new Date(Math.max(...times)).toLocaleTimeString()) : null,
-        h("button", { class: "primary sync-btn", type: "button", disabled: usageBusy, onclick() { syncUsage(Object.keys(USAGE_SOURCES)); } },
-          syncIcon, usageBusy ? "동기화 중…" : "동기화"))),
+        last ? h("span", { class: "muted small" }, "마지막 동기화 " + new Date(last).toLocaleTimeString() + " · 다음 자동 " + new Date(last + ETC_AUTO_MS).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) : null,
+        syncButton())),
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView()),
-    section("Cloudflare", "중계 서버(TURN) · Worker", cloudflareView()),
-    section("GitHub", "사이트 · 자동 실행", githubView())));
+    section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView()),
+    section("GitHub", "사이트 · 자동 실행", githubView()),
+    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView())));
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.
