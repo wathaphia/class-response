@@ -248,9 +248,7 @@ main.lesson .slide { cursor: zoom-in; }
 .edit-btn.on .edit-switch { background: var(--accent); }
 .edit-btn.on .edit-switch::after { transform: translateX(.85rem); }
 @media (prefers-reduced-motion: reduce) { .edit-btn, .edit-switch, .edit-switch::after { transition: none; } }
-/* 편집 모드: 탭이 다섯이라 파란 기호 바탕은 고른 탭에만 남긴다 */
-.teacher .top.editing .tab:not(.on) .tab-icon { background: none; color: var(--muted); }
-.teacher .top.editing .tab:hover:not(:disabled):not(.on) .tab-icon { color: var(--accent); background: none; }
+/* 편집 모드: 탭이 다섯이라 한 줄에 들어가게 탭 사이·안쪽 여백만 조금 줄인다(색은 평소와 같음) */
 .teacher .top.editing > .tabs { gap: .1rem; }
 .teacher .top.editing .tabs .tab { padding-inline: .6rem; }
 /* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다. 편집 모드에서는 제목 칸 바로 오른쪽부터 차례로 늘어놓는다 */
