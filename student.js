@@ -289,6 +289,7 @@ function buildShell() {
   const simLayer = h("div", { class: "sim-layer" });   // 선생님이 슬라이드 위에 얹은 시뮬레이션
   const slideWrap = h("div", { class: "slide-wrap" }, img, simLayer);
   img.addEventListener("load", () => syncSimLayer(simLayer, img));
+  new ResizeObserver(() => syncSimLayer(simLayer, img)).observe(img);   // 알림 띠가 생기고 사라져 슬라이드 크기가 바뀔 때도 얹은 시뮬레이션을 맞춘다
   const slideBox = h("div", { class: "slide-box" }, slideWrap, simStage,
     h("nav", { class: "pager" }, prev, where, next, back, h("span", { class: "spacer" }),
       h("button", { class: "ghost", type: "button", onclick: zoom }, "크게 보기")),
