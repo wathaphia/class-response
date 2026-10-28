@@ -516,6 +516,7 @@ function syncButton() {
 function usageAmount(n, fmt) {
   if (fmt === "days") return n + "일";
   if (fmt !== "bytes") return Number(n).toLocaleString();
+  if (n < 1024) return Math.round(n) + "B";
   if (n < MB) return (n / 1024).toFixed(0) + "KB";
   if (n < GB) return (n / MB).toFixed(1) + "MB";
   return (n / GB).toFixed(2) + "GB";
@@ -763,7 +764,7 @@ function syncCostView() {
     h("p", { class: "muted small" }, "원 그래프는 이 탭을 하루 종일 켜 둔 최악의 경우(자동 동기화 하루 " + AUTO_PER_DAY + "번 + 매시 집계 24번)가 무료 한도에서 차지하는 몫입니다."),
     h("div", { class: "usage-blocks" },
       h("div", { class: "usage-block wide" }, h("h4", {}, "동기화 1번에 드는 것(마지막 동기화에서 잼)"), usageTable(["어디로", "하는 일", "1번", "하루(자동 " + AUTO_PER_DAY + "번)"], rows)),
-      usageBlock("Worker 매시 집계(매시 5분 · 탭과 상관없음)", usageTable(["무엇", "1번", "하루(24번)"], [
+      h("div", { class: "usage-block wide" }, h("h4", {}, "Worker 매시 집계(매시 5분 · 탭과 상관없음)"), usageTable(["무엇", "1번", "하루(24번)"], [
         ["KV 읽기 · 쓰기", n(cron.kvRead) + " · " + n(cron.kvWrite), n(24 * cron.kvRead) + " · " + n(24 * cron.kvWrite)],
         ["Supabase 관리 API(전송량 로그)", times(cron.sbApi, "건"), times(24 * cron.sbApi, "건")],
         ["Worker 실행", "1번", "24번"],
