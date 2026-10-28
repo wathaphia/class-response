@@ -147,10 +147,13 @@ function refreshRun() {
 addEventListener("resize", () => { if (run && run.simLayer) syncSimLayer(run.simLayer, run.img); });
 
 // ---------- 수업 시작하기(중계 접속 발급) ----------
-// 학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 시작하기」를 누른 뒤 80분 동안만 된다. 누를 때 중계 서버(TURN) 접속 정보를
-// 수업 시간만큼 한 장 받아 두고, 80분이 지나거나 「수업 끝내기」를 누르면 화면 보기를 닫고 접속 정보를 버린다(월 발급 한도를 아끼려고).
+// 학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 시작하기」를 누른 뒤 50분 동안만 된다. 누를 때 중계 서버(TURN) 접속 정보를
+// 수업 시간만큼 한 장 받아 두고, 50분이 지나거나 「수업 끝내기」를 누르면 화면 보기를 닫고 접속 정보를 버린다(월 발급 한도를 아끼려고).
+// 남은 시간이 30분 밑으로 내려가면 「시간 연장하기」로 50분을 더하고, 그때 끝나는 시각까지 쓸 접속 정보를 한 장 새로 받는다.
 // 이 브라우저에 수업마다 남겨 두어(cra-class) 새로 고침해도 이어진다.
-const CLASS_MS = 80 * 60 * 1000;
+const CLASS_MS = 50 * 60 * 1000;
+const EXTEND_MS = 50 * 60 * 1000;
+const EXTEND_BELOW_MS = 30 * 60 * 1000;   // 남은 시간이 이보다 적어야 연장할 수 있다
 let classTimer = null;
 let classTick = null;
 function classUntil() {
@@ -166,7 +169,18 @@ async function startClass() {
   armClass();
   paintClass();
   const ice = await teacherIce();
-  flash(hasTurn(ice) ? "수업을 시작했습니다. 80분 동안 학생 화면을 볼 수 있습니다." : "수업을 시작했습니다(중계 서버 없이 직접 연결만 씁니다).");
+  flash(hasTurn(ice) ? "수업을 시작했습니다. 50분 동안 학생 화면을 볼 수 있습니다." : "수업을 시작했습니다(중계 서버 없이 직접 연결만 씁니다).");
+}
+const canExtend = () => classOn() && classUntil() - Date.now() < EXTEND_BELOW_MS;
+async function extendClass() {
+  if (!canExtend()) return;
+  const until = classUntil() + EXTEND_MS;
+  try { localStorage.setItem("cra-class", JSON.stringify({ lesson: lesson.id, until })); } catch {}
+  forgetIce();   // 새 끝나는 시각까지 쓸 접속 정보를 한 장 받는다(지금 보고 있는 화면은 그대로 이어짐)
+  armClass();
+  paintClass();
+  await teacherIce();
+  flash("수업 시간을 50분 늘렸습니다.");
 }
 function endClass(auto) {
   try { localStorage.removeItem("cra-class"); } catch {}
@@ -176,7 +190,7 @@ function endClass(auto) {
   for (const w of new Set(screenWatchers.values())) w.close();
   paintClass();
   if (tab === "students") drawStudents();
-  if (auto) flash("수업 시작 뒤 80분이 지나 학생 화면 보기를 닫았습니다.");
+  if (auto) flash("수업 시간이 끝나 학생 화면 보기를 닫았습니다.");
 }
 function forgetIce() {
   iceCache = null;
@@ -205,9 +219,12 @@ function paintClass(fresh) {
   if (!classBarEl || (!fresh && !classBarEl.isConnected)) return;
   const on = classOn();
   classBarEl.classList.toggle("on", on);
+  const ext = canExtend();
   classBarEl.replaceChildren(on
-    ? h("span", { class: "class-left" }, h("span", { class: "presence on" }), " " + classLeft())
-    : h("span", { class: "muted small" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 수업을 시작해야 쓸 수 있습니다. 시작하면 80분 뒤 저절로 끝납니다."),
+    ? h("span", { class: "row class-now" }, h("span", { class: "class-left" }, h("span", { class: "presence on" }), " " + classLeft()),
+      h("button", { class: "ghost class-extend", type: "button", disabled: !ext, onclick: extendClass,
+        title: ext ? "수업 시간을 50분 늘립니다" : "남은 시간이 30분 밑으로 내려가면 늘릴 수 있습니다" }, "시간 연장하기(+50분)"))
+    : h("span", { class: "muted small" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 수업을 시작해야 쓸 수 있습니다. 시작하면 50분 뒤 저절로 끝나고, 남은 시간이 30분 밑이면 50분씩 늘릴 수 있습니다."),
   on ? h("button", { class: "ghost", type: "button", onclick() { if (confirm("수업을 끝낼까요? 학생 화면 보기가 닫힙니다.")) endClass(false); } }, "수업 끝내기")
     : h("button", { class: "primary class-start", type: "button", onclick: startClass }, "수업 시작하기"));
 }

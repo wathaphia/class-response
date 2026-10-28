@@ -532,7 +532,8 @@ begin
   if not found then raise exception 'not a teacher'; end if;
   if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
   return jsonb_build_object(
-    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'since', t.created_at,
+    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'since', t.created_at, 'student', t.student_id is not null,
+    'promoted', promoted_students(),   -- 선생님으로 승격된 학생(아래)
     'own', (select count(*) from lessons where owner = auth.uid()),
     'shared', (select count(*) from lesson_collaborators where email = me),
     -- 내가 나눈(개발자는 모든) 수업의 공동 작업자
@@ -606,6 +607,56 @@ grant execute on function admin_set_teacher(text, boolean) to authenticated;
 grant execute on function is_admin() to authenticated;
 grant execute on function can_lesson(uuid) to authenticated;
 grant execute on function owns_lesson(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 학생을 선생님으로 승격(개발자만, 「학생 관리」에서): 학생 계정에 로그인 이메일을 붙여 teachers 에 넣는다.
+-- 승격된 학생은 그 이메일로 교사 화면의 「처음 계정 만들기」를 해 로그인하고,
+-- 선생님들은 「공동 작업자 추가」에서 승격된 학생 목록 중에 골라 수업을 함께 쓴다.
+-- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 남고 개발자가 볼 수 있다).
+-- ------------------------------------------------------------
+alter table teachers add column if not exists student_id uuid references students(id) on delete cascade;
+create unique index if not exists teachers_student_key on teachers (student_id);
+
+create or replace function promote_student(p_student uuid, p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare e text := lower(trim(p_email));
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
+  if not exists (select 1 from students where id = p_student) then return jsonb_build_object('error', 'no_student'); end if;
+  if exists (select 1 from teachers where student_id = p_student) then return jsonb_build_object('error', 'already'); end if;
+  if exists (select 1 from teachers where email = e) then return jsonb_build_object('error', 'email_taken'); end if;
+  insert into teachers (email, student_id) values (e, p_student);
+  return jsonb_build_object('ok', true, 'code', (select code from teachers where email = e));
+end $$;
+
+-- 선생님 자격 해제: 학생 계정은 그대로 두고, 공동 작업자 권한은 함께 없어진다
+create or replace function demote_student(p_student uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  delete from teachers where student_id = p_student and not is_admin;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- 승격된 학생 목록(모든 선생님이 봄: 학생 관리 위쪽 표 · 공동 작업자 고르기)
+create or replace function promoted_students()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select case when is_teacher() then coalesce((select jsonb_agg(jsonb_build_object(
+      'student_id', s.id, 'class_no', s.class_no, 'name', s.name, 'email', t.email, 'code', t.code, 'since', t.created_at,
+      'account', u.id is not null, 'confirmed', u.email_confirmed_at is not null, 'last_sign_in', u.last_sign_in_at,
+      'own', (select count(*) from lessons l where l.owner = u.id),
+      'shared', (select count(*) from lesson_collaborators c where c.email = t.email))
+    order by s.class_no, s.name)
+    from teachers t join students s on s.id = t.student_id left join auth.users u on lower(u.email) = t.email), '[]'::jsonb) end
+$$;
+
+revoke all on function promote_student(uuid, text) from public;
+revoke all on function demote_student(uuid) from public;
+revoke all on function promoted_students() from public;
+grant execute on function promote_student(uuid, text) to authenticated;
+grant execute on function demote_student(uuid) to authenticated;
+grant execute on function promoted_students() to authenticated;
 
 -- ------------------------------------------------------------
 -- 교사 이메일: teacher@example.com 을 자기 이메일(소문자)로 바꾸세요. 여러 명이면 줄을 더하면 됩니다.
