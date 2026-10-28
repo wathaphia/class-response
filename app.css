@@ -176,7 +176,34 @@ main.lesson .slide { cursor: zoom-in; }
 .tab.on { background: var(--accent); color: #fff; font-weight: 700; }
 .tab.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
 .tab.on:hover .tab-icon { background: rgba(255, 255, 255, .2); }
-@media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon { transition: none; } }
+/* 설정: 올리면(또는 눌러서·키보드로 들어가면) 아래로 펼쳐지는 메뉴. 단추와 메뉴 사이 틈은 padding으로 메워 마우스가 옮겨 가도 닫히지 않는다 */
+.top-actions { display: flex; align-items: center; gap: .25rem; margin-left: auto; }
+.set-menu { position: relative; }
+.set-caret { width: .42rem; height: .42rem; margin: 0 .1rem .2rem; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+.set-drop { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: .15rem; min-width: 11rem; padding: .45rem .3rem .3rem;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(0, 0, 0, .14);
+  opacity: 0; visibility: hidden; transform: translateY(-6px) scaleY(.96); transform-origin: top;
+  transition: opacity .18s, transform .22s cubic-bezier(.2, .8, .2, 1), visibility 0s .22s; }
+.set-drop::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
+.set-menu:hover .set-drop, .set-menu:focus-within .set-drop, .set-menu.open .set-drop {
+  opacity: 1; visibility: visible; transform: none; transition: opacity .18s, transform .22s cubic-bezier(.2, .8, .2, 1), visibility 0s; }
+.set-menu:hover .set-caret, .set-menu:focus-within .set-caret, .set-menu.open .set-caret { transform: translateY(.2rem) rotate(225deg); }
+.set-menu.shut .set-drop { opacity: 0; visibility: hidden; transform: translateY(-6px) scaleY(.96); }
+.set-menu.shut .set-caret { transform: rotate(45deg); }
+.set-menu:hover .set-btn:not(.on) { color: var(--accent); background: var(--accent-soft); }
+.set-menu:hover .set-btn:not(.on)::after { transform: scaleX(1); }
+.set-item { position: relative; display: flex; align-items: center; gap: .5rem; width: 100%; padding: .45rem .7rem; text-align: left;
+  background: none; border: 0; border-radius: 8px; color: var(--ink); transition: color .15s, background-color .15s, padding-left .2s; }
+.set-item::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent);
+  transform: scaleY(0); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+.set-item:hover:not(.on), .set-item:focus-visible:not(.on) { color: var(--accent); background: var(--accent-soft); padding-left: .95rem; }
+.set-item:hover::before, .set-item:focus-visible::before { transform: scaleY(1); }
+.set-item:hover .tab-icon { transform: translateY(-1px) scale(1.08); background: #fff; }
+.set-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.set-item.on { background: var(--accent); color: #fff; font-weight: 700; }
+.set-item.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon, .set-drop, .set-caret, .set-item, .set-item::before { transition: none; } }
 .teacher .top-title select { min-height: 40px; padding: .3rem .6rem; font-weight: 700; max-width: 70vw; }
 
 /* 교사: 수업 진행 */
