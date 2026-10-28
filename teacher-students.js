@@ -570,7 +570,7 @@ function drawStudents() {
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)), h("td", {}, status),
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
-        : h("span", { class: "tag info" }, "아직 안 정함")),
+        : h("span", { class: "tag info" }, "아직 안 정함"), deskTag(s)),
       h("td", { class: "grid-cell", "data-sid": s.id }),
       h("td", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !live, title: live ? "" : "수업을 시작해야 볼 수 있습니다", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),

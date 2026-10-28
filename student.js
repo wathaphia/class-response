@@ -33,7 +33,11 @@ let deskId = 0;                      // 지금 연결 번호(예전 연결의 �
 let deskLive = false;                // 교사에게 영상이 실제로 가는 중(그동안은 수업 화면 복사를 보내지 않는다)
 let deskQueued = [];
 let deskMsg = "";
-const canDesk = () => !!navigator.mediaDevices?.getDisplayMedia;
+// 휴대폰·태블릿은 화면 공유가 없다(아이패드는 Mac처럼 보이지만 터치가 된다)
+const mobileDevice = () => !!navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
+const canDesk = () => !!navigator.mediaDevices?.getDisplayMedia && !mobileDevice();
+let deskGate = null;                 // 동의한 PC 학생이 전체 화면을 공유하기 전까지 수업 화면을 가리는 막
 // 크게 보기: 높이 720·8 FPS·약 600 kbps. 일괄 미리보기(작은 칸 320×180): 높이 180·5 FPS·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
 const DESK = { full: { h: 720, fps: 8, br: 600000 }, lite: { h: 180, fps: 5, br: 70000 } };
 // 실시간 수업 화면: 화면 공유가 없을 때 이 수업 화면(쪽, 쓰고 있는 답)을 복사해 보낸다. 모든 기기·브라우저에서 된다.
@@ -212,6 +216,7 @@ function leaveScreenShare() {
   liveOk = false;
   screenChannelKey = "";
   screenPending = false;
+  renderDeskGate(false);   // 위에서 화면 안내를 다시 그려도 입장 화면에는 막이 남지 않게 맨 끝에
 }
 
 // ---------- 서버에서 상태 받기 ----------
@@ -318,7 +323,7 @@ function ensureScreenChannel() {
   screenChannel.on("broadcast", { event: "nudge" }, pollSoon);
   screenChannel.subscribe((status) => {
     liveOk = status === "SUBSCRIBED";
-    if (liveOk) trackPresence();
+    if (liveOk) trackPresence(true);
   });
 }
 
@@ -372,6 +377,37 @@ function renderScreenNotice() {
   shell.screenNotice.classList.toggle("live", mirrorOn);
   shell.screenNotice.classList.toggle("ask", !!(mirrorOn && deskBtn));   // 선생님이 보는데 전체 화면 공유가 꺼져 있음
   shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
+  renderDeskGate(choice === "yes" && !!deskBtn);
+  trackPresence();
+}
+
+// 화면 보기에 동의한 PC 학생은 화면 전체를 공유해야 수업 화면이 열린다(창·탭만 고르면 열리지 않음).
+// 공유 대신 동의를 철회할 수도 있지만, 그러면 선생님 명단에 바로 「철회함」으로 보인다.
+function renderDeskGate(on) {
+  if (!on) {
+    if (deskGate) deskGate.remove();
+    deskGate = null;
+    document.body.classList.remove("desk-locked");
+    return;
+  }
+  if (!deskGate) {
+    deskGate = h("div", { class: "desk-gate", role: "dialog", "aria-modal": "true", "aria-labelledby": "desk-gate-title" });
+    document.body.append(deskGate);
+  }
+  document.body.classList.add("desk-locked");
+  deskGate.replaceChildren(h("div", { class: "card stack" },
+    h("h2", { id: "desk-gate-title" }, "화면 전체를 공유해야 수업이 열립니다"),
+    h("p", {}, "수업 중 화면 보기에 동의했으므로, 이 PC에서는 화면 전체를 선생님과 공유해야 합니다. 열려 있는 다른 창·앱도 함께 보입니다."),
+    h("ol", { class: "small" },
+      h("li", {}, "아래 「전체 화면 공유 시작」을 누릅니다."),
+      h("li", {}, "뜨는 창에서 「전체 화면」(또는 「화면 전체」) 탭을 고르고 화면을 누릅니다. 창이나 탭 하나만 고르면 열리지 않습니다."),
+      h("li", {}, "「공유」를 누릅니다. 새로고침하면 다시 해야 합니다.")),
+    deskMsg ? h("p", { class: "error" }, deskMsg.trim()) : null,
+    h("div", { class: "row wrap" },
+      h("button", { class: "primary", type: "button", onclick: startDesk }, "전체 화면 공유 시작"),
+      h("button", { class: "ghost", type: "button", onclick() {
+        if (confirm("화면 보기 동의를 철회할까요?\n선생님 명단에 「철회함」으로 바로 표시됩니다. 나중에 다시 동의할 수 있습니다.")) setMonitorChoice("no");
+      } }, "화면 보기 동의 철회"))));
 }
 
 function startMirror(lite = false) {
@@ -539,8 +575,15 @@ window.addEventListener("message", async (e) => {
 });
 ["input", "change", "click", "scroll"].forEach((t) => document.addEventListener(t, queueMirror, { capture: true, passive: true }));
 document.addEventListener("visibilitychange", () => { trackPresence(); if (mirrorOn) sendMirror(); });
-function trackPresence() {
-  if (screenChannel && screenChannel.state === "joined") screenChannel.track({ away: document.hidden }).catch(() => {});
+// desk: on(전체 화면 공유 중) · off(PC인데 공유 안 함) · none(휴대폰·태블릿) · no(화면 보기 동의 안 함). multi: 모니터가 여러 대
+let lastPresence = "";
+function trackPresence(force) {
+  if (!screenChannel || screenChannel.state !== "joined") return;
+  const p = { away: document.hidden, desk: monitorChoice() !== "yes" ? "no" : !canDesk() ? "none" : deskStream ? "on" : "off", multi: !!screen.isExtended };
+  const k = JSON.stringify(p);
+  if (k === lastPresence && !force) return;
+  lastPresence = k;
+  screenChannel.track(p).catch(() => {});
 }
 
 // 지금 수업 화면을 복사한다(쓰고 있는 답을 속성으로 옮겨 적어 그대로 보이게)

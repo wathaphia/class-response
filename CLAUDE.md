@@ -29,7 +29,7 @@
 | `teacher-build.js` | 「자료 추가」 활동 목록(쪽 옮기기·끌기, 칸 재사용 `syncRows`), 시뮬레이션 편집기, 설명·질문 작성기(`composeEditor`), 저장 버튼 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
 | `teacher-students.js` | 「학생 관리」 위쪽 승격된 학생 표(`promotedCard`, 승격·해제는 개발자만: `promote_student` `demote_student`), 학생 표(이름 밑 「승격」), 학생 화면 크게 보기(교사 전용 채널 `:t`, PC는 화면 전체 WebRTC 영상 `deskAnswer`, 휴대폰·태블릿은 수업 화면 복사 + 시뮬레이션 WebRTC), 일괄 미리보기 그리드 | `drawStudents` `promoteStudent` `watchStudentScreen` `startGrid` `simRtc` `deskAnswer` | promote, live-android, live-iphone, live-relay, live-desk |
 | `teacher-settings.js` | 「슬라이드 편집」, 슬라이드 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call` / Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
-| `student.js` | 학생: 입장, 상태 받기(`poll`, `student_state` RPC, `nudge`→`pollSoon`), 화면·활동 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk` 「전체 화면」만 받음 → 교사가 볼 때마다 `offerDesk`, 영상이 가는 동안 수업 화면 복사는 안 보냄) | `start` `render` `cardFor` `buildForm` | live-* |
+| `student.js` | 학생: 입장, 상태 받기(`poll`, `student_state` RPC, `nudge`→`pollSoon`), 화면·활동 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk` 「전체 화면」만 받음 → 교사가 볼 때마다 `offerDesk`, 영상이 가는 동안 수업 화면 복사는 안 보냄), 동의한 PC 학생은 공유 전까지 수업을 가리는 막(`renderDeskGate`), 접속 표시(Presence)에 공유 상태 `desk`·모니터 여러 대 `multi` → 교사 `deskTag`(teacher-run.js) | `start` `render` `cardFor` `buildForm` | live-* |
 | `app.css` | 모든 모양 | | |
 | `setup.sql` | 표·보안 규칙(수업은 주인·공동 작업자·개발자만: `can_lesson` `owns_lesson`)·RPC(`student_state`, `resource_usage`, `my_profile`). Supabase에 직접 적용(`class-tools\supabase-sql.ps1`) | | |
 
