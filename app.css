@@ -116,17 +116,19 @@ main.lesson textarea, main.lesson input[type=text] { font-size: 1.05rem; }
 }
 /* 넓고 충분히 높은 화면: 페이지를 창 높이에 맞춰 고정. 왼쪽 슬라이드는 남은 칸에 맞게 줄이고 오른쪽(질문·설명·시뮬레이션)만 안에서 스크롤 */
 @media (min-width: 960px) and (min-height: 520px) {
-  #app:has(> main.lesson.split) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  body:has(> #app > main.lesson.split) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  body:has(> #app > main.lesson.split) > #app { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  body:has(> #app > main.lesson.split) > .credit { flex: none; width: 100%; padding: .4rem 16px; }
   #app > main.lesson.split { flex: 1 1 0; min-height: 0; width: 100%; padding-bottom: .75rem; row-gap: 0;
     grid-template-rows: auto auto auto minmax(0, 1fr); align-items: stretch; }
   main.lesson.split > .banner, main.lesson.split > .screen-share-note { margin-bottom: .75rem; }   /* 알림 띠는 1~3줄, 슬라이드·질문은 4줄째 */
-  main.lesson.split > .slide-box { grid-row: 4; grid-column: 1; position: static; display: flex; flex-direction: column; min-height: 0; }
+  main.lesson.split > .slide-box { grid-row: 4; grid-column: 1; position: static; container-type: inline-size; display: flex; flex-direction: column; min-height: 0; }
   main.lesson.split > .slide-box > * { flex: none; }
   main.lesson.split > .stack { grid-row: 4; grid-column: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
-  main.lesson.split .slide-box > .slide-wrap { flex: 1 1 0; min-height: 0; container-type: size; display: flex; justify-content: center; align-items: flex-start; }
+  main.lesson.split .slide-box > .slide-wrap { flex: 1 1 0; max-height: calc(100cqw * 9 / 16); min-height: 0; container-type: size; display: flex; justify-content: center; align-items: flex-start; }
   main.lesson.split .slide-box > .slide-wrap:has(> .slide[hidden]) { display: none; }   /* PPTX·슬라이드 자리 시뮬레이션일 때 */
   main.lesson.split .slide-wrap > .slide { width: min(100cqw, 100cqh * 16 / 9); max-height: none; }
-  main.lesson.split .slide-box > .sim-stage { flex: 1 1 0; min-height: 0; container-type: size; display: flex; justify-content: center; align-items: flex-start; }
+  main.lesson.split .slide-box > .sim-stage { flex: 1 1 0; max-height: calc(100cqw * 9 / 16); min-height: 0; container-type: size; display: flex; justify-content: center; align-items: flex-start; }
   main.lesson.split .sim-stage .sim-frame { width: min(100cqw, 100cqh * 16 / 9); min-height: 0; max-height: none; }
   main.lesson.split .slide-box > .pptx-frame { flex: 1 1 0; min-height: 0; height: auto; aspect-ratio: auto; }
 }
