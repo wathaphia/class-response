@@ -559,11 +559,15 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
   transition: background-color .2s, border-color .2s, color .2s; }
 .grid-toggle:hover { background: var(--accent-soft); border-color: var(--accent); }
 .grid-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 미리보기를 켜고 꺼도 열 위치는 그대로, 행 높이만 바뀌게: 미리보기 열은 늘 칸(320px) 너비, 단추 글자가 바뀌어도 너비 그대로 */
+.grid-toggle { min-width: 12rem; }
+.students-table th.grid-head, .students-table td.grid-cell { box-sizing: content-box; width: 320px; min-width: 320px; }
 td.grid-cell { white-space: normal; }
+td.grid-cell > span { white-space: nowrap; }
+/* 1366px 화면에서도 오른쪽 단추까지 가로 스크롤 없이 들어오게 칸·단추 여백을 조금 줄인다 */
+.students-table th, .students-table td { padding-inline: .55rem; }
+.students-table td.actions button.ghost { padding: 0 .75rem; }
 .grid-head-row { flex-wrap: nowrap; gap: .4rem; }
-/* 미리보기 칸이 높으니 오른쪽 단추들은 그 높이 안에서 줄을 바꿔 쌓는다(표가 오른쪽으로 넘치지 않게) */
-.students-table[data-grid="1"] td.actions { white-space: normal; width: 1%; }
-.students-table[data-grid="1"] td.actions > * { margin: .15rem 0 .15rem .3rem; }
 .grid-head-row .csv-btn { min-height: 36px; padding: 0 .75rem; font-size: .85rem; white-space: nowrap; }
 .students-table th, .students-table td:nth-child(-n+6) { white-space: nowrap; }
 .live-tile { display: grid; gap: .3rem; width: 320px; }
