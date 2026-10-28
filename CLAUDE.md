@@ -27,9 +27,9 @@
 | `teacher-etc.js` | 「기타 관리」 사용량 원 그래프(Supabase 아래는 날마다 캐시 전송량 막대만, 오늘 막대 = 매시 집계 + Worker `egressTail`), 동기화(모든 받는 곳 한꺼번에, 숫자는 `lastSync()` 기준)/비용, 한국 시간(`kstIso`) | `drawEtc` `syncUsage` `supabaseView` `cloudflareView` `syncCostView` | etc |
 | `teacher-run.js` | 「수업 진행」 슬라이드·제출 현황·접속 표시(Presence), 「수업 시작하기」(50분, 남은 시간 30분 밑이면 「시간 연장하기」 +50분·TURN 새로 한 장. 이때만 TURN 발급·학생 화면 보기: `classOn` `startClass` `extendClass` `endClass`) | `drawRun` `setPage` `drawRoster` `showJoin` | class, teacher |
 | `teacher-build.js` | 「자료 추가」 활동 목록(쪽 옮기기·끌기, 칸 재사용 `syncRows`), 시뮬레이션 편집기, 설명·질문 작성기(`composeEditor`), 저장 버튼 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
-| `teacher-students.js` | 「학생 관리」 위쪽 승격된 학생 표(`promotedCard`, 승격·해제는 개발자만: `promote_student` `demote_student`), 학생 표(이름 밑 「승격」), 학생 화면 크게 보기(교사 전용 채널 `:t`, 시뮬레이션 WebRTC), 일괄 미리보기 그리드 | `drawStudents` `promoteStudent` `watchStudentScreen` `startGrid` `simRtc` | promote, live-android, live-iphone, live-relay |
+| `teacher-students.js` | 「학생 관리」 위쪽 승격된 학생 표(`promotedCard`, 승격·해제는 개발자만: `promote_student` `demote_student`), 학생 표(이름 밑 「승격」), 학생 화면 크게 보기(교사 전용 채널 `:t`, PC는 화면 전체 WebRTC 영상 `deskAnswer`, 휴대폰·태블릿은 수업 화면 복사 + 시뮬레이션 WebRTC), 일괄 미리보기 그리드 | `drawStudents` `promoteStudent` `watchStudentScreen` `startGrid` `simRtc` `deskAnswer` | promote, live-android, live-iphone, live-relay, live-desk |
 | `teacher-settings.js` | 「슬라이드 편집」, 슬라이드 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call` / Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
-| `student.js` | 학생: 입장, 상태 받기(`poll`, `student_state` RPC, `nudge`→`pollSoon`), 화면·활동 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`) | `start` `render` `cardFor` `buildForm` | live-* |
+| `student.js` | 학생: 입장, 상태 받기(`poll`, `student_state` RPC, `nudge`→`pollSoon`), 화면·활동 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk` 「전체 화면」만 받음 → 교사가 볼 때마다 `offerDesk`, 영상이 가는 동안 수업 화면 복사는 안 보냄) | `start` `render` `cardFor` `buildForm` | live-* |
 | `app.css` | 모든 모양 | | |
 | `setup.sql` | 표·보안 규칙(수업은 주인·공동 작업자·개발자만: `can_lesson` `owns_lesson`)·RPC(`student_state`, `resource_usage`, `my_profile`). Supabase에 직접 적용(`class-tools\supabase-sql.ps1`) | | |
 
