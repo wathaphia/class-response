@@ -1,6 +1,6 @@
-// 교사 화면 · 「수업 설정」 탭: 수업 정보·슬라이드 올리기(PPTX/PDF → 그림), 슬라이드 저장소(R2 / Supabase), CSV 내보내기.
+// 교사 화면 · 「슬라이드 편집」 탭: 새 수업 만들기·복제·지우기, 슬라이드 올리기(PPTX/PDF → 그림), 슬라이드 저장소(R2 / Supabase), CSV 내보내기.
 
-// ---------- 수업 설정 ----------
+// ---------- 슬라이드 편집 ----------
 function drawSettings() {
   const title = h("input", { type: "text", maxlength: 100, value: lesson ? lesson.title : "", placeholder: "예: 2학년 3반 · 열의 이동" });
   const msg = h("p", { class: "error" });
@@ -58,26 +58,25 @@ function drawSettings() {
   const slides = lesson && lesson.kind !== "survey" ? slidesCard() : null;
   main.replaceChildren(h("div", { class: slides && slides.allCard ? "settings-grid" : "stack narrowish" }, h("div", { class: "stack" },
     slides ? slides.fxCard : null,   // 전환 효과 미리보기를 맨 위에(오른쪽 전체 슬라이드와 나란히)
-    h("form", { class: "card stack", onsubmit: submit },
-      h("h2", {}, lesson ? (lesson.kind === "survey" ? "설문 설정" : "수업 설정") : "새로 만들기"),
-      lesson ? null : kindPick,
-      lesson ? h("p", { class: "join-code" }, "수업 코드 ", h("strong", {}, lesson.code)) : h("p", { class: "muted small" }, "수업 코드는 겹치지 않게 자동으로 만들어집니다."),
+    // 제목 고치기·학생 접속 주소는 위쪽 머리(제목 칸·「접속 QR」)에 있으므로 이 칸은 새로 만들 때만 보인다
+    lesson ? null : h("form", { class: "card stack", onsubmit: submit },
+      h("h2", {}, "새로 만들기"),
+      kindPick,
+      h("p", { class: "muted small" }, "수업 코드는 겹치지 않게 자동으로 만들어집니다."),
       h("label", {}, "제목", title),
       msg,
-      h("button", { class: "primary big", type: "submit" }, lesson ? "제목 저장" : "수업 만들기")),
+      h("button", { class: "primary big", type: "submit" }, "수업 만들기")),
     slides ? slides.mainCard : null,
     lesson ? h("section", { class: "card stack" },
-      h("h2", {}, "학생 접속"),
-      h("p", { class: "join-url" }, joinUrl(lesson)),
+      h("h2", {}, "수업 관리"),
       h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick: showJoin }, "QR 크게 보기"),
         h("button", { class: "ghost", type: "button", onclick: duplicate }, "다른 반용으로 복제"),
         h("button", { class: "ghost danger", type: "button", onclick: remove }, "수업 지우기"))) : null),
     slides && slides.allCard ? h("div", { class: "settings-slot" }, h("div", { class: "stack settings-right" }, slides.allCard)) : null));
   pinSettingsRight();
 }
 
-// 수업 설정 오른쪽(전체 슬라이드·다중 선택 삭제)을 넓은 화면에서 화면에 고정한다(왼쪽을 스크롤해도 움직이지 않게).
+// 슬라이드 편집 오른쪽(전체 슬라이드·다중 선택 삭제)을 넓은 화면에서 화면에 고정한다(왼쪽을 스크롤해도 움직이지 않게).
 // 자리는 그리드의 빈 칸(settings-slot)이 잡고, 패널은 그 칸의 위치·너비에 맞춰 position: fixed로 띄운다.
 let pinWatch = null;
 function pinSettingsRight() {
