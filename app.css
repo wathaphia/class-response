@@ -603,3 +603,9 @@ td.grid-cell > span { white-space: nowrap; }
   .profile-page { grid-template-columns: minmax(0, 1fr); }
   .profile-side { position: static; }
 }
+.class-bar .class-now { gap: .6rem; align-items: center; }
+.class-bar .class-extend { min-height: 0; padding: .3rem .7rem; }
+.promoted-card { margin-bottom: 1rem; }
+.promoted-table td, .promoted-table th { white-space: nowrap; }
+.collab-people { border: 1px solid var(--line); border-radius: 10px; max-height: 30vh; overflow: auto; }
+.students-table .promote-btn { min-height: 0; padding: 0; font-size: .8rem; }

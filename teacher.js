@@ -105,7 +105,25 @@ function showLogin() {
           : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
       },
     }, "비밀번호 재설정 메일 보내기"),
-    h("p", { class: "muted small center" }, "교사 계정은 Supabase 대시보드 → Authentication → Users 에서 만듭니다.")));
+    // 선생님으로 승격된 학생: 승격할 때 받은 이메일로 처음 한 번 계정을 만든다(확인 메일의 링크를 눌러야 로그인됨)
+    h("button", {
+      class: "link",
+      type: "button",
+      async onclick() {
+        const address = email.value.trim();
+        if (!address || pw.value.length < 6) {
+          msg.textContent = "승격할 때 등록한 이메일과 새 비밀번호(6자 이상)를 넣고 다시 눌러 주세요.";
+          (address ? pw : email).focus();
+          return;
+        }
+        msg.textContent = "계정을 만드는 중…";
+        const { error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: new URL(location.pathname, location.origin).href } });
+        msg.textContent = error
+          ? "계정을 만들지 못했습니다: " + error.message
+          : "메일함에서 확인 링크를 누른 뒤 로그인해 주세요. (선생님으로 승격된 이메일만 교사 화면을 쓸 수 있습니다.)";
+      },
+    }, "선생님으로 승격된 학생: 처음 계정 만들기"),
+    h("p", { class: "muted small center" }, "교사 계정은 Supabase 대시보드 → Authentication → Users 에서 만들거나, 「학생 관리」에서 승격된 학생이 위 단추로 직접 만듭니다.")));
 }
 
 function showPasswordRecovery() {

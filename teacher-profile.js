@@ -47,7 +47,7 @@ function paintProfile() {
         info("마지막 로그인", dateText(me.last_sign_in_at)),
         info("내 수업", p ? p.own + "개" : "—"),
         info("공유받은 수업", p ? p.shared + "개" : "—")),
-      h("p", { class: "muted small" }, "교사 ID(6자리)를 다른 선생님에게 알려 주면, 그 선생님이 자기 수업을 나와 함께 쓰도록 공동 작업자로 추가할 수 있습니다."),
+      h("p", { class: "muted small" }, "공동 작업자는 「학생 관리」에서 선생님으로 승격된 학생 중에서 고릅니다."),
       h("div", { class: "row wrap" },
         h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"),
         h("button", {
@@ -63,6 +63,12 @@ function paintProfile() {
       msg),
     p ? collaboratorCard(p) : null,
     p && p.admin ? teachersCard(p) : null);
+}
+
+// 공동 작업자 이름: 승격된 학생이면 학번·이름, 아니면 이메일(교사 ID)
+function whoText(c, p) {
+  const s = (p.promoted || []).find((x) => x.email === c.email);
+  return s ? s.class_no + " " + s.name + " (" + c.email + ")" : c.email + " (" + c.code + ")";
 }
 
 // 공동 작업자: 내가 나눈 수업(개발자는 모든 수업)과 나에게 나눈 수업
@@ -84,7 +90,7 @@ function collaboratorCard(p) {
       h("button", { class: "primary", type: "button", onclick: addCollaborator }, "+ 공동 작업자 추가하기")),
     byLesson.size ? h("ul", { class: "collab-list" }, [...byLesson].map(([id, g]) => h("li", {},
       h("strong", {}, g.title), h("span", { class: "muted small" }, " · " + g.code),
-      h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, c.email + " (" + c.code + ")",
+      h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, whoText(c, p),
         h("button", { class: "link danger", type: "button", title: "공동 작업자에서 빼기", "aria-label": c.email + " 빼기",
           onclick() { remove(id, c.email, "「" + g.title + "」에서 " + c.email + " 선생님을 뺄까요?"); } }, "×")))))))
       : h("p", { class: "muted small" }, "아직 함께 쓰는 선생님이 없습니다."),
@@ -94,22 +100,23 @@ function collaboratorCard(p) {
         h("button", { class: "link danger", type: "button", onclick() { remove(s.lesson_id, p.email, "「" + s.title + "」 공동 작업에서 빠질까요?"); } }, "빠지기"))))) : null);
 }
 
-// 공동 작업자 추가: 상대 선생님의 6자리 ID + 나눌 수업 고르기(내 수업만, 개발자는 모든 수업)
+// 공동 작업자 추가: 선생님으로 승격된 학생 목록에서 한 명 + 나눌 수업 고르기(내 수업만, 개발자는 모든 수업)
 function addCollaborator() {
   const mine = lessons.filter((l) => l.owner === me.id || (profile && profile.admin));
-  const id = h("input", { type: "text", inputmode: "numeric", maxlength: 6, placeholder: "예: 123456", "aria-label": "선생님 ID" });
+  const people = ((profile && profile.promoted) || []).filter((p) => p.email !== profile.email);
+  const picks = people.map((p) => h("input", { type: "radio", name: "collab-who", value: p.code }));
   const msg = h("p", { class: "msg" });
   const boxes = mine.map((l) => h("input", { type: "checkbox", value: l.id, checked: !!lesson && l.id === lesson.id }));
   const close = openModal("공동 작업자 추가하기", h("form", {
     class: "stack collab-form",
     async onsubmit(e) {
       e.preventDefault();
-      const code = id.value.trim();
+      const who = picks.find((r) => r.checked);
       const picked = boxes.filter((b) => b.checked).map((b) => b.value);
-      if (!/^\d{6}$/.test(code)) { msg.textContent = "선생님 ID 6자리 숫자를 넣어 주세요."; id.focus(); return; }
+      if (!who) { msg.textContent = "함께 쓸 선생님(승격된 학생)을 골라 주세요."; return; }
       if (!picked.length) { msg.textContent = "함께 쓸 수업을 하나 이상 골라 주세요."; return; }
       msg.textContent = "추가하는 중…";
-      const { data, error } = await sb.rpc("add_collaborator", { p_code: code, p_lessons: picked });
+      const { data, error } = await sb.rpc("add_collaborator", { p_code: who.value, p_lessons: picked });
       const why = { no_teacher: "그 ID의 선생님이 없습니다.", self: "내 ID는 넣을 수 없습니다.", not_owner: "내 수업만 나눌 수 있습니다." };
       if (error || data.error) { msg.textContent = error ? error.message : why[data.error] || data.error; return; }
       close();
@@ -117,13 +124,15 @@ function addCollaborator() {
       await loadProfile();
     },
   },
-    h("label", {}, "선생님 ID(6자리)", id),
+    h("fieldset", { class: "stack collab-people" }, h("legend", {}, "함께 쓸 선생님(승격된 학생)"),
+      people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + p.class_no + " " + p.name,
+        h("span", { class: "muted small" }, " · " + p.email + (p.account ? "" : " · 아직 계정 만들기 전"))))
+        : h("p", { class: "muted small" }, "선생님으로 승격된 학생이 없습니다. 「학생 관리」에서 학생을 먼저 승격해 주세요.")),
     h("fieldset", { class: "stack collab-lessons" }, h("legend", {}, "함께 쓸 수업"),
       mine.length ? mine.map((l, i) => h("label", { class: "check" }, boxes[i], " " + l.title + " (" + l.code + ")"))
         : h("p", { class: "muted small" }, "내가 만든 수업이 없습니다.")),
     h("p", { class: "muted small" }, "공동 작업자는 고른 수업을 보고 고치고 진행할 수 있습니다. 수업을 지우거나 다른 선생님에게 다시 나누지는 못합니다."),
-    h("button", { class: "primary", type: "submit" }, "추가"), msg));
-  id.focus();
+    h("button", { class: "primary", type: "submit", disabled: !people.length }, "추가"), msg));
 }
 
 // 개발자 전용: 모든 선생님 목록 · 교사 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
