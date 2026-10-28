@@ -397,9 +397,14 @@ function queueMirror() {
 // 시뮬레이션 안의 촬영기(SIM_AGENT)가 보낸 장면을 교사에게 넘기고, 다 보낸 뒤에야 다음 장면을 달라고 답한다.
 // 메시지가 크면 해상도·화질을 낮추고, 작으면 조금씩 되돌린다.
 function simFrames() { return [...document.querySelectorAll("iframe.sim-frame")]; }
+const simHidden = (f) => !!f.closest(".sim-over.off");
+// 다른 쪽이라 숨겨 둔 얹기 시뮬레이션은 장면을 보내지 않는다(그 쪽으로 넘기면 다음 전송 때 다시 시작)
+function stopHiddenSimAgents() {
+  for (const f of simFrames()) if (simHidden(f) && simStarted.has(f)) { f.contentWindow?.postMessage({ craMirror: "stop" }, "*"); simStarted.delete(f); }
+}
 function startSimAgents() {
   for (const f of simFrames()) {
-    if (simStarted.get(f) === f.srcdoc.length) continue;
+    if (simHidden(f) || simStarted.get(f) === f.srcdoc.length) continue;
     simStarted.set(f, f.srcdoc.length);
     const start = () => {
       f.contentWindow?.postMessage(mirrorLite ? { craMirror: "start", every: liteEvery, maxW: LITE.maxW, q: LITE.q, lite: true }
@@ -408,7 +413,7 @@ function startSimAgents() {
       iceServers({ body: { token, code: state.lesson.code || code } })
         .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: relayFirst(ice), opt: mirrorLite ? LITE.rtc : null }, "*"));
     };
-    f.addEventListener("load", () => { if (mirrorOn) start(); });
+    if (!f.__craLoad) { f.__craLoad = true; f.addEventListener("load", () => { if (mirrorOn && !simHidden(f) && simStarted.has(f)) start(); }); }
     start();
   }
 }
@@ -462,6 +467,7 @@ function mirrorSnapshot() {
     const k = all.indexOf(inMain[i]);
     el.replaceWith(k >= 0 ? h("div", { class: "sim-mirror", "data-k": k }) : h("p", { class: "card muted" }, "[화면]"));
   });
+  clone.querySelectorAll(".sim-over.off").forEach((el) => el.remove());   // 다른 쪽이라 숨겨 둔 것
   // 수업 화면 밖에 띄운 시뮬레이션(떠 있는 창·화면 가득)은 맨 위에 붙인다
   all.forEach((f, k) => {
     if (!main.contains(f)) clone.prepend(h("section", { class: "card" }, h("p", { class: "muted small" }, "학생이 띄운 시뮬레이션"), h("div", { class: "sim-mirror", "data-k": k })));
@@ -671,11 +677,14 @@ function render(pageChanged) {
   showStageSim(stageSim);
   if (stageSim) here = here.filter((a) => a !== stageSim);
   // 슬라이드 위에 얹는 시뮬레이션: 선생님이 정한 자리에 테두리 없이 놓는다(카드로는 보이지 않음)
-  const overs = hasSlides && !isPptx(L) && !stageSim ? here.filter(isOverSim) : [];
-  here = here.filter((a) => !overs.includes(a));
-  shell.simLayer.hidden = !overs.length;
+  // 다른 쪽에 얹은 것도 미리 불러 숨겨 두어, 그 쪽으로 넘기면 바로 보인다
+  const allOvers = hasSlides && !isPptx(L) ? acts.filter(isOverSim) : [];
+  const overs = stageSim ? [] : here.filter(isOverSim);
+  here = here.filter((a) => !isOverSim(a));
+  shell.simLayer.hidden = !allOvers.length;
   syncSimLayer(shell.simLayer, shell.img);
-  renderSimLayer(shell.simLayer, overs, { load: (a) => loadSim(a).then(withSimAgent), ver: (a) => a.html_ver, editable: false });
+  renderSimLayer(shell.simLayer, overs, { all: allOvers, load: (a) => loadSim(a).then(withSimAgent), ver: (a) => a.html_ver, editable: false });
+  stopHiddenSimAgents();
   const els = here.map(cardFor);
   if (anytime.length) els.push(shell.anytimeHead, anytime.map(cardFor));
   if (!here.length && !anytime.length) {

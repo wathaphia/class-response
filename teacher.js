@@ -262,18 +262,7 @@ function tabIcon(k) {
 }
 function draw() {
   clearTimeout(timer);
-  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 다른 수업으로 옮기기/새 수업 · 학생 접속 QR
-  const pick = h("select", {
-    "aria-label": "수업 고르기", title: "다른 수업으로 옮기거나 새 수업을 만듭니다",
-    async onchange() {
-      if (!pick.value) return;
-      if (pick.value === "new") { lesson = null; tab = "settings"; }
-      else lesson = lessons.find((l) => l.id === pick.value);
-      await loadLesson();
-    },
-  }, h("option", { value: "", selected: true, hidden: true }, "수업 이동 · 추가"),
-    lessons.map((l) => h("option", { value: l.id }, (lesson && l.id === lesson.id ? "✓ " : "") + (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
-    h("option", { value: "new" }, "+ 새 수업 만들기"));
+  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 학생 접속 QR. 수업 옮기기·새 수업은 「전체 수업」에서
   const titleBox = h("input", {
     type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
     value: lesson ? lesson.title : "", placeholder: lesson ? "수업 제목" : "새 수업 (수업 설정에서 만듭니다)",
@@ -290,7 +279,7 @@ function draw() {
     },
   });
   const lessonBox = h("div", { class: "lesson-box" },
-    h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox, pick);
+    h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox);
   const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"]];
   // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 세 탭
   const setTabs = [["settings", "수업 설정"], ["manage", "전체 수업"], ["etc", "기타 관리"]];

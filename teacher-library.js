@@ -117,7 +117,13 @@ async function drawManage() {
     h("section", { class: "card stack" },
       h("div", { class: "row between wrap" },
         h("h2", {}, "전체 수업 " + lessons.length + "개"),
-        h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가"))),
+        h("div", { class: "row wrap" },
+          h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가")),
+          // 새 수업: 지금 수업을 비우고 「수업 설정」의 만들기 칸으로 간다
+          h("button", { class: "primary new-lesson", type: "button", async onclick() {
+            lesson = null; tab = "settings"; localStorage.setItem("cra-tab", tab);
+            await loadLesson();
+          } }, "+ 수업 추가"))),
       h("p", { class: "muted small" }, "수업 카드를 끌어 폴더에 넣거나 순서를 바꿀 수 있습니다. 카드를 눌러 고른 뒤 「불러오기」(또는 두 번 누르기)를 하면 그 수업이 지금 수업이 됩니다. 화면은 그대로이고, 다른 탭에서 바로 그 수업을 씁니다."),
       error ? h("p", { class: "error" }, "폴더 기능을 쓰려면 Supabase에서 새 setup.sql을 실행해야 합니다.") : null,
       p ? h("div", { class: "row wrap picked-bar" },

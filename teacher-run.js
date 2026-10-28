@@ -128,10 +128,11 @@ function refreshRun() {
     run.simStage.replaceChildren(...(stageSim ? [simFrame(stageSim.html, stageSim.title)] : []));
   }
   // 슬라이드 위에 얹는 시뮬레이션: 위쪽 막대를 끌어 옮기면 바로 저장되고 학생 화면에도 그 자리에 보인다
-  const overs = L.slide_count > 0 && !isPptx(L) && !stageSim ? shown.filter((a) => isOverSim(a) && simOnSlide(a, sn)) : [];
+  const allOvers = L.slide_count > 0 && !isPptx(L) ? activities.filter(isOverSim) : [];
+  const overs = stageSim ? [] : allOvers.filter((a) => simOnSlide(a, sn));
   syncSimLayer(run.simLayer, run.img);
   renderSimLayer(run.simLayer, overs, {
-    load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: true,
+    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: true,
     onMove: (a, p) => setActivity(a, { sim_place: p }),
   });
   drawRoster(shown.filter((a) => a.kind !== "sim"));
