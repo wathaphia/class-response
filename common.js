@@ -297,11 +297,14 @@ function syncSimLayer(layer, img) {
   Object.assign(layer.style, { left: img.offsetLeft + "px", top: img.offsetTop + "px", width: img.offsetWidth + "px", height: img.offsetHeight + "px" });
 }
 
-// list: 이 쪽에 얹을 시뮬레이션들. load(a) → html, ver(a) → 바뀌었는지 볼 값. 같은 시뮬레이션은 다시 불러오지 않아 조작 상태가 남는다.
-function renderSimLayer(layer, list, { load, ver, editable, onMove }) {
-  const ids = new Set(list.map((a) => a.id));
+// list: 이 쪽에 얹을 시뮬레이션들, all: 수업의 얹기 시뮬레이션 전부. load(a) → html, ver(a) → 바뀌었는지 볼 값.
+// all을 미리 모두 불러 두고 다른 쪽 것은 숨겨 멈춰 두므로, 쪽을 넘기면 슬라이드의 일부처럼 바로 보인다.
+// 같은 시뮬레이션은 다시 불러오지 않아 조작 상태가 남는다.
+function renderSimLayer(layer, list, { all = list, load, ver, editable, onMove }) {
+  const ids = new Set(all.map((a) => a.id));
+  const shown = new Set(list.map((a) => a.id));
   layer.querySelectorAll(":scope > .sim-over").forEach((b) => { if (!ids.has(b.dataset.sim)) b.remove(); });
-  for (const a of list) {
+  for (const a of all) {
     let box = layer.querySelector(':scope > .sim-over[data-sim="' + a.id + '"]');
     if (!box) {
       box = h("div", { class: "sim-over" + (editable ? " editable" : ""), "data-sim": a.id });
@@ -317,11 +320,19 @@ function renderSimLayer(layer, list, { load, ver, editable, onMove }) {
       box.dataset.ver = v;
       box.querySelector("iframe")?.remove();
       const f = simFrame(null, a.title);
+      f.loading = "eager";   // 숨겨 둔 것도 미리 불러 둔다
+      f.addEventListener("load", () => simOverPause(box));
       box.prepend(f);
-      Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = html; }).catch(() => {});
+      Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = withSimPause(html); }).catch(() => {});
     }
+    const off = !shown.has(a.id);
+    if (box.classList.contains("off") !== off) { box.classList.toggle("off", off); simOverPause(box); }
     if (!box.classList.contains("moving")) placeBox(box, a.sim_place || SIM_PLACE_DEFAULT);
   }
+}
+// 보이는 얹기 시뮬레이션은 계속 돌고, 숨긴 것은 멈춘다(다시 보이면 이어서)
+function simOverPause(box) {
+  box.querySelector("iframe")?.contentWindow?.postMessage({ craPause: box.classList.contains("off") }, "*");
 }
 function placeBox(box, p) {
   Object.assign(box.style, { left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: p.h * 100 + "%" });

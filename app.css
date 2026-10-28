@@ -204,14 +204,13 @@ main.lesson .slide { cursor: zoom-in; }
 .set-item.on { background: var(--accent); color: #fff; font-weight: 700; }
 .set-item.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
 @media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon, .set-drop, .set-caret, .set-item, .set-item::before { transition: none; } }
-/* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기) · 수업 이동/추가 */
+/* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기) */
 .lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(36rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .lesson-box:focus-within { border-color: var(--accent); }
 .lesson-code { display: flex; align-items: center; padding: 0 .7rem; border-right: 1px solid var(--line); border-radius: 10px 0 0 10px; background: var(--accent-soft);
   color: var(--accent); font-weight: 700; letter-spacing: .05em; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; user-select: all; }
-.teacher .lesson-box .lesson-title { flex: 1 1 14rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0; background: none; font-weight: 700; }
+.teacher .lesson-box .lesson-title { flex: 1 1 14rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0 10px 10px 0; background: none; font-weight: 700; }
 .teacher .lesson-box .lesson-title:focus { outline: none; background: var(--accent-soft); }
-.teacher .lesson-box select { flex: 0 0 auto; width: 9.5rem; min-height: 40px; padding: .3rem .5rem; border: 0; border-left: 1px solid var(--line); border-radius: 0 10px 10px 0; background-color: transparent; color: var(--muted); font-size: .9rem; }
 @media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
 .teacher .top-title .lesson-box { flex: 1 1 auto; }
 .teacher .top-title .eyebrow { white-space: nowrap; }
@@ -457,6 +456,7 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .slide-wrap { position: relative; }
 .sim-layer { position: absolute; z-index: 2; pointer-events: none; }
 .sim-over { position: absolute; pointer-events: auto; }
+.sim-over.off { visibility: hidden; pointer-events: none; }   /* 다른 쪽의 얹기 시뮬레이션: 미리 불러 숨겨 둠 */
 .sim-over .sim-frame { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: transparent; }
 .sim-over.editable:hover, .sim-over.moving { outline: 2px dashed rgba(37, 99, 235, .7); }
 .sim-grip { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; padding: 0 .6rem; background: rgba(37, 99, 235, .92); color: #fff; font-size: .8rem; cursor: move; opacity: 0; touch-action: none; user-select: none; }
@@ -552,6 +552,11 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .grid-toggle:hover { background: var(--accent-soft); border-color: var(--accent); }
 .grid-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 td.grid-cell { white-space: normal; }
+.grid-head-row { flex-wrap: nowrap; gap: .4rem; }
+/* 미리보기 칸이 높으니 오른쪽 단추들은 그 높이 안에서 줄을 바꿔 쌓는다(표가 오른쪽으로 넘치지 않게) */
+.students-table[data-grid="1"] td.actions { white-space: normal; width: 1%; }
+.students-table[data-grid="1"] td.actions > * { margin: .15rem 0 .15rem .3rem; }
+.grid-head-row .csv-btn { min-height: 36px; padding: 0 .75rem; font-size: .85rem; white-space: nowrap; }
 .students-table th, .students-table td:nth-child(-n+6) { white-space: nowrap; }
 .live-tile { display: grid; gap: .3rem; width: 320px; }
 .tile-view { position: relative; width: 320px; height: 180px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #f6f7fb; }
