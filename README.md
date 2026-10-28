@@ -21,7 +21,7 @@
 | 파일 | 하는 일 | 고칠 일 |
 |---|---|---|
 | `index.html`, `student.js` | 학생 화면 | 없음 |
-| `teacher.html`, `teacher.js` | 교사 화면 | 없음 |
+| `teacher.html`, `teacher.js`, `teacher-*.js` | 교사 화면(탭별로 나눈 파일, 목록은 `teacher.js` 맨 위) | 없음 |
 | `common.js`, `app.css` | 두 화면이 함께 쓰는 기능과 모양 | 없음 |
 | `vendor/` | PDF를 그림으로 바꾸는 도구(pdf.js) | 없음 |
 | `setup.sql` | 데이터베이스 표, 보안 규칙, 슬라이드 저장소 | **1단계: 맨 아래 교사 이메일** |
