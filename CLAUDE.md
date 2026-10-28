@@ -14,8 +14,8 @@
 |---|---|---|---|
 | `config.js` | Supabase 주소·키, TURN Worker 주소 | | |
 | `common.js` | 교사·학생 공용: `h()` DOM 도우미, 데이터 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드 단계·주소(`slideSrc`), WebRTC/TURN(`iceServers`, `relayFirst`), 시뮬레이션 재생·얹기·전체 화면(`withSimPause`, `renderSimLayer`, `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
-| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw` | | teacher |
-| `teacher-library.js` | 「전체 수업 관리」 폴더·카드, 슬라이드 PDF | `drawManage` `exportSlidesPdf` | manage |
+| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw`(위쪽 탭 3개 + 로그아웃 왼쪽 「설정」 펼침 메뉴: 수업 설정·전체 수업·기타 관리) | | teacher |
+| `teacher-library.js` | 「전체 수업」(설정 메뉴) 폴더·카드, 슬라이드 PDF | `drawManage` `exportSlidesPdf` | manage |
 | `teacher-etc.js` | 「기타 관리」 사용량 원 그래프·표, 동기화 규칙/비용, 한국 시간(`kstIso`) | `drawEtc` `syncUsage` `supabaseView` `cloudflareView` `syncCostView` | etc |
 | `teacher-run.js` | 「수업 진행」 슬라이드·제출 현황·접속 표시(Presence) | `drawRun` `setPage` `drawRoster` `showJoin` | teacher |
 | `teacher-build.js` | 「자료 추가」 활동 목록(쪽 옮기기·끌기, 칸 재사용 `syncRows`), 시뮬레이션 편집기, 설명·질문 작성기(`composeEditor`), 저장 버튼 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |

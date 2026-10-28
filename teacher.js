@@ -1,9 +1,9 @@
-// 교사 화면(버전 2): 로그인 → 수업 고르기 → [수업 진행] [자료 추가] [학생 관리] [수업 설정] [전체 수업 관리] [기타 관리]
+// 교사 화면(버전 2): 로그인 → 수업 고르기 → [수업 진행] [자료 추가] [학생 관리] · 설정▾[수업 설정 · 전체 수업 · 기타 관리]
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
 // 교사 화면 스크립트는 탭별로 나뉘어 teacher.html 이 이 순서로 불러온다(모두 같은 전역 공간을 쓴다):
 //   teacher.js          공유 상태 · 시작 · 로그인 · 데이터 읽기/쓰기 · 탭 틀(이 파일)
-//   teacher-library.js  전체 수업 관리 · 슬라이드 PDF
+//   teacher-library.js  전체 수업 · 슬라이드 PDF
 //   teacher-etc.js      기타 관리(사용량)
 //   teacher-run.js      수업 진행 · 실시간 접속 표시
 //   teacher-build.js    자료 추가 · 설명 및 질문 작성기
@@ -38,6 +38,11 @@ addEventListener("DOMContentLoaded", () => {
       passwordRecovery = true;
       showPasswordRecovery();
     }
+  });
+  // 눌러서 펼친 설정 메뉴는 바깥을 누르면 접는다
+  document.addEventListener("click", (e) => {
+    const m = app.querySelector(".set-menu.open");
+    if (m && !m.contains(e.target)) m.classList.remove("open");
   });
   init();
 });
@@ -240,7 +245,7 @@ const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentB
 const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.page + "~" + a.page_to + "쪽" : a.page + "쪽";
 
 // ---------- 틀 ----------
-// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 수업 설정 조절기 · 전체 수업 관리 폴더 · 기타 관리 계기판
+// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 수업 설정 조절기 · 전체 수업 폴더 · 기타 관리 계기판 · 설정 톱니
 const TAB_ICONS = {
   run: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   build: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>',
@@ -248,6 +253,7 @@ const TAB_ICONS = {
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   manage: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   etc: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
 };
 function tabIcon(k) {
   const el = h("span", { class: "tab-icon", "aria-hidden": "true" });
@@ -265,17 +271,36 @@ function draw() {
     },
   }, lessons.map((l) => h("option", { value: l.id, selected: lesson && l.id === lesson.id }, (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
     h("option", { value: "new", selected: !lesson }, "+ 새 수업 만들기"));
-  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "수업 설정"], ["manage", "전체 수업 관리"], ["etc", "기타 관리"]];
-  if (!tabs.some(([k]) => k === tab)) tab = "run";
+  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"]];
+  // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 세 탭
+  const setTabs = [["settings", "수업 설정"], ["manage", "전체 수업"], ["etc", "기타 관리"]];
+  if (![...tabs, ...setTabs].some(([k]) => k === tab)) tab = "run";
+  const go = (k) => { tab = k; localStorage.setItem("cra-tab", k); draw(); };
+  const menu = h("div", { class: "set-menu" },
+    h("button", {
+      type: "button", class: setTabs.some(([k]) => k === tab) ? "tab set-btn on" : "tab set-btn", "aria-haspopup": "menu",
+      onclick() { menu.classList.toggle("open"); },
+    }, tabIcon("gear"), h("span", {}, "설정"), h("span", { class: "set-caret", "aria-hidden": "true" })),
+    h("div", { class: "set-drop", role: "menu" }, setTabs.map(([k, label]) => h("button", {
+      type: "button", role: "menuitem", class: tab === k ? "set-item on" : "set-item",
+      onclick() {
+        go(k);
+        // 고른 뒤에는 마우스가 아직 위에 있어도 접어 두고, 한 번 벗어나면 다시 올려서 펼칠 수 있다
+        const m = app.querySelector(".set-menu");
+        m.classList.add("shut");
+        m.addEventListener("mouseleave", () => m.classList.remove("shut"), { once: true });
+      },
+    }, tabIcon(k), h("span", {}, label)))));
   main = h("main", { class: "wide" });
   app.replaceChildren(
     h("header", { class: "top" },
       h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), pick),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
-        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "manage" && k !== "etc",
-        onclick() { tab = k; localStorage.setItem("cra-tab", k); draw(); },
+        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson,
+        onclick() { go(k); },
       }, tabIcon(k), h("span", {}, label)))),
-      h("button", { class: "link", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃")),
+      h("div", { class: "top-actions" }, menu,
+        h("button", { class: "link", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))),
     main);
   if (!lesson && tab !== "manage" && tab !== "etc") tab = "settings";
   if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
