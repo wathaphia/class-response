@@ -137,11 +137,79 @@ drop policy if exists teacher_all on activities;
 drop policy if exists teacher_all on students;
 drop policy if exists teacher_all on responses;
 drop policy if exists teacher_all on lesson_students;
-create policy teacher_all on lessons    for all to authenticated using (is_teacher()) with check (is_teacher());
-create policy teacher_all on activities for all to authenticated using (is_teacher()) with check (is_teacher());
+-- 교사 고유 ID(6자리 숫자, 공동 작업자 추가에 씀) · 개발자(is_admin)는 모든 교사의 수업에 손댈 수 있다
+alter table teachers add column if not exists code text;
+alter table teachers add column if not exists is_admin boolean not null default false;
+alter table teachers add column if not exists created_at timestamptz not null default now();
+create unique index if not exists teachers_code_key on teachers (code);
+create or replace function new_teacher_code() returns text
+language plpgsql volatile set search_path = public as $$
+declare c text;
+begin
+  loop
+    c := (floor(random() * 900000) + 100000)::int::text;
+    exit when not exists (select 1 from teachers where code = c);
+  end loop;
+  return c;
+end $$;
+create or replace function teachers_set_code() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  new.email := lower(new.email);
+  if new.code is null then new.code := new_teacher_code(); end if;
+  return new;
+end $$;
+drop trigger if exists teachers_code on teachers;
+create trigger teachers_code before insert on teachers for each row execute function teachers_set_code();
+update teachers set code = new_teacher_code() where code is null;
+
+create or replace function is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from teachers where email = lower(auth.jwt() ->> 'email') and is_admin)
+$$;
+
+-- 공동 작업자: 수업 주인(또는 개발자)이 다른 교사(ID로 찾음)에게 수업 하나씩 권한을 나눈다.
+-- 공동 작업자는 그 수업을 보고 고치고 진행할 수 있지만, 지우거나 다른 사람에게 다시 나누지는 못한다.
+create table if not exists lesson_collaborators (
+  lesson_id  uuid not null references lessons(id) on delete cascade,
+  email      text not null references teachers(email) on delete cascade,
+  added_by   uuid default auth.uid(),
+  created_at timestamptz not null default now(),
+  primary key (lesson_id, email)
+);
+alter table lesson_collaborators enable row level security;
+create index if not exists lesson_collaborators_email on lesson_collaborators (email);
+
+-- 이 수업에 손댈 수 있는지: 개발자 · 주인 · 공동 작업자
+create or replace function can_lesson(p_lesson uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select is_teacher() and (is_admin()
+    or exists (select 1 from lessons where id = p_lesson and owner = auth.uid())
+    or exists (select 1 from lesson_collaborators where lesson_id = p_lesson and email = lower(auth.jwt() ->> 'email')))
+$$;
+-- 수업을 지우거나 공동 작업자를 바꿀 수 있는지: 개발자 · 주인
+create or replace function owns_lesson(p_lesson uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select is_teacher() and (is_admin() or exists (select 1 from lessons where id = p_lesson and owner = auth.uid()))
+$$;
+
+drop policy if exists teacher_select on lessons;
+drop policy if exists teacher_insert on lessons;
+drop policy if exists teacher_update on lessons;
+drop policy if exists teacher_delete on lessons;
+create policy teacher_select on lessons for select to authenticated using (can_lesson(id));
+create policy teacher_insert on lessons for insert to authenticated with check (is_teacher() and (owner = auth.uid() or is_admin()));
+create policy teacher_update on lessons for update to authenticated using (can_lesson(id)) with check (can_lesson(id));
+create policy teacher_delete on lessons for delete to authenticated using (owns_lesson(id));
+create policy teacher_all on activities for all to authenticated using (can_lesson(lesson_id)) with check (can_lesson(lesson_id));
+-- 학생 계정은 웹앱 전체에 하나라 모든 교사가 함께 쓴다(비밀번호 초기화 등)
 create policy teacher_all on students   for all to authenticated using (is_teacher()) with check (is_teacher());
-create policy teacher_all on responses  for all to authenticated using (is_teacher()) with check (is_teacher());
-create policy teacher_all on lesson_students for all to authenticated using (is_teacher()) with check (is_teacher());
+create policy teacher_all on responses  for all to authenticated
+  using (exists (select 1 from activities a where a.id = activity_id and can_lesson(a.lesson_id)))
+  with check (exists (select 1 from activities a where a.id = activity_id and can_lesson(a.lesson_id)));
+create policy teacher_all on lesson_students for all to authenticated using (can_lesson(lesson_id)) with check (can_lesson(lesson_id));
+drop policy if exists teacher_read on lesson_collaborators;
+create policy teacher_read on lesson_collaborators for select to authenticated using (can_lesson(lesson_id));
 
 -- 전체 수업 관리: 교사가 만든 폴더와 수업 순서(끌어서 옮기기). 폴더를 지우면 안의 수업은 「폴더 없음」으로 나온다.
 create table if not exists lesson_folders (
@@ -153,7 +221,9 @@ create table if not exists lesson_folders (
 );
 alter table lesson_folders enable row level security;
 drop policy if exists teacher_all on lesson_folders;
-create policy teacher_all on lesson_folders for all to authenticated using (is_teacher()) with check (is_teacher());
+-- 폴더는 교사마다 따로(개발자는 모두)
+create policy teacher_all on lesson_folders for all to authenticated
+  using (is_teacher() and (owner = auth.uid() or is_admin())) with check (is_teacher() and (owner = auth.uid() or is_admin()));
 alter table lessons add column if not exists folder_id uuid references lesson_folders(id) on delete set null;
 alter table lessons add column if not exists sort int not null default 0;
 
@@ -369,7 +439,7 @@ end $$;
 create or replace function teacher_students(p_lesson uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 begin
-  if not is_teacher() then raise exception 'not a teacher'; end if;
+  if not can_lesson(p_lesson) then raise exception 'not your lesson'; end if;
   return coalesce((
     select jsonb_agg(jsonb_build_object(
       'id', s.id, 'class_no', s.class_no, 'name', s.name, 'pin_set', s.pin_set, 'fails', s.fails,
@@ -450,6 +520,96 @@ revoke all on function resource_usage() from public;
 grant execute on function resource_usage() to authenticated;
 
 -- ------------------------------------------------------------
+-- 프로필(교사 화면 오른쪽 위): 내 정보 · 공동 작업자 · (개발자) 교사 목록
+-- ------------------------------------------------------------
+create or replace function my_profile()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  me text := lower(auth.jwt() ->> 'email');
+  t teachers;
+begin
+  select * into t from teachers where email = me;
+  if not found then raise exception 'not a teacher'; end if;
+  if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
+  return jsonb_build_object(
+    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'since', t.created_at,
+    'own', (select count(*) from lessons where owner = auth.uid()),
+    'shared', (select count(*) from lesson_collaborators where email = me),
+    -- 내가 나눈(개발자는 모든) 수업의 공동 작업자
+    'collaborators', coalesce((select jsonb_agg(jsonb_build_object('lesson_id', c.lesson_id, 'title', l.title, 'lesson_code', l.code,
+        'email', c.email, 'code', x.code) order by l.title, c.email)
+      from lesson_collaborators c join lessons l on l.id = c.lesson_id join teachers x on x.email = c.email
+      where l.owner = auth.uid() or t.is_admin), '[]'::jsonb),
+    -- 다른 교사가 나에게 나눈 수업
+    'shared_with_me', coalesce((select jsonb_agg(jsonb_build_object('lesson_id', l.id, 'title', l.title, 'owner', u.email) order by l.title)
+      from lesson_collaborators c join lessons l on l.id = c.lesson_id left join auth.users u on u.id = l.owner
+      where c.email = me), '[]'::jsonb),
+    'teachers', case when t.is_admin then coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'admin', x.is_admin,
+        'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id)) order by x.created_at)
+      from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end);
+end $$;
+
+-- 공동 작업자 추가: 상대 교사의 6자리 ID와 나눌 수업들(내 수업만, 개발자는 모든 수업)
+create or replace function add_collaborator(p_code text, p_lessons uuid[])
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  who text;
+  n int;
+begin
+  if not is_teacher() then raise exception 'not a teacher'; end if;
+  select email into who from teachers where code = trim(p_code);
+  if who is null then return jsonb_build_object('error', 'no_teacher'); end if;
+  if who = lower(auth.jwt() ->> 'email') then return jsonb_build_object('error', 'self'); end if;
+  if exists (select 1 from unnest(p_lessons) x where not owns_lesson(x)) then return jsonb_build_object('error', 'not_owner'); end if;
+  -- 그 교사가 주인인 수업은 건너뛴다
+  insert into lesson_collaborators (lesson_id, email)
+    select x, who from unnest(p_lessons) x
+    where not exists (select 1 from lessons l join auth.users u on u.id = l.owner where l.id = x and lower(u.email) = who)
+    on conflict do nothing;
+  get diagnostics n = row_count;
+  return jsonb_build_object('ok', true, 'email', who, 'added', n);
+end $$;
+
+create or replace function remove_collaborator(p_lesson uuid, p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  -- 주인·개발자가 빼거나, 공동 작업자가 스스로 빠진다
+  if not (owns_lesson(p_lesson) or (is_teacher() and lower(p_email) = lower(auth.jwt() ->> 'email'))) then raise exception 'not allowed'; end if;
+  delete from lesson_collaborators where lesson_id = p_lesson and email = lower(p_email);
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- 개발자 전용: 교사 추가·빼기(빼도 그 교사의 수업은 남고 개발자가 볼 수 있다)
+create or replace function admin_set_teacher(p_email text, p_on boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare e text := lower(trim(p_email));
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
+  if p_on then insert into teachers (email) values (e) on conflict do nothing;
+  else
+    if e = lower(auth.jwt() ->> 'email') then return jsonb_build_object('error', 'self'); end if;
+    delete from teachers where email = e and not is_admin;
+  end if;
+  return jsonb_build_object('ok', true, 'code', (select code from teachers where email = e));
+end $$;
+
+revoke all on function my_profile() from public;
+revoke all on function add_collaborator(text, uuid[]) from public;
+revoke all on function remove_collaborator(uuid, text) from public;
+revoke all on function admin_set_teacher(text, boolean) from public;
+revoke all on function new_teacher_code() from public;
+grant execute on function my_profile() to authenticated;
+grant execute on function add_collaborator(text, uuid[]) to authenticated;
+grant execute on function remove_collaborator(uuid, text) to authenticated;
+grant execute on function admin_set_teacher(text, boolean) to authenticated;
+grant execute on function is_admin() to authenticated;
+grant execute on function can_lesson(uuid) to authenticated;
+grant execute on function owns_lesson(uuid) to authenticated;
+
+-- ------------------------------------------------------------
 -- 교사 이메일: teacher@example.com 을 자기 이메일(소문자)로 바꾸세요. 여러 명이면 줄을 더하면 됩니다.
 -- ------------------------------------------------------------
 insert into teachers (email) values ('wathaphia@gmail.com') on conflict do nothing;
+-- 이 웹앱의 개발자: 모든 교사의 수업·공동 작업자·교사 목록을 관리한다
+update teachers set is_admin = true where email = 'wathaphia@gmail.com';

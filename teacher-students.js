@@ -145,8 +145,10 @@ function paintSim(watch, k) {
 // 시뮬레이션 영상(WebRTC): 학생 시뮬레이션의 가장 큰 캔버스를 15~30 FPS 영상으로 받는다.
 // 연결되면 학생 쪽은 그 캔버스의 JPEG 전송을 멈추고, 연결되지 않으면(학교망이 막는 등) 그림 전송이 그대로 이어진다.
 async function teacherIce() {
+  if (!classOn()) return STUN_ONLY;   // 수업 시작 전에는 중계 접속 정보를 받지 않는다
   const { data } = await sb.auth.getSession();
-  return iceServers({ headers: data.session ? { Authorization: "Bearer " + data.session.access_token } : {} });
+  const ttl = Math.ceil((classUntil() - Date.now()) / 1000) + 300;   // 수업이 끝날 때까지 쓸 만큼 한 장(최대 90분)
+  return iceServers({ headers: data.session ? { Authorization: "Bearer " + data.session.access_token } : {}, body: { ttl } });
 }
 async function simRtc(watch, m) {
   const send = (rtc, extra) => sendTeacherScreenSignal({ type: "sim-rtc", from: "teacher", to: m.from, k: m.k, rtc, ...extra });
@@ -238,6 +240,7 @@ async function showMirror(watch, m) {
 }
 
 async function watchStudentScreen(s) {
+  if (!classOn()) return alert("「수업 진행」에서 「수업 시작하기」를 누른 뒤에 학생 화면을 볼 수 있습니다.");
   if (screenWatchers.size) return alert("실시간 화면은 한 번에 한 명씩 볼 수 있습니다. 먼저 열린 화면 창을 닫아 주세요.");
   const tile = grid && grid.tiles.get(s.id);
   if (tile) tileReset(tile, "크게 보는 중");   // 크게 보는 동안 학생은 원래 화질로 보내고, 닫으면 작은 화면으로 돌아온다
@@ -285,6 +288,7 @@ async function watchStudentScreen(s) {
 let grid = null;   // { code, ready, keep, tiles: Map(학생 id → 칸) }
 
 function startGrid() {
+  if (!classOn()) return alert("「수업 진행」에서 「수업 시작하기」를 누른 뒤에 일괄 미리보기를 쓸 수 있습니다.");
   grid = { code: lesson.code, tiles: new Map(), ready: false };
   const g = grid;
   // 학생 화면이 「아직 보고 있음」을 알 수 있게 15초마다 한 번(모두에게 한 메시지)
@@ -426,6 +430,7 @@ function gridCell(s, now) {
 
 function drawStudents() {
   const now = Date.now();
+  const live = classOn();   // 「수업 진행」에서 수업을 시작했을 때만 학생 화면을 본다
   const rows = students.map((s) => {
     const mine = responses.filter((r) => r.student_id === s.id);
     const last = mine.reduce((t, r) => (r.updated_at > t ? r.updated_at : t), "");
@@ -441,7 +446,7 @@ function drawStudents() {
         : h("span", { class: "tag info" }, "아직 안 정함")),
       h("td", { class: "grid-cell", "data-sid": s.id }),
       h("td", { class: "actions" },
-        h("button", { class: "ghost", type: "button", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
+        h("button", { class: "ghost", type: "button", disabled: !live, title: live ? "" : "수업을 시작해야 볼 수 있습니다", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
         h("button", {
           class: locked ? "primary" : "ghost", type: "button", disabled: !s.pin_set && !locked,
           async onclick() {
@@ -484,7 +489,7 @@ function drawStudents() {
   const cells = new Map(grid ? students.map((s) => [s.id, gridCell(s, now)]) : []);
   // 미리보기 중이고 학생 목록이 그대로면 미리보기 칸은 그대로 두고 나머지 칸만 바꾼다(iframe을 옮기면 다시 불러온다)
   const old = grid && main.querySelector(".students-table");
-  if (old && old.dataset.ids === ids && old.dataset.grid === "1") {
+  if (old && old.dataset.ids === ids && old.dataset.grid === "1" && old.dataset.live === String(live)) {
     const oldRows = [...old.tBodies[0].rows];
     rows.forEach((row, i) => {
       const was = oldRows[i];
@@ -500,8 +505,8 @@ function drawStudents() {
   for (const td of rows.flatMap((row) => [...row.cells])) if (td.dataset.sid && cells.has(td.dataset.sid)) td.append(cells.get(td.dataset.sid));
   // 일괄 미리보기 단추 오른쪽에 전체 응답 CSV
   const gridHead = h("th", { class: "grid-head" }, h("div", { class: "row grid-head-row" }, h("button", {
-    class: grid ? "grid-toggle on" : "grid-toggle", type: "button", "aria-pressed": grid ? "true" : "false",
-    title: "화면 보기에 동의한 학생들의 수업 화면을 작게(240p 미만) 한꺼번에 봅니다",
+    class: grid ? "grid-toggle on" : "grid-toggle", type: "button", "aria-pressed": grid ? "true" : "false", disabled: !live && !grid,
+    title: live ? "화면 보기에 동의한 학생들의 수업 화면을 작게(240p 미만) 한꺼번에 봅니다" : "「수업 진행」에서 「수업 시작하기」를 누르면 쓸 수 있습니다",
     onclick() { if (grid) stopGrid(); else startGrid(); drawStudents(); },
   }, grid ? "■ 일괄 미리보기 끄기" : "▦ 실시간 화면 일괄 미리보기"),
     h("button", { class: "ghost csv-btn", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV")));
@@ -509,8 +514,9 @@ function drawStudents() {
     h("div", { class: "row between wrap" },
       h("h2", { class: "students-count" }, "학생 " + students.length + "명"),
       h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 크게 보기는 한 번에 한 명, 「일괄 미리보기」는 동의한 학생 모두를 작게(240p 미만, 시뮬레이션 영상 10 FPS) 함께 봅니다. 칸을 누르면 크게 봅니다."),
+      live ? null : h("p", { class: "banner class-off" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 진행」에서 「수업 시작하기」를 누른 뒤 80분 동안 쓸 수 있습니다."),
       h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
-    students.length ? h("div", { class: "table-wrap" }, h("table", { class: "students-table", "data-ids": ids, "data-grid": grid ? "1" : "" },
+    students.length ? h("div", { class: "table-wrap" }, h("table", { class: "students-table", "data-ids": ids, "data-grid": grid ? "1" : "", "data-live": String(live) },
       h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
 }

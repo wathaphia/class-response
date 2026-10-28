@@ -163,7 +163,8 @@ async function iceServers(auth) {
     if (!r.ok) throw new Error("turn " + r.status);
     const d = await r.json();
     const list = d.iceServers ? [].concat(d.iceServers) : STUN_ONLY;
-    iceCache = { list, until: Date.now() + 50 * 60 * 1000 };   // 접속 정보는 1시간짜리라 50분 동안 다시 쓴다
+    // 접속 정보는 기본 1시간짜리라 50분 동안 다시 쓴다. Worker가 유효 시간(ttl, 초)을 알려 주면 그보다 5분 앞까지
+    iceCache = { list, until: Date.now() + (d.ttl > 600 ? d.ttl * 1000 - 300000 : 50 * 60 * 1000) };
     if (hasTurn(list)) try { sessionStorage.setItem("cra-ice", JSON.stringify(iceCache)); } catch {}
     return list;
   } catch {
@@ -283,6 +284,7 @@ function simFrame(html, title) {
 
 // ---------- 슬라이드 위에 얹는 시뮬레이션 ----------
 // 테두리 없이 슬라이드의 정해진 자리에 놓인다. 자리(sim_place)는 슬라이드 크기에 대한 비율 {x, y, w, h}(0~1).
+// 「이 수업의 활동」 미리보기처럼 컴퓨터 화면(SIM_VIEW, 16:9)에서 띄운 모습 그대로 줄여 보인다: 칸은 늘 16:9이고 높이는 너비로 정해진다(h는 참고용).
 // 교사 화면(editable)에서는 위쪽 막대를 끌어 옮기고, 오른쪽 아래 모서리를 끌어 크기를 바꾼다.
 const SIM_PLACE_DEFAULT = { x: 0.55, y: 0.1, w: 0.4, h: 0.55 };
 const clamp01 = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -319,10 +321,13 @@ function renderSimLayer(layer, list, { all = list, load, ver, editable, onMove }
     if (box.dataset.ver !== v) {
       box.dataset.ver = v;
       box.querySelector("iframe")?.remove();
+      box.querySelector(".sim-over-view")?.remove();
       const f = simFrame(null, a.title);
       f.loading = "eager";   // 숨겨 둔 것도 미리 불러 둔다
       f.addEventListener("load", () => simOverPause(box));
-      box.prepend(f);
+      const view = h("div", { class: "sim-over-view" }, f);
+      if (!box._ro) (box._ro = new ResizeObserver(() => box.style.setProperty("--s", box.clientWidth / SIM_VIEW.w))).observe(box);
+      box.prepend(view);
       Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = withSimPause(html); }).catch(() => {});
     }
     const off = !shown.has(a.id);
@@ -335,7 +340,7 @@ function simOverPause(box) {
   box.querySelector("iframe")?.contentWindow?.postMessage({ craPause: box.classList.contains("off") }, "*");
 }
 function placeBox(box, p) {
-  Object.assign(box.style, { left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: p.h * 100 + "%" });
+  Object.assign(box.style, { left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: "" });
 }
 function dragSim(layer, box, onMove) {
   const start = (e, mode) => {
@@ -347,11 +352,13 @@ function dragSim(layer, box, onMove) {
     box.classList.add("moving");
     layer.classList.add("dragging");   // 끄는 동안 시뮬레이션이 마우스를 가로채지 않게
     let p = null;
+    // 크기 바꾸기는 너비만 정하고 높이는 16:9로 따라온다
+    const sizeTo = (w) => ({ x: s.l, y: s.t, w, h: w * s.W * 9 / 16 / s.H });
     const move = (ev) => {
       const dx = (ev.clientX - s.x) / s.W, dy = (ev.clientY - s.y) / s.H;
       p = mode === "move"
         ? { x: clamp01(s.l + dx, 0, 1 - s.w), y: clamp01(s.t + dy, 0, 1 - s.h), w: s.w, h: s.h }
-        : { x: s.l, y: s.t, w: clamp01(s.w + dx, 0.1, 1 - s.l), h: clamp01(s.h + dy, 0.1, 1 - s.t) };
+        : sizeTo(clamp01(s.w + Math.max(dx, dy * s.H * 16 / 9 / s.W), 0.1, Math.min(1 - s.l, (1 - s.t) * s.H * 16 / 9 / s.W)));
       placeBox(box, p);
     };
     const up = () => {

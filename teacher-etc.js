@@ -73,17 +73,19 @@ async function usageGithub(net) {
 const USAGE_SOURCES = { db: usageDb, worker: usageWorker, github: usageGithub };
 
 const lastSync = () => Math.max(0, ...Object.values(usage).map((u) => u.at || 0));
-const staleSources = () => Object.keys(USAGE_SOURCES).filter((k) => !usage[k] || Date.now() - usage[k].at >= ETC_AUTO_MS);
+// 하나라도 1시간이 지났으면 모두 다시 받는다: 기타 관리의 모든 숫자는 같은 동기화 시각(lastSync) 기준이다
+const staleSources = () => Object.keys(USAGE_SOURCES).some((k) => !usage[k] || Date.now() - usage[k].at >= ETC_AUTO_MS) ? Object.keys(USAGE_SOURCES) : [];
 const manualWait = () => Math.max(0, lastSync() + ETC_MANUAL_MS - Date.now());
 
 async function syncUsage(names) {
   if (usageBusy || !names.length) return;
   usageBusy = true;
   if (tab === "etc") paintEtc();
+  const at = Date.now();   // 이번 동기화의 기준 시각(모든 받는 곳에 같은 값)
   await Promise.all(names.map(async (k) => {
     const net = { requests: 0, bytes: 0 };
-    try { usage[k] = { data: await USAGE_SOURCES[k](net), at: Date.now(), net }; }
-    catch (e) { usage[k] = { error: e.message || String(e), at: Date.now(), net }; }
+    try { usage[k] = { data: await USAGE_SOURCES[k](net), at, net }; }
+    catch (e) { usage[k] = { error: e.message || String(e), at, net }; }
   }));
   usageBusy = false;
   try { localStorage.setItem("cra-usage", JSON.stringify(usage)); } catch {}
@@ -168,17 +170,16 @@ function egressDayNote(m, k) {
   return !since || k < since ? " (" + DAY9 + ")" : k === since ? " (일부 " + DAY9 + ")" : "";
 }
 const egressHasDay9 = (m) => !!(m && m.days && Object.keys(m.days).some((k) => egressDayNote(m, k)));
-const EGRESS_SRC = { site: "사이트(학생·교사 화면)", test: "브라우저 시험(이 PC)", tool: "올리기 도구(PowerShell)", other: "기타(Office 뷰어 등)" };
 
 // 날마다 전송량 막대 그래프. 축척을 고정한다: 세로 0~500MB, 가로 그달 1일~말일(날마다·달마다 같은 눈으로 견줄 수 있게).
 // 점선은 「하루 몫」(5GB ÷ 그달 날 수). 500MB를 넘는 날은 막대를 위에서 자르고 값을 적는다.
 const EGRESS_DAY_MAX = 500 * MB;
-function egressDayChart(title, m, field) {
-  const ref = new Date(+(m && m.until ? Date.parse(m.until) - 1 : Date.now()) + KST_MS);
+function egressDayChart(title, m, field, at = lastSync() || Date.now()) {
+  const ref = new Date(+(m && m.until ? Date.parse(m.until) - 1 : at) + KST_MS);
   const y = ref.getUTCFullYear(), mo = ref.getUTCMonth();
   const n = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
   const key = (d) => y + "-" + String(mo + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
-  const today = kstIso().slice(0, 10);
+  const today = kstIso(at).slice(0, 10);
   const budget = 5 * GB / n;
   const W = 640, H = 210, L = 52, R = 10, T = 16, B = 26, pw = W - L - R, ph = H - T - B, base = T + ph;
   const yOf = (v) => T + ph * (1 - Math.min(v, EGRESS_DAY_MAX) / EGRESS_DAY_MAX);
@@ -201,7 +202,12 @@ function egressDayChart(title, m, field) {
         + "H" + (x + bw - r) + "Q" + (x + bw) + "," + top + " " + (x + bw) + "," + (top + r) + "V" + base + 'Z"/>';
       if (v > EGRESS_DAY_MAX) bar += '<text class="eg-over" x="' + (x + bw / 2) + '" y="' + (T - 4) + '">' + esc(usageAmount(v, "bytes")) + "</text>";
     }
-    const tip = (mo + 1) + "/" + d + (v == null ? "" : egressDayNote(m, k)) + " · " + (v == null ? (k > today ? "아직 안 옴" : "집계 없음") : usageAmount(v, "bytes"));
+    if (k === today) {
+      bar = bar.replace('class="eg-bar"', 'class="eg-bar today"');
+      if (v <= EGRESS_DAY_MAX) bar += '<text class="eg-today" x="' + (x + bw / 2) + '" y="' + (yOf(v || 0) - 5) + '">오늘 ' + esc(usageAmount(v || 0, "bytes")) + "</text>";
+    }
+    const tip = (mo + 1) + "/" + d + (v == null ? "" : egressDayNote(m, k)) + " · " + (v == null ? (k > today ? "아직 안 옴" : "집계 없음") : usageAmount(v, "bytes"))
+      + (k === today ? " (" + kstClock(at, { hour: "2-digit", minute: "2-digit" }) + " 동기화까지)" : "");
     // 막대보다 넓은 칸 전체가 마우스 대상(얇은 막대도 가리키기 쉽게)
     svg += '<g class="eg-day"><title>' + esc(tip) + "</title>"
       + '<rect class="eg-hit" x="' + (L + (d - 1) * slot) + '" y="' + T + '" width="' + slot + '" height="' + ph + '"/>' + bar + "</g>";
@@ -218,45 +224,29 @@ function egressDayChart(title, m, field) {
     h("figcaption", {}, h("strong", {}, title), h("span", { class: "muted small" }, " " + (mo + 1) + "월 합계 " + usageAmount(total, "bytes") + " / 5GB")),
     h("div", { class: "eg-scroll" }, box));
 }
-// 무료 5GB가 두 가지(전송량·캐시 전송량)라 따로 본다: 날마다 얼마나, 누가, 무엇이 많이 나갔는지
-function egressView(m, ep, e24, top) {
-  const amt = (n) => usageAmount(n || 0, "bytes");
-  const days = m && m.days ? Object.entries(m.days).sort((a, b) => b[0].localeCompare(a[0])) : [];
-  const srcs = m && m.srcs ? Object.entries(m.srcs).sort((a, b) => (b[1].bytes + b[1].cached) - (a[1].bytes + a[1].cached)) : [];
-  const fileName = (p) => p.replace(/^\/storage\/v1\/object\/public\/slides\/\*\/\*\//, "슬라이드 ").replace(/^\/rest\/v1\/rpc\//, "함수 ").replace(/^\/rest\/v1\//, "표 ");
-  return h("div", { class: "usage-blocks" },
-    m ? h("div", { class: "usage-block wide" }, h("h4", {}, "날마다 전송량 그래프(하루 = 한국 시간 0시~24시 · 세로 축 0~500MB 고정)"),
-      h("div", { class: "eg-pair" }, egressDayChart("캐시 전송량", m, "cached"), egressDayChart("전송량", m, "bytes")),
-      h("p", { class: "muted small" }, "막대에 마우스를 올리면 그날 값이 나옵니다. 점선은 한 달 5GB를 날마다 고르게 쓸 때의 하루 몫입니다."
-        + (egressHasDay9(m) ? " 「" + DAY9 + "」이 붙은 날은 한국 시간 기준으로 바꾸기 전에 모여, 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다." : "")
-        + (m.from && Date.parse(m.from) > kstMonthStart(Date.parse(m.until || m.from) - 1) + 3600000 ? " " + shortTime(m.from) + " 전 날짜는 집계가 없습니다." : ""))) : null,
-    usageBlock("전송량 한눈에(무료 각 5GB)",
-      usageTable(["", "전송량", "캐시 전송량"], [
-        ["이번 달 지금까지", m ? amt(m.bytes) : "—", m ? amt(m.cached) : "—"],
-        ["월말 예상", ep ? amt(ep.bytes) : "—", ep ? amt(ep.cached) : "—"],
-        ["최근 24시간", e24 ? amt(e24.bytes) : "—", e24 ? amt(e24.cached) : "—"],
-        ["한도까지 남음", m ? amt(Math.max(0, 5 * GB - m.bytes)) : "—", m ? amt(Math.max(0, 5 * GB - m.cached)) : "—"],
-      ]),
-      e24 && e24.unsized ? h("p", { class: "muted small" }, "최근 24시간 요청 " + e24.requests.toLocaleString() + "건 중 " + e24.unsized.toLocaleString() + "건은 크기가 기록되지 않아 「전송량」에서 빠졌습니다.") : null),
-    days.length ? usageBlock("날마다 전송량(하루 = 한국 시간 0시~24시)",
-      usageTable(["날짜", "전송량", "캐시 전송량"], days.map(([d, v]) => [d.slice(5).replace("-", "/") + egressDayNote(m, d), amt(v.bytes), amt(v.cached)]))) : null,
-    srcs.length ? usageBlock("누가 받았나(이번 달)",
-      usageTable(["어디서", "전송량", "캐시 전송량"], srcs.map(([k, v]) => [EGRESS_SRC[k] || k, amt(v.bytes), amt(v.cached)]))) : null,
-    top && top.length ? usageBlock("최근 24시간 많이 나간 것",
-      usageTable(["주소", "요청", "전송량"], top.filter((x) => x.bytes > 0).map((x) => [fileName(x.path), x.requests.toLocaleString() + "건", amt(x.bytes)]))) : null);
+// 이번 달 집계(매시 5분까지) + 그 뒤 동기화 시각까지(Worker egressTail)
+function egressWithTail(m, tail) {
+  if (!m || !tail || !tail.until || (m.until && Date.parse(tail.until) <= Date.parse(m.until))) return m;
+  const days = { ...m.days };
+  for (const [k, v] of Object.entries(tail.days || {})) {
+    const was = days[k] || { bytes: 0, cached: 0 };
+    days[k] = { bytes: was.bytes + v.bytes, cached: was.cached + v.cached };
+  }
+  return { ...m, days, bytes: m.bytes + tail.bytes, cached: m.cached + tail.cached, until: tail.until,
+    hours: m.hours + Math.max(0, (Date.parse(tail.until) - Date.parse(tail.from || m.until)) / 3600000) };
 }
-
 // Supabase: DB 안 숫자(db) + Worker가 관리 API로 모은 전송량·요청 수·서비스 상태(worker.supabase)
 function supabaseView() {
   const d = usage.db && usage.db.data, w = usage.worker && usage.worker.data, s = w && w.supabase;
   if (!d) return usage.db && usage.db.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + usage.db.error) : h("p", { class: "muted small" }, "불러오는 중…");
   const noApi = !w ? "Worker 응답 없음" : !s ? "관리 토큰 필요" : null;
-  const m = s && s.egressMonth;
-  const since = m && Date.parse(m.from) > kstMonthStart() + 3600000 ? shortTime(m.from) + "부터 집계" : null;
+  const at = lastSync();
+  const m = s && egressWithTail(s.egressMonth, s.egressTail);
+  const since = m && Date.parse(m.from) > kstMonthStart(at) + 3600000 ? shortTime(m.from) + "부터 집계" : null;
   const ep = egressProjection(m);
   // 무료 프로젝트는 7일 동안 요청이 없으면 잠든다: 최근 7일 요청 기록 중 마지막으로 요청이 있었던 날로 센다
   const lastDay = s && s.apiCounts && [...s.apiCounts].reverse().find((x) => x.total_rest_requests + x.total_auth_requests + x.total_storage_requests + x.total_realtime_requests > 0);
-  const idle = lastDay ? Math.max(0, Math.floor((Date.now() - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
+  const idle = lastDay ? Math.max(0, Math.floor((at - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
     { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일 · 새 슬라이드는 Cloudflare R2에 저장(여기 남은 것은 예전 사본·PPTX)" },
@@ -269,32 +259,16 @@ function supabaseView() {
     { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
     { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
   ];
-  const KIND = { rest: "데이터", storage: "파일", auth: "로그인", realtime: "실시간", other: "기타" };
-  const HEALTH = { db: "데이터베이스", auth: "로그인", rest: "데이터 API", realtime: "실시간", storage: "파일 저장소" };
-  const e24 = s && s.egress24h;
-  const stale = s && (!s.egressLast || Date.now() - Date.parse(s.egressLast) > 3 * 3600000);
+  const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 3 * 3600000);
   return [
     h("div", { class: "usage-grid" }, items.map(usageRing)),
     s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
       + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다.") : null,
-    s ? egressView(m, ep, e24, s.top24h) : null,
-    s && s.health ? h("div", { class: "usage-tags start" }, h("span", { class: "small" }, "서비스 상태"),
-      s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
-    h("div", { class: "usage-blocks" },
-      e24 ? usageBlock("최근 24시간 요청·전송량",
-        usageTable(["종류", "요청", "전송량"], Object.entries(e24.kinds).sort((a, b) => b[1].bytes - a[1].bytes)
-          .map(([k, v]) => [KIND[k] || k, v.requests.toLocaleString() + "건", usageAmount(v.bytes, "bytes")])
-          .concat([["합계", e24.requests.toLocaleString() + "건", usageAmount(e24.bytes + e24.cached, "bytes") + " (캐시 " + usageAmount(e24.cached, "bytes") + ")"]]))) : null,
-      s && s.apiCounts ? usageBlock("최근 7일 요청 수(하루 = 한국 시간 " + DAY9 + ")",
-        usageTable(["날짜", "데이터", "파일", "로그인", "실시간"], [...s.apiCounts].reverse().map((x) => [
-          new Date(x.timestamp + "Z").toLocaleDateString("ko-KR", { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }),
-          x.total_rest_requests.toLocaleString(), x.total_storage_requests.toLocaleString(), x.total_auth_requests.toLocaleString(), x.total_realtime_requests.toLocaleString()]))) : null,
-      d.tables ? usageBlock("표별 크기",
-        usageTable(["표", "줄 수", "크기"], d.tables.map((t) => [t.name, Number(t.rows).toLocaleString(), usageAmount(t.bytes, "bytes")]))) : null),
-    h("p", { class: "small" }, "학생 " + d.students + "명 · 수업 " + d.lessons + "개 · 응답 " + d.responses + "개"),
-    h("p", { class: "muted small" }, (noApi === "관리 토큰 필요" ? "전송량·요청 수·서비스 상태는 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행). " : "")
-      + "전송량은 응답 크기가 적힌 것만 더합니다. 데이터 API의 압축 응답과 실시간 연결은 크기가 기록되지 않아 빠지므로 「전송량」은 실제보다 적게 나옵니다(슬라이드 그림인 「캐시 전송량」은 정확함). 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
-      + (s && s.errors && s.errors.length ? " (일부 못 받음: " + s.errors.join(", ") + ")" : "")),
+    m ? h("div", { class: "usage-blocks" }, h("div", { class: "usage-block wide" }, egressDayChart("날마다 캐시 전송량", m, "cached", at),
+      h("p", { class: "muted small" }, "하루 = 한국 시간 0시~24시 · 세로 축 0~500MB 고정 · 막대에 마우스를 올리면 그날 값이 나옵니다. 오늘 막대는 동기화한 시각("
+        + kstClock(at, { hour: "2-digit", minute: "2-digit" }) + ")까지 쓴 양이고, 점선은 한 달 5GB를 날마다 고르게 쓸 때의 하루 몫입니다."
+        + (egressHasDay9(m) ? " 「" + DAY9 + "」이 붙은 날은 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다." : "")))) : null,
+    noApi === "관리 토큰 필요" ? h("p", { class: "muted small" }, "전송량은 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행).") : null,
   ];
 }
 
@@ -387,7 +361,7 @@ function githubView() {
   if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
   const { repo, rate, runsThisMonth, recent, alive } = u.data;
   // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
-  const idleDays = Math.floor((Date.now() - Date.parse(repo.pushed_at)) / 86400000);
+  const idleDays = Math.floor((u.at - Date.parse(repo.pushed_at)) / 86400000);
   const RESULT = { success: "성공", failure: "실패", cancelled: "취소", skipped: "건너뜀" };
   const items = [
     { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
@@ -416,7 +390,7 @@ function paintEtc() {
         h("h2", {}, "기타 관리"),
         h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상)")),
       h("div", { class: "row" },
-        last ? h("span", { class: "muted small" }, "마지막 동기화 " + kstClock(last) + " · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
+        last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView()),
     section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView()),
