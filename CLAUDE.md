@@ -14,14 +14,14 @@
 |---|---|---|---|
 | `config.js` | Supabase 주소·키, TURN Worker 주소 | | |
 | `common.js` | 교사·학생 공용: `h()` DOM 도우미, 데이터 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드 단계·주소(`slideSrc`), WebRTC/TURN(`iceServers`, `relayFirst`), 시뮬레이션 재생·얹기·전체 화면(`withSimPause`, `renderSimLayer`, `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
-| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw`(위쪽 탭 3개 + 「설정」 펼침 메뉴: 수업 설정·기타 관리 + 맨 오른쪽 「프로필」) | | teacher |
+| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw`(위쪽 탭 3개 + 「설정」 펼침 메뉴: 슬라이드 편집·기타 관리 + 맨 오른쪽 「프로필」) | | teacher |
 | `teacher-library.js` | 「전체 수업」(프로필 화면 오른쪽 2/3, `.manage-pane`) 폴더·카드·불러오기, 「+ 수업 추가」, 슬라이드 PDF. 남의 수업은 「공유받은 수업」 묶음 | `drawManage` `exportSlidesPdf` | manage |
 | `teacher-profile.js` | 「프로필」(오른쪽 위 단추): 내 정보·교사 ID(6자리)·로그아웃·비밀번호 재설정, 공동 작업자(`add_collaborator`), 개발자(`teachers.is_admin`)의 선생님 관리 | `drawProfile` `paintProfile` `addCollaborator` | manage |
 | `teacher-etc.js` | 「기타 관리」 사용량 원 그래프(Supabase 아래는 날마다 캐시 전송량 막대만, 오늘 막대 = 매시 집계 + Worker `egressTail`), 동기화(모든 받는 곳 한꺼번에, 숫자는 `lastSync()` 기준)/비용, 한국 시간(`kstIso`) | `drawEtc` `syncUsage` `supabaseView` `cloudflareView` `syncCostView` | etc |
 | `teacher-run.js` | 「수업 진행」 슬라이드·제출 현황·접속 표시(Presence), 「수업 시작하기」(80분, 이때만 TURN 발급·학생 화면 보기: `classOn` `startClass` `endClass`) | `drawRun` `setPage` `drawRoster` `showJoin` | teacher |
 | `teacher-build.js` | 「자료 추가」 활동 목록(쪽 옮기기·끌기, 칸 재사용 `syncRows`), 시뮬레이션 편집기, 설명·질문 작성기(`composeEditor`), 저장 버튼 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
 | `teacher-students.js` | 「학생 관리」 표, 학생 화면 크게 보기(교사 전용 채널 `:t`, 시뮬레이션 WebRTC), 일괄 미리보기 그리드 | `drawStudents` `watchStudentScreen` `startGrid` `simRtc` | live-android, live-iphone, live-relay |
-| `teacher-settings.js` | 「수업 설정」, 슬라이드 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call` / Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
+| `teacher-settings.js` | 「슬라이드 편집」, 슬라이드 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call` / Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
 | `student.js` | 학생: 입장, 상태 받기(`poll`, `student_state` RPC, `nudge`→`pollSoon`), 화면·활동 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`) | `start` `render` `cardFor` `buildForm` | live-* |
 | `app.css` | 모든 모양 | | |
 | `setup.sql` | 표·보안 규칙(수업은 주인·공동 작업자·개발자만: `can_lesson` `owns_lesson`)·RPC(`student_state`, `resource_usage`, `my_profile`). Supabase에 직접 적용(`class-tools\supabase-sql.ps1`) | | |

@@ -125,7 +125,7 @@ async function drawManage() {
         h("h2", {}, "전체 수업 " + lessons.length + "개"),
         h("div", { class: "row wrap" },
           h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가")),
-          // 새 수업: 지금 수업을 비우고 「수업 설정」의 만들기 칸으로 간다
+          // 새 수업: 지금 수업을 비우고 「슬라이드 편집」의 만들기 칸으로 간다
           h("button", { class: "primary new-lesson", type: "button", async onclick() {
             lesson = null; tab = "settings"; localStorage.setItem("cra-tab", tab);
             await loadLesson();
