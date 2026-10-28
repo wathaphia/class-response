@@ -262,15 +262,35 @@ function tabIcon(k) {
 }
 function draw() {
   clearTimeout(timer);
+  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 다른 수업으로 옮기기/새 수업 · 학생 접속 QR
   const pick = h("select", {
-    "aria-label": "수업 고르기",
+    "aria-label": "수업 고르기", title: "다른 수업으로 옮기거나 새 수업을 만듭니다",
     async onchange() {
+      if (!pick.value) return;
       if (pick.value === "new") { lesson = null; tab = "settings"; }
       else lesson = lessons.find((l) => l.id === pick.value);
       await loadLesson();
     },
-  }, lessons.map((l) => h("option", { value: l.id, selected: lesson && l.id === lesson.id }, (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
-    h("option", { value: "new", selected: !lesson }, "+ 새 수업 만들기"));
+  }, h("option", { value: "", selected: true, hidden: true }, "수업 이동 · 추가"),
+    lessons.map((l) => h("option", { value: l.id }, (lesson && l.id === lesson.id ? "✓ " : "") + (l.kind === "survey" ? "[설문] " : "") + l.title + " (" + l.code + ")")),
+    h("option", { value: "new" }, "+ 새 수업 만들기"));
+  const titleBox = h("input", {
+    type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
+    value: lesson ? lesson.title : "", placeholder: lesson ? "수업 제목" : "새 수업 (수업 설정에서 만듭니다)",
+    onkeydown(e) { if (e.key === "Enter") titleBox.blur(); else if (e.key === "Escape") { titleBox.value = lesson.title; titleBox.blur(); } },
+    async onchange() {
+      const t = titleBox.value.trim();
+      if (!t || t === lesson.title) { titleBox.value = lesson.title; return; }
+      const saved = await save("lessons", { title: t }, lesson.id);
+      if (!saved) { titleBox.value = lesson.title; return; }
+      lesson.title = saved.title;
+      const same = lessons.find((l) => l.id === lesson.id);
+      if (same) same.title = saved.title;
+      flash("제목을 저장했습니다.");
+    },
+  });
+  const lessonBox = h("div", { class: "lesson-box" },
+    h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox, pick);
   const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"]];
   // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 세 탭
   const setTabs = [["settings", "수업 설정"], ["manage", "전체 수업"], ["etc", "기타 관리"]];
@@ -297,7 +317,8 @@ function draw() {
   main = h("main", { class: "wide" });
   app.replaceChildren(
     h("header", { class: "top" },
-      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), pick),
+      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox,
+        lesson ? h("button", { class: "ghost qr-btn", type: "button", title: "학생 접속 주소·QR 크게 보기", onclick: showJoin }, "접속 QR") : null),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
         type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson,
         onclick() { go(k); },

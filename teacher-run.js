@@ -26,12 +26,9 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      // 접속 QR·CSV 버튼도 화살표 줄에 함께 둔다(왼쪽이 창 한 화면에 들어가도록 줄 수를 줄임)
-      h(hasSlides ? "nav" : "div", { class: hasSlides ? "pager" : "row" },
-        hasSlides ? [prev, where, next, h("span", { class: "spacer" })] : null,
-        h("button", { class: "ghost", type: "button", onclick: showJoin }, "학생 접속 주소·QR"),
-        h("button", { class: "ghost", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV"),
-        hasSlides ? [deckBtn, h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")] : null),
+      // 접속 QR은 머리말 수업 코드 옆, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
+      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
+        h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
         ? "학생 화면은 여기서 띄운 쪽과 애니메이션 단계를 따라갑니다. 키보드 ← → 는 PowerPoint처럼 애니메이션을 하나씩 넘깁니다."
         : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null),
@@ -54,11 +51,13 @@ function pinRun() {
   const credit = document.querySelector(".credit");
   const left = box.querySelector(".run-left");
   const stage = left && left.querySelector(".stage");
+  const pager = left && left.querySelector(".pager");
   const fit = () => {
     if (!box.isConnected) return;
     if (!matchMedia("(min-width: 1100px)").matches) {
       box.classList.remove("pinned"); box.style.height = "";
       if (stage) stage.style.maxWidth = "";
+      if (pager) pager.style.maxWidth = "";
       return;
     }
     box.classList.add("pinned");
@@ -71,6 +70,7 @@ function pinRun() {
       const gap = parseFloat(getComputedStyle(left).rowGap) || 0;
       const rest = others.reduce((s, el) => s + el.getBoundingClientRect().height, 0) + gap * others.length;
       stage.style.maxWidth = Math.max(240, Math.floor((left.clientHeight - rest - 2) * 16 / 9)) + "px";
+      if (pager) pager.style.maxWidth = stage.style.maxWidth;
     }
   };
   const ro = new ResizeObserver(fit);
