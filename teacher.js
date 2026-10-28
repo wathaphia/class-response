@@ -285,10 +285,13 @@ function draw() {
       type: "button", role: "menuitem", class: tab === k ? "set-item on" : "set-item",
       onclick() {
         go(k);
-        // 고른 뒤에는 마우스가 아직 위에 있어도 접어 두고, 한 번 벗어나면 다시 올려서 펼칠 수 있다
+        // 고른 뒤에는 마우스가 아직 위에 있어도 접어 두고, 메뉴를 벗어나거나 설정 단추에 다시 올리면 펼칠 수 있다.
+        // (클릭 직후 커서는 숨은 메뉴 자리에 있어 메뉴 「안」으로 치지 않으므로 mouseleave만으로는 풀리지 않는다)
         const m = app.querySelector(".set-menu");
+        const open = () => m.classList.remove("shut");
         m.classList.add("shut");
-        m.addEventListener("mouseleave", () => m.classList.remove("shut"), { once: true });
+        m.addEventListener("mouseleave", open, { once: true });
+        m.querySelector(".set-btn").addEventListener("mouseenter", open, { once: true });
       },
     }, tabIcon(k), h("span", {}, label)))));
   main = h("main", { class: "wide" });
