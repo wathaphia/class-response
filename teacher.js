@@ -564,6 +564,13 @@ function egressProjection(m) {
   const left = Math.max(0, (kstMonthStart(until - 1, 1) - until) / 3600000);
   return { bytes: m.bytes + m.bytes / m.hours * left, cached: m.cached + m.cached / m.hours * left };
 }
+// 날짜 묶음의 하루가 언제 바뀌는지: Worker가 한국 시간으로 나누기 전(kstSince 전)에 모인 날은 UTC 날짜 = 한국 오전 9시~다음 날 오전 9시
+const DAY9 = "오전 9시~다음 날 오전 9시";
+function egressDayNote(m, k) {
+  const since = m && m.kstSince ? kstIso(Date.parse(m.kstSince)).slice(0, 10) : null;
+  return !since || k < since ? " (" + DAY9 + ")" : k === since ? " (일부 " + DAY9 + ")" : "";
+}
+const egressHasDay9 = (m) => !!(m && m.days && Object.keys(m.days).some((k) => egressDayNote(m, k)));
 const EGRESS_SRC = { site: "사이트(학생·교사 화면)", test: "브라우저 시험(이 PC)", tool: "올리기 도구(PowerShell)", other: "기타(Office 뷰어 등)" };
 
 // 날마다 전송량 막대 그래프. 축척을 고정한다: 세로 0~500MB, 가로 그달 1일~말일(날마다·달마다 같은 눈으로 견줄 수 있게).
@@ -597,7 +604,7 @@ function egressDayChart(title, m, field) {
         + "H" + (x + bw - r) + "Q" + (x + bw) + "," + top + " " + (x + bw) + "," + (top + r) + "V" + base + 'Z"/>';
       if (v > EGRESS_DAY_MAX) bar += '<text class="eg-over" x="' + (x + bw / 2) + '" y="' + (T - 4) + '">' + esc(usageAmount(v, "bytes")) + "</text>";
     }
-    const tip = (mo + 1) + "/" + d + " · " + (v == null ? (k > today ? "아직 안 옴" : "집계 없음") : usageAmount(v, "bytes"));
+    const tip = (mo + 1) + "/" + d + (v == null ? "" : egressDayNote(m, k)) + " · " + (v == null ? (k > today ? "아직 안 옴" : "집계 없음") : usageAmount(v, "bytes"));
     // 막대보다 넓은 칸 전체가 마우스 대상(얇은 막대도 가리키기 쉽게)
     svg += '<g class="eg-day"><title>' + esc(tip) + "</title>"
       + '<rect class="eg-hit" x="' + (L + (d - 1) * slot) + '" y="' + T + '" width="' + slot + '" height="' + ph + '"/>' + bar + "</g>";
@@ -621,9 +628,10 @@ function egressView(m, ep, e24, top) {
   const srcs = m && m.srcs ? Object.entries(m.srcs).sort((a, b) => (b[1].bytes + b[1].cached) - (a[1].bytes + a[1].cached)) : [];
   const fileName = (p) => p.replace(/^\/storage\/v1\/object\/public\/slides\/\*\/\*\//, "슬라이드 ").replace(/^\/rest\/v1\/rpc\//, "함수 ").replace(/^\/rest\/v1\//, "표 ");
   return h("div", { class: "usage-blocks" },
-    m ? h("div", { class: "usage-block wide" }, h("h4", {}, "날마다 전송량 그래프(한국 날짜 · 세로 축 0~500MB 고정)"),
+    m ? h("div", { class: "usage-block wide" }, h("h4", {}, "날마다 전송량 그래프(하루 = 한국 시간 0시~24시 · 세로 축 0~500MB 고정)"),
       h("div", { class: "eg-pair" }, egressDayChart("캐시 전송량", m, "cached"), egressDayChart("전송량", m, "bytes")),
       h("p", { class: "muted small" }, "막대에 마우스를 올리면 그날 값이 나옵니다. 점선은 한 달 5GB를 날마다 고르게 쓸 때의 하루 몫입니다."
+        + (egressHasDay9(m) ? " 「" + DAY9 + "」이 붙은 날은 한국 시간 기준으로 바꾸기 전에 모여, 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다." : "")
         + (m.from && Date.parse(m.from) > kstMonthStart(Date.parse(m.until || m.from) - 1) + 3600000 ? " " + shortTime(m.from) + " 전 날짜는 집계가 없습니다." : ""))) : null,
     usageBlock("전송량 한눈에(무료 각 5GB)",
       usageTable(["", "전송량", "캐시 전송량"], [
@@ -633,8 +641,8 @@ function egressView(m, ep, e24, top) {
         ["한도까지 남음", m ? amt(Math.max(0, 5 * GB - m.bytes)) : "—", m ? amt(Math.max(0, 5 * GB - m.cached)) : "—"],
       ]),
       e24 && e24.unsized ? h("p", { class: "muted small" }, "최근 24시간 요청 " + e24.requests.toLocaleString() + "건 중 " + e24.unsized.toLocaleString() + "건은 크기가 기록되지 않아 「전송량」에서 빠졌습니다.") : null),
-    days.length ? usageBlock("날마다 전송량(한국 날짜)",
-      usageTable(["날짜", "전송량", "캐시 전송량"], days.map(([d, v]) => [d.slice(5).replace("-", "/"), amt(v.bytes), amt(v.cached)]))) : null,
+    days.length ? usageBlock("날마다 전송량(하루 = 한국 시간 0시~24시)",
+      usageTable(["날짜", "전송량", "캐시 전송량"], days.map(([d, v]) => [d.slice(5).replace("-", "/") + egressDayNote(m, d), amt(v.bytes), amt(v.cached)]))) : null,
     srcs.length ? usageBlock("누가 받았나(이번 달)",
       usageTable(["어디서", "전송량", "캐시 전송량"], srcs.map(([k, v]) => [EGRESS_SRC[k] || k, amt(v.bytes), amt(v.cached)]))) : null,
     top && top.length ? usageBlock("최근 24시간 많이 나간 것",
@@ -680,7 +688,7 @@ function supabaseView() {
         usageTable(["종류", "요청", "전송량"], Object.entries(e24.kinds).sort((a, b) => b[1].bytes - a[1].bytes)
           .map(([k, v]) => [KIND[k] || k, v.requests.toLocaleString() + "건", usageAmount(v.bytes, "bytes")])
           .concat([["합계", e24.requests.toLocaleString() + "건", usageAmount(e24.bytes + e24.cached, "bytes") + " (캐시 " + usageAmount(e24.cached, "bytes") + ")"]]))) : null,
-      s && s.apiCounts ? usageBlock("최근 7일 요청 수",
+      s && s.apiCounts ? usageBlock("최근 7일 요청 수(하루 = 한국 시간 " + DAY9 + ")",
         usageTable(["날짜", "데이터", "파일", "로그인", "실시간"], [...s.apiCounts].reverse().map((x) => [
           new Date(x.timestamp + "Z").toLocaleDateString("ko-KR", { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }),
           x.total_rest_requests.toLocaleString(), x.total_storage_requests.toLocaleString(), x.total_auth_requests.toLocaleString(), x.total_realtime_requests.toLocaleString()]))) : null,
@@ -712,7 +720,7 @@ function cloudflareView() {
     { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: day9, hint: daily + " · 중계 접속 1장마다 2번", missing },
     { label: "KV 목록", used: a && a.kvListsToday, limit: 1000, period: day9, missing: a && a.kvListsToday == null ? "Worker 새로 배포 필요" : missing, hint: daily + " · 기타 관리 동기화 1번마다 1번" },
     { label: "KV 저장", used: a && a.kvBytes, limit: GB, fmt: "bytes", period: "누적", missing: a && a.kvBytes == null ? (a.kvListsToday == null ? "Worker 새로 배포 필요" : "아직 집계 없음") : missing,
-      hint: a && a.kvKeys != null ? a.kvKeys.toLocaleString() + "개 키 · 하루 한 번 집계" : "하루 한 번 집계" },
+      hint: a && a.kvKeys != null ? a.kvKeys.toLocaleString() + "개 키 · 하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" : "하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" },
   ];
   const hist = (d.turn.history || []).slice().reverse();
   return [
