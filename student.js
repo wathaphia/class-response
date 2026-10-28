@@ -576,14 +576,22 @@ window.addEventListener("message", async (e) => {
 ["input", "change", "click", "scroll"].forEach((t) => document.addEventListener(t, queueMirror, { capture: true, passive: true }));
 document.addEventListener("visibilitychange", () => { trackPresence(); if (mirrorOn) sendMirror(); });
 // desk: on(전체 화면 공유 중) · off(PC인데 공유 안 함) · none(휴대폰·태블릿) · no(화면 보기 동의 안 함). multi: 모니터가 여러 대
+// 보내기에 실패하면(track 은 실패해도 "timed out"·"error" 를 돌려줄 뿐 던지지 않음) 기억을 지우고 3초 뒤 다시 보낸다
 let lastPresence = "";
+let presenceRetry = null;
 function trackPresence(force) {
   if (!screenChannel || screenChannel.state !== "joined") return;
   const p = { away: document.hidden, desk: monitorChoice() !== "yes" ? "no" : !canDesk() ? "none" : deskStream ? "on" : "off", multi: !!screen.isExtended };
   const k = JSON.stringify(p);
   if (k === lastPresence && !force) return;
   lastPresence = k;
-  screenChannel.track(p).catch(() => {});
+  clearTimeout(presenceRetry);
+  const failed = () => {
+    if (lastPresence !== k) return;   // 그사이 새 상태를 보냈다
+    lastPresence = "";
+    presenceRetry = setTimeout(() => trackPresence(), 3000);
+  };
+  screenChannel.track(p).then((r) => { if (r !== "ok") failed(); }, failed);
 }
 
 // 지금 수업 화면을 복사한다(쓰고 있는 답을 속성으로 옮겨 적어 그대로 보이게)
