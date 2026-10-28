@@ -534,6 +534,11 @@ begin
   return jsonb_build_object(
     'email', t.email, 'code', t.code, 'admin', t.is_admin, 'since', t.created_at, 'student', t.student_id is not null,
     'promoted', promoted_students(),   -- 선생님으로 승격된 학생(아래)
+    -- 공동 작업자로 고를 수 있는 다른 선생님(「선생님 추가」로 넣은 선생님 먼저, 그다음 승격된 학생)
+    'colleagues', coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'account', u.id is not null,
+        'class_no', s.class_no, 'name', s.name) order by s.id is not null, s.class_no, s.name, x.email)
+      from teachers x left join students s on s.id = x.student_id left join auth.users u on lower(u.email) = x.email
+      where x.email <> me), '[]'::jsonb),
     'own', (select count(*) from lessons where owner = auth.uid()),
     'shared', (select count(*) from lesson_collaborators where email = me),
     -- 내가 나눈(개발자는 모든) 수업의 공동 작업자
@@ -580,7 +585,7 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- 개발자 전용: 교사 추가·빼기(빼도 그 교사의 수업은 남고 개발자가 볼 수 있다)
+-- 개발자 전용: 선생님 추가·빼기(빼도 그 교사의 수업은 남고 개발자가 볼 수 있다)
 create or replace function admin_set_teacher(p_email text, p_on boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare e text := lower(trim(p_email));
@@ -611,7 +616,7 @@ grant execute on function owns_lesson(uuid) to authenticated;
 -- ------------------------------------------------------------
 -- 학생을 선생님으로 승격(개발자만, 「학생 관리」에서): 학생 계정에 로그인 이메일을 붙여 teachers 에 넣는다.
 -- 승격된 학생은 그 이메일로 교사 화면의 「처음 계정 만들기」를 해 로그인하고,
--- 선생님들은 「공동 작업자 추가」에서 승격된 학생 목록 중에 골라 수업을 함께 쓴다.
+-- 선생님들은 「공동 작업자 추가」에서 승격된 학생이나 「선생님 추가」로 넣은 선생님을 골라 수업을 함께 쓴다.
 -- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 남고 개발자가 볼 수 있다).
 -- ------------------------------------------------------------
 alter table teachers add column if not exists student_id uuid references students(id) on delete cascade;

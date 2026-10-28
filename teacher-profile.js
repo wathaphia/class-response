@@ -47,7 +47,7 @@ function paintProfile() {
         info("마지막 로그인", dateText(me.last_sign_in_at)),
         info("내 수업", p ? p.own + "개" : "—"),
         info("공유받은 수업", p ? p.shared + "개" : "—")),
-      h("p", { class: "muted small" }, "공동 작업자는 「학생 관리」에서 선생님으로 승격된 학생 중에서 고릅니다."),
+      h("p", { class: "muted small" }, "공동 작업자는 「선생님 추가」로 넣은 선생님이나 「학생 관리」에서 승격된 학생 중에서 고릅니다."),
       h("div", { class: "row wrap" },
         h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"),
         h("button", {
@@ -100,10 +100,10 @@ function collaboratorCard(p) {
         h("button", { class: "link danger", type: "button", onclick() { remove(s.lesson_id, p.email, "「" + s.title + "」 공동 작업에서 빠질까요?"); } }, "빠지기"))))) : null);
 }
 
-// 공동 작업자 추가: 선생님으로 승격된 학생 목록에서 한 명 + 나눌 수업 고르기(내 수업만, 개발자는 모든 수업)
+// 공동 작업자 추가: 다른 선생님(「선생님 추가」로 넣은 선생님 · 승격된 학생) 한 명 + 나눌 수업 고르기(내 수업만, 개발자는 모든 수업)
 function addCollaborator() {
   const mine = lessons.filter((l) => l.owner === me.id || (profile && profile.admin));
-  const people = ((profile && profile.promoted) || []).filter((p) => p.email !== profile.email);
+  const people = (profile && profile.colleagues) || [];
   const picks = people.map((p) => h("input", { type: "radio", name: "collab-who", value: p.code }));
   const msg = h("p", { class: "msg" });
   const boxes = mine.map((l) => h("input", { type: "checkbox", value: l.id, checked: !!lesson && l.id === lesson.id }));
@@ -113,7 +113,7 @@ function addCollaborator() {
       e.preventDefault();
       const who = picks.find((r) => r.checked);
       const picked = boxes.filter((b) => b.checked).map((b) => b.value);
-      if (!who) { msg.textContent = "함께 쓸 선생님(승격된 학생)을 골라 주세요."; return; }
+      if (!who) { msg.textContent = "함께 쓸 선생님을 골라 주세요."; return; }
       if (!picked.length) { msg.textContent = "함께 쓸 수업을 하나 이상 골라 주세요."; return; }
       msg.textContent = "추가하는 중…";
       const { data, error } = await sb.rpc("add_collaborator", { p_code: who.value, p_lessons: picked });
@@ -124,10 +124,10 @@ function addCollaborator() {
       await loadProfile();
     },
   },
-    h("fieldset", { class: "stack collab-people" }, h("legend", {}, "함께 쓸 선생님(승격된 학생)"),
-      people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + p.class_no + " " + p.name,
-        h("span", { class: "muted small" }, " · " + p.email + (p.account ? "" : " · 아직 계정 만들기 전"))))
-        : h("p", { class: "muted small" }, "선생님으로 승격된 학생이 없습니다. 「학생 관리」에서 학생을 먼저 승격해 주세요.")),
+    h("fieldset", { class: "stack collab-people" }, h("legend", {}, "함께 쓸 선생님"),
+      people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + (p.name ? p.class_no + " " + p.name : p.email),
+        h("span", { class: "muted small" }, (p.name ? " · " + p.email : "") + " · ID " + p.code + (p.account ? "" : " · 아직 계정 만들기 전"))))
+        : h("p", { class: "muted small" }, "고를 수 있는 선생님이 없습니다. 「선생님 추가」로 선생님을 넣거나 「학생 관리」에서 학생을 승격해 주세요.")),
     h("fieldset", { class: "stack collab-lessons" }, h("legend", {}, "함께 쓸 수업"),
       mine.length ? mine.map((l, i) => h("label", { class: "check" }, boxes[i], " " + l.title + " (" + l.code + ")"))
         : h("p", { class: "muted small" }, "내가 만든 수업이 없습니다.")),
@@ -135,7 +135,7 @@ function addCollaborator() {
     h("button", { class: "primary", type: "submit", disabled: !people.length }, "추가"), msg));
 }
 
-// 개발자 전용: 모든 선생님 목록 · 교사 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
+// 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
   const email = h("input", { type: "email", placeholder: "새 선생님 이메일", "aria-label": "새 선생님 이메일" });
   const set = async (who, on) => {
@@ -154,6 +154,6 @@ function teachersCard(p) {
         h("td", {}, t.code), h("td", {}, t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
         h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"),
         h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기"))))))),
-    h("div", { class: "row" }, email, h("button", { class: "ghost", type: "button", onclick() { if (email.value.trim()) set(email.value.trim(), true); } }, "교사 추가")),
+    h("div", { class: "row" }, email, h("button", { class: "ghost", type: "button", onclick() { if (email.value.trim()) set(email.value.trim(), true); } }, "선생님 추가")),
     h("p", { class: "muted small" }, "추가한 선생님은 Supabase 대시보드 → Authentication → Users 에서 같은 이메일로 계정을 만들어야 로그인할 수 있습니다. 개발자는 모든 선생님의 수업을 「전체 수업」에서 보고 불러올 수 있습니다."));
 }
