@@ -438,6 +438,13 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .screen-share-note.live { border-color: var(--bad); background: #fff5f4; }
 .screen-share-note.ask { border-width: 2px; border-color: var(--warn); background: var(--warn-soft); }
 .desk-warn { margin: 0; padding: .6rem .9rem; border-radius: 10px; background: #fde7e5; color: var(--bad); font-weight: 600; }
+/* 화면 보기에 동의한 PC 학생: 전체 화면을 공유할 때까지 수업 화면을 가린다 */
+body.desk-locked { overflow: hidden; }
+.desk-gate { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 16px; overflow: auto; background: rgba(246, 247, 251, .98); }
+.desk-gate .card { width: min(560px, 100%); border: 2px solid var(--warn); }
+.desk-gate h2 { margin: 0; }
+.desk-gate ol { margin: 0; padding-left: 1.3rem; display: grid; gap: .3rem; }
+.desk-tag { display: block; width: fit-content; margin-top: .25rem; }
 .sim-mirror { margin-top: .5rem; }
 
 /* 실시간 접속 표시: 초록 = 수업 화면을 보고 있음, 주황 = 다른 앱·탭, 회색 = 접속 안 함 */
@@ -445,6 +452,7 @@ textarea.mono { font-family: ui-monospace, Consolas, monospace; font-size: .85re
 .presence.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
 .presence.away { background: #e08a00; box-shadow: 0 0 0 3px #fff1db; }
 .chip.away { background: #fff1db; color: #a35f00; border-color: #f2c98a; font-weight: 700; }
+.chip.nodesk { border: 2px solid var(--bad); }
 
 /* 수업 설정: 전환 효과 미리보기(작은 화면) */
 .fx-preview { max-width: 360px; overflow: hidden; border-radius: 12px; }

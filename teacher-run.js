@@ -252,12 +252,38 @@ function presenceDot(s) {
 }
 function updatePresence() {
   presence = {};
-  for (const [k, metas] of Object.entries(screenChannel ? screenChannel.presenceState() : {})) presence[k] = { away: metas.every((m) => m.away) };
+  // 같은 학생이 여러 기기·탭으로 들어와 있으면 하나라도 전체 화면을 공유하지 않으면 「공유 안 함」
+  const rank = { off: 4, no: 3, none: 2, on: 1 };
+  for (const [k, metas] of Object.entries(screenChannel ? screenChannel.presenceState() : {})) {
+    presence[k] = { away: metas.every((m) => m.away), multi: metas.some((m) => m.multi),
+      desk: metas.map((m) => m.desk).filter(Boolean).sort((a, b) => (rank[b] || 0) - (rank[a] || 0))[0] || "" };
+  }
   document.querySelectorAll(".presence[data-sid]").forEach((el) => {
     const s = students.find((x) => x.id === el.dataset.sid);
     if (s) setDot(el, presenceOf(s));
   });
+  document.querySelectorAll(".desk-tag[data-sid]").forEach((el) => {
+    const s = students.find((x) => x.id === el.dataset.sid);
+    if (s) el.replaceWith(deskTag(s));
+  });
   if (tab === "run" && run) refreshRun();
+}
+
+// 전체 화면 공유 상태(학생 화면이 Presence로 알림): on · off(PC인데 공유 안 함) · none(휴대폰·태블릿) · no(동의 안 함·철회) · ""(모름·접속 안 함)
+function deskOf(s) {
+  if (presenceOf(s) === "off") return { desk: "" };
+  return presence[s.id] || presence[screenKey(s)] || { desk: "" };
+}
+const DESK_TAG = { on: ["ok", "화면 공유 중", "PC 화면 전체를 공유하고 있어 다른 창·앱도 보입니다"],
+  off: ["bad", "공유 안 함", "PC인데 전체 화면을 공유하지 않아 수업 화면이 가려져 있습니다(학생이 공유해야 열림)"],
+  none: ["info", "휴대폰·태블릿", "화면 공유가 없는 기기라 이 수업 화면만 보입니다(다른 앱은 보이지 않음)"],
+  no: ["warn", "동의 안 함", "화면 보기에 동의하지 않았거나 철회해 화면을 볼 수 없습니다"] };
+function deskTag(s) {
+  const d = deskOf(s), t = DESK_TAG[d.desk];
+  const el = h("span", { class: "desk-tag", "data-sid": s.id });
+  if (t) el.append(h("span", { class: "tag " + t[0], title: t[2] }, t[1]));
+  if (d.multi && d.desk === "on") el.append(" ", h("span", { class: "tag warn", title: "모니터가 여러 대입니다. 공유한 화면 하나만 보입니다" }, "모니터 2대+"));
+  return el;
 }
 
 // 접속한 학생: 초록 = 수업 화면을 보고 있음, 주황 = 다른 앱·탭, ✓ = 이 쪽 활동에 답함
@@ -266,7 +292,9 @@ function rosterChips(shown, big) {
   return h("div", { class: "roster" + (big ? " big" : "") }, students.map((s) => {
     const st = presenceOf(s);
     const done = shown.length && responses.some((r) => r.student_id === s.id && ids.has(r.activity_id));
-    return h("span", { class: "chip" + (st === "on" ? " on" : st === "away" ? " away" : "") + (done ? " done" : ""), title: PRESENCE_TEXT[st] }, nameOf(s));
+    const d = DESK_TAG[deskOf(s).desk];
+    return h("span", { class: "chip" + (st === "on" ? " on" : st === "away" ? " away" : "") + (deskOf(s).desk === "off" ? " nodesk" : "") + (done ? " done" : ""),
+      title: PRESENCE_TEXT[st] + (d ? " · " + d[1] : "") }, nameOf(s));
   }));
 }
 
@@ -277,7 +305,7 @@ function drawRoster(shown) {
       h("h2", {}, "접속 중 " + online + "명", h("span", { class: "muted small" }, " · 입장 " + students.length + "명")),
       h("button", { class: "ghost", type: "button", onclick() { openModal("입장한 학생", rosterChips(shown, true)); } }, "크게 보기")),
     students.length ? rosterChips(shown) : h("p", { class: "muted small" }, "아직 입장한 학생이 없습니다."),
-    students.length ? h("p", { class: "muted small" }, "초록: 수업 화면을 보고 있음 · 주황: 다른 앱·탭 · ✓: " + (lesson.slide_count ? "이 쪽" : "") + " 활동에 답함") : h("span", {}));
+    students.length ? h("p", { class: "muted small" }, "초록: 수업 화면을 보고 있음 · 주황: 다른 앱·탭 · 빨간 테두리: PC인데 전체 화면 공유 안 함 · ✓: " + (lesson.slide_count ? "이 쪽" : "") + " 활동에 답함") : h("span", {}));
 }
 
 function runBlock(a) {
