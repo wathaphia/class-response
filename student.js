@@ -470,8 +470,11 @@ async function startDesk() {
     return;
   }
   const track = stream.getVideoTracks()[0];
-  const surface = track && track.getSettings().displaySurface;
-  if (!track || (surface && surface !== "monitor")) {   // 창·탭만 고르면 그 밖의 활동이 보이지 않는다
+  const set = track ? track.getSettings() : {};
+  // 창·탭만 고르면 그 밖의 활동이 보이지 않는다. 종류를 알려 주지 않는 브라우저는 영상 비율이 모니터와 같을 때만 받는다
+  const whole = set.displaySurface ? set.displaySurface === "monitor"
+    : !!(set.width && set.height) && Math.abs(set.width / set.height - screen.width / screen.height) < 0.02;
+  if (!track || !whole) {
     stream.getTracks().forEach((t) => t.stop());
     deskMsg = " 창이나 탭이 아니라 「전체 화면」을 골라 주세요.";
     return renderScreenNotice();
