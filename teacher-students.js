@@ -32,6 +32,19 @@ async function sendTeacherScreenSignal(payload) {
   if (screenChannel) await screenChannel.send({ type: "broadcast", event: "signal", payload });
 }
 
+// 「공유 요청」: 접속한 학생 모두에게 보기 허용·전체 화면 공유를 권한다. 동의 안 한 학생은 묻는 창, 동의했지만 공유 안 한 PC 학생은 공유 막이 뜬다
+async function askAllShare(e) {
+  const btn = e.currentTarget;
+  try {
+    await ensureTeacherScreenChannel();
+    await sendTeacherScreenSignal({ type: "ask-share", to: "all" });
+    btn.textContent = "보냄 ✓";
+  } catch (err) {
+    alert(err.message || err);
+  }
+  setTimeout(() => { btn.textContent = "공유 요청"; }, 2000);
+}
+
 async function handleTeacherScreenSignal(message) {
   if (!message || message.to !== "teacher") return;
   const watch = screenWatchers.get(message.from);
@@ -631,12 +644,13 @@ function drawStudents() {
     return;
   }
   for (const td of rows.flatMap((row) => [...row.cells])) if (td.dataset.sid && cells.has(td.dataset.sid)) td.append(cells.get(td.dataset.sid));
-  // 일괄 미리보기 단추 오른쪽에 전체 응답 CSV
+  // 일괄 미리보기 단추 오른쪽에 공유 요청, 그 오른쪽에 전체 응답 CSV
   const gridHead = h("th", { class: "grid-head" }, h("div", { class: "row grid-head-row" }, h("button", {
     class: grid ? "grid-toggle on" : "grid-toggle", type: "button", "aria-pressed": grid ? "true" : "false", disabled: !live && !grid,
     title: live ? "화면 보기에 동의한 학생들의 수업 화면을 작게(240p 미만) 한꺼번에 봅니다" : "「수업 진행」에서 「수업 시작하기」를 누르면 쓸 수 있습니다",
     onclick() { if (grid) stopGrid(); else startGrid(); drawStudents(); },
   }, grid ? "■ 일괄 미리보기 끄기" : "▦ 실시간 화면 일괄 미리보기"),
+    h("button", { class: "ghost csv-btn", type: "button", title: "접속한 모든 학생에게 화면 보기 허용과 전체 화면 공유를 권합니다(학생이 거절할 수 있음)", onclick: askAllShare }, "공유 요청"),
     h("button", { class: "ghost csv-btn", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV")));
   main.replaceChildren(promotedCard(), h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },

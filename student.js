@@ -38,6 +38,7 @@ const mobileDevice = () => !!navigator.userAgentData?.mobile || /Android|iPhone|
   || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
 const canDesk = () => !!navigator.mediaDevices?.getDisplayMedia && !mobileDevice();
 let deskGate = null;                 // 동의한 PC 학생이 전체 화면을 공유하기 전까지 수업 화면을 가리는 막
+let shareAsked = false;              // 선생님이 「공유 요청」을 보냈고 학생이 아직 답하지 않음(동의 안 한 학생에게 묻는 창)
 // 크게 보기: 높이 720·8 FPS·약 600 kbps. 일괄 미리보기(작은 칸 320×180): 높이 180·5 FPS·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
 const DESK = { full: { h: 720, fps: 8, br: 600000 }, lite: { h: 180, fps: 5, br: 70000 } };
 // 실시간 수업 화면: 화면 공유가 없을 때 이 수업 화면(쪽, 쓰고 있는 답)을 복사해 보낸다. 모든 기기·브라우저에서 된다.
@@ -216,6 +217,7 @@ function leaveScreenShare() {
   liveOk = false;
   screenChannelKey = "";
   screenPending = false;
+  shareAsked = false;
   renderDeskGate(false);   // 위에서 화면 안내를 다시 그려도 입장 화면에는 막이 남지 않게 맨 끝에
 }
 
@@ -350,6 +352,17 @@ function monitorChoice() {
   if (monitorInAccount()) return state.me.monitor === true ? "yes" : state.me.monitor === false ? "no" : null;
   try { return localStorage.getItem(monitorKey()); } catch { return null; }
 }
+// 끄기: 무엇이 바뀌는지 한 번 더 보여 주고 고르게 한다(입장할 때 묻는 것과 같은 설명)
+function askMonitorOff() {
+  if (confirm("화면 보기 허용을 끌까요?\n끄면 선생님이 이 기기 화면을 볼 수 없고, 선생님 명단에 「철회함」으로 바로 표시됩니다.\n이 안내 칸의 「보기 허용 켜기」로 언제든 다시 켤 수 있습니다.")) setMonitorChoice("no");
+}
+// 켜기: PC면 곧바로 전체 화면 공유 창도 띄운다(브라우저는 누른 그 순간에만 띄워 준다)
+function turnMonitorOn() {
+  shareAsked = false;
+  if (canDesk() && !deskStream) startDesk();
+  setMonitorChoice("yes");
+  if (screenPending) startMirror();
+}
 async function setMonitorChoice(v) {
   if (v === "no") { stopMirror(); stopDesk(); }
   if (monitorInAccount()) {
@@ -378,7 +391,7 @@ function renderScreenNotice() {
       : mirrorOn && mirrorLite ? "● 선생님이 지금 여러 학생의 수업 화면을 작게 함께 보고 있습니다." + deskAsk
       : mirrorOn ? "● 선생님이 지금 이 수업 화면을 보고 있습니다." + deskAsk
       : "선생님이 수업 중 이 화면을 볼 수 있습니다(동의함)." + deskAsk;
-    buttons = [deskBtn, h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "보기 허용 끄기")];
+    buttons = [deskBtn, h("button", { class: "ghost", type: "button", onclick: askMonitorOff }, "보기 허용 끄기")];
   } else if (screenPending) {
     text = "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면이 보이고, PC에서 전체 화면 공유까지 켜면 화면 전체가 보입니다.";
     buttons = [h("button", { class: "primary", type: "button", onclick: startMirror }, "이번만 허용"),
@@ -387,19 +400,23 @@ function renderScreenNotice() {
   } else if (mirrorOn) {
     text = deskStream ? "● 이 PC의 화면 전체를 선생님께 보여 주는 중입니다." : "● 이 수업 화면을 선생님께 보여 주는 중입니다." + deskAsk;
     buttons = [deskBtn, h("button", { class: "ghost", type: "button", onclick() { stopMirror(); stopDesk(); } }, "그만 보여 주기")];
+  } else {   // 보기 허용을 끈 학생: 안내 칸을 남겨 두어 언제든 다시 켤 수 있게
+    text = "화면 보기 허용이 꺼져 있습니다. 선생님은 이 기기 화면을 볼 수 없습니다.";
+    buttons = [h("button", { class: "primary", type: "button", onclick: turnMonitorOn }, "보기 허용 켜기")];
   }
   shell.screenNotice.hidden = !text;
   shell.screenNotice.classList.toggle("live", mirrorOn);
   shell.screenNotice.classList.toggle("ask", !!(mirrorOn && deskBtn));   // 선생님이 보는데 전체 화면 공유가 꺼져 있음
   shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
-  renderDeskGate(choice === "yes" && !!deskBtn);
+  renderDeskGate(choice === "yes" && !!deskBtn, choice !== "yes" && shareAsked);
   trackPresence();
 }
 
 // 화면 보기에 동의한 PC 학생은 화면 전체를 공유해야 수업 화면이 열린다(창·탭만 고르면 열리지 않음).
 // 공유 대신 동의를 철회할 수도 있지만, 그러면 선생님 명단에 바로 「철회함」으로 보인다.
-function renderDeskGate(on) {
-  if (!on) {
+// ask: 동의하지 않은 학생에게 선생님의 「공유 요청」을 보여 준다(거절하면 막이 닫히고 수업은 그대로 열린다)
+function renderDeskGate(on, ask = false) {
+  if (!on && !ask) {
     if (deskGate) deskGate.remove();
     deskGate = null;
     document.body.classList.remove("desk-locked");
@@ -410,6 +427,14 @@ function renderDeskGate(on) {
     document.body.append(deskGate);
   }
   document.body.classList.add("desk-locked");
+  if (!on) return deskGate.replaceChildren(h("div", { class: "card stack" },
+    h("h2", { id: "desk-gate-title" }, "선생님이 화면 공유를 요청했습니다"),
+    h("p", {}, canDesk() ? "수업하는 동안 선생님이 이 PC 화면 전체(다른 창·앱 포함)를 볼 수 있게 화면 보기를 허용하고 전체 화면을 공유해 달라는 요청입니다."
+      : "수업하는 동안 선생님이 이 기기의 수업 화면을 볼 수 있게 화면 보기를 허용해 달라는 요청입니다."),
+    canDesk() ? h("p", { class: "small" }, "「허용하고 공유 시작」을 누른 뒤 뜨는 창에서 「전체 화면」을 고르고 「공유」를 누르세요.") : null,
+    h("div", { class: "row wrap" },
+      h("button", { class: "primary", type: "button", onclick: turnMonitorOn }, canDesk() ? "허용하고 공유 시작" : "허용"),
+      h("button", { class: "ghost", type: "button", onclick() { shareAsked = false; renderScreenNotice(); } }, "이번에는 안 함"))));
   deskGate.replaceChildren(h("div", { class: "card stack" },
     h("h2", { id: "desk-gate-title" }, "화면 전체를 공유해야 수업이 열립니다"),
     h("p", {}, "수업 중 화면 보기에 동의했으므로, 이 PC에서는 화면 전체를 선생님과 공유해야 합니다. 열려 있는 다른 창·앱도 함께 보입니다."),
@@ -690,6 +715,11 @@ async function sendScreenSignal(payload) {
 async function handleScreenSignal(message) {
   if (message && message.type === "grid-keep") {   // 일괄 미리보기가 아직 열려 있음
     if (mirrorLite && (message.ids || []).includes(screenStudentId)) liteKeep = Date.now();
+    return;
+  }
+  if (message && message.type === "ask-share" && message.to === "all") {   // 선생님이 모든 학생에게 보기 허용·전체 화면 공유를 권함
+    if (monitorChoice() !== "yes") shareAsked = true;
+    renderScreenNotice();   // 동의했지만 공유하지 않은 PC 학생에게는 원래 막이 보인다
     return;
   }
   if (!message || (message.to !== screenStudentId && message.key !== screenKey(state.me))) return;
