@@ -620,8 +620,9 @@ td.grid-cell > span { white-space: nowrap; }
 /* 1366px 화면에서도 오른쪽 단추까지 가로 스크롤 없이 들어오게 칸·단추 여백을 조금 줄인다 */
 .students-table th, .students-table td { padding-inline: .55rem; }
 .students-table td.actions button.ghost { padding: 0 .75rem; }
-.grid-head-row { flex-wrap: nowrap; gap: .4rem; }
-.grid-head-row .csv-btn { min-height: 36px; padding: 0 .75rem; font-size: .85rem; white-space: nowrap; }
+.grid-head-row { flex-wrap: nowrap; gap: .3rem; }
+.grid-head-row .grid-toggle { padding-inline: .6rem; }
+.grid-head-row .csv-btn { min-height: 36px; padding: 0 .45rem; font-size: .85rem; white-space: nowrap; }
 .students-table th, .students-table td:nth-child(-n+6) { white-space: nowrap; }
 .live-tile { display: grid; gap: .3rem; width: 320px; }
 .tile-view { position: relative; width: 320px; height: 180px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #f6f7fb; }
