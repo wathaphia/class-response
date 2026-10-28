@@ -31,7 +31,8 @@ function drawRun() {
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
         ? "학생 화면은 여기서 띄운 쪽과 애니메이션 단계를 따라갑니다. 키보드 ← → 는 PowerPoint처럼 애니메이션을 하나씩 넘깁니다."
-        : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null),
+        : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null,
+      classBar()),
     h("aside", { class: "run-right stack" },
       h("section", { class: "card row between" }, openText, openBtn),
       roster,
@@ -52,12 +53,14 @@ function pinRun() {
   const left = box.querySelector(".run-left");
   const stage = left && left.querySelector(".stage");
   const pager = left && left.querySelector(".pager");
+  const bar = left && left.querySelector(".class-bar");
   const fit = () => {
     if (!box.isConnected) return;
     if (!matchMedia("(min-width: 1100px)").matches) {
       box.classList.remove("pinned"); box.style.height = "";
       if (stage) stage.style.maxWidth = "";
       if (pager) pager.style.maxWidth = "";
+      if (bar) bar.style.maxWidth = "";
       return;
     }
     box.classList.add("pinned");
@@ -71,6 +74,7 @@ function pinRun() {
       const rest = others.reduce((s, el) => s + el.getBoundingClientRect().height, 0) + gap * others.length;
       stage.style.maxWidth = Math.max(240, Math.floor((left.clientHeight - rest - 2) * 16 / 9)) + "px";
       if (pager) pager.style.maxWidth = stage.style.maxWidth;
+      if (bar) bar.style.maxWidth = stage.style.maxWidth;
     }
   };
   const ro = new ResizeObserver(fit);
@@ -141,6 +145,72 @@ function refreshRun() {
 }
 
 addEventListener("resize", () => { if (run && run.simLayer) syncSimLayer(run.simLayer, run.img); });
+
+// ---------- 수업 시작하기(중계 접속 발급) ----------
+// 학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 시작하기」를 누른 뒤 80분 동안만 된다. 누를 때 중계 서버(TURN) 접속 정보를
+// 수업 시간만큼 한 장 받아 두고, 80분이 지나거나 「수업 끝내기」를 누르면 화면 보기를 닫고 접속 정보를 버린다(월 발급 한도를 아끼려고).
+// 이 브라우저에 수업마다 남겨 두어(cra-class) 새로 고침해도 이어진다.
+const CLASS_MS = 80 * 60 * 1000;
+let classTimer = null;
+let classTick = null;
+function classUntil() {
+  try {
+    const v = JSON.parse(localStorage.getItem("cra-class"));
+    return v && lesson && v.lesson === lesson.id && v.until > Date.now() ? v.until : 0;
+  } catch { return 0; }
+}
+const classOn = () => classUntil() > 0;
+async function startClass() {
+  try { localStorage.setItem("cra-class", JSON.stringify({ lesson: lesson.id, until: Date.now() + CLASS_MS })); } catch {}
+  forgetIce();
+  armClass();
+  paintClass();
+  const ice = await teacherIce();
+  flash(hasTurn(ice) ? "수업을 시작했습니다. 80분 동안 학생 화면을 볼 수 있습니다." : "수업을 시작했습니다(중계 서버 없이 직접 연결만 씁니다).");
+}
+function endClass(auto) {
+  try { localStorage.removeItem("cra-class"); } catch {}
+  forgetIce();
+  armClass();
+  if (grid) stopGrid();
+  for (const w of new Set(screenWatchers.values())) w.close();
+  paintClass();
+  if (tab === "students") drawStudents();
+  if (auto) flash("수업 시작 뒤 80분이 지나 학생 화면 보기를 닫았습니다.");
+}
+function forgetIce() {
+  iceCache = null;
+  try { sessionStorage.removeItem("cra-ice"); } catch {}
+}
+// 끝나는 시각에 저절로 끝내고, 남은 시간 글자는 20초마다 고친다
+function armClass() {
+  clearTimeout(classTimer);
+  clearInterval(classTick);
+  const until = classUntil();
+  if (!until) return;
+  classTimer = setTimeout(() => endClass(true), until - Date.now());
+  classTick = setInterval(paintClass, 20000);
+}
+function classLeft() {
+  const m = Math.max(0, Math.ceil((classUntil() - Date.now()) / 60000));
+  return "수업 중 · " + m + "분 남음";
+}
+function classBar() {
+  classBarEl = h("div", { class: "class-bar row" });
+  paintClass(true);
+  return classBarEl;
+}
+let classBarEl = null;
+function paintClass(fresh) {
+  if (!classBarEl || (!fresh && !classBarEl.isConnected)) return;
+  const on = classOn();
+  classBarEl.classList.toggle("on", on);
+  classBarEl.replaceChildren(on
+    ? h("span", { class: "class-left" }, h("span", { class: "presence on" }), " " + classLeft())
+    : h("span", { class: "muted small" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 수업을 시작해야 쓸 수 있습니다. 시작하면 80분 뒤 저절로 끝납니다."),
+  on ? h("button", { class: "ghost", type: "button", onclick() { if (confirm("수업을 끝낼까요? 학생 화면 보기가 닫힙니다.")) endClass(false); } }, "수업 끝내기")
+    : h("button", { class: "primary class-start", type: "button", onclick: startClass }, "수업 시작하기"));
+}
 
 // ---------- 실시간 접속 표시 ----------
 // 학생 화면은 수업 채널에 접속 상태(보고 있음/다른 앱·탭)만 알린다(Supabase Presence). 화면 데이터는 보내지 않는다.

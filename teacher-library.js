@@ -1,4 +1,4 @@
-// 교사 화면 · 「전체 수업」 탭(설정 메뉴 안): 폴더 정리, 수업 카드 끌어 옮기기, 골라 불러오기, 슬라이드 PDF 받기.
+// 교사 화면 · 「전체 수업」(프로필 화면 오른쪽 2/3, teacher-profile.js): 폴더 정리, 수업 카드 끌어 옮기기, 골라 불러오기, 슬라이드 PDF 받기.
 // 공유 상태(lessons·lesson·me…)와 틀(h·section 등)은 teacher.js, common.js 에 있다.
 
 // ---------- 전체 수업 ----------
@@ -7,13 +7,18 @@ let folders = [];
 let pickedId = null;
 
 async function drawManage() {
-  const { data, error } = await sb.from("lesson_folders").select("*").order("sort").order("created_at");
-  if (tab !== "manage") return;
+  const { data, error } = await sb.from("lesson_folders").select("*").eq("owner", me.id).order("sort").order("created_at");
+  const pane = main && main.querySelector(".manage-pane");
+  if (tab !== "profile" || !pane) return;
   folders = error ? [] : data;
   const msg = h("p", { class: "msg" });
+  // 다른 선생님 수업(공유받은 것, 개발자는 모든 선생님 것)은 내 폴더에 넣지 않고 따로 묶는다(끌어 옮기기 없음)
+  const mine = (l) => l.owner === me.id;
+  const others = lessons.filter((l) => !mine(l));
+  const OTHERS = "others";
   const groups = [...folders.map((f) => ({ id: f.id, name: f.name })), { id: null, name: "폴더 없음" }];
   const inGroup = (gid) => lessons
-    .filter((l) => (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null) === gid)
+    .filter((l) => gid === OTHERS ? !mine(l) : mine(l) && (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null) === gid)
     .sort((x, y) => (x.sort || 0) - (y.sort || 0) || x.created_at.localeCompare(y.created_at));
   const picked = () => lessons.find((l) => l.id === pickedId) || null;
 
@@ -56,7 +61,7 @@ async function drawManage() {
   };
   const card = (l) => {
     const el = h("article", {
-      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: "true", tabindex: "0",
+      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: mine(l) ? "true" : "false", tabindex: "0",
       onclick() { pickedId = l.id; drawManage(); },
       ondblclick() { pickedId = l.id; loadPicked(); },
       onkeydown(e) { if (e.key === "Enter") { pickedId = l.id; drawManage(); } },
@@ -66,18 +71,19 @@ async function drawManage() {
       h("strong", {}, (l.kind === "survey" ? "[설문] " : "") + l.title),
       h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString()),
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
+      mine(l) ? null : h("span", { class: "tag info" }, "공유받음"),
       // 첫 슬라이드(끌기를 방해하지 않게 그림 자체는 끌 수 없게)
       l.slide_count && !isPptx(l)
         ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
         : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"));
-    dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
+    if (mine(l)) dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
     return el;
   };
 
   const folderBox = (g) => {
     const items = inGroup(g.id);
     const list = h("div", { class: "lesson-list" }, items.length ? items.map(card) : h("p", { class: "muted small" }, "여기로 수업을 끌어 놓으세요."));
-    dropZone(list, g.id, null);
+    if (g.id !== OTHERS) dropZone(list, g.id, null);
     const f = folders.find((x) => x.id === g.id);
     return h("section", { class: "card stack folder" },
       h("div", { class: "row between" },
@@ -111,9 +117,9 @@ async function drawManage() {
   newName.addEventListener("keydown", (e) => { if (e.key === "Enter") addFolder(); });
 
   const p = picked();
-  const moveSel = p ? h("select", { "aria-label": "옮길 폴더", async onchange() { await moveLesson(p.id, moveSel.value || null, null); } },
+  const moveSel = p && mine(p) ? h("select", { "aria-label": "옮길 폴더", async onchange() { await moveLesson(p.id, moveSel.value || null, null); } },
     groups.map((g) => h("option", { value: g.id || "", selected: (folders.some((f) => f.id === p.folder_id) ? p.folder_id : null) === g.id }, g.name))) : null;
-  main.replaceChildren(h("div", { class: "stack manage" },
+  pane.replaceChildren(h("div", { class: "stack manage" },
     h("section", { class: "card stack" },
       h("div", { class: "row between wrap" },
         h("h2", {}, "전체 수업 " + lessons.length + "개"),
@@ -132,10 +138,11 @@ async function drawManage() {
           ? h("button", { class: "primary", type: "button", disabled: true }, "불러오기 완료")
           : h("button", { class: "primary", type: "button", onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
         h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
-        h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"), moveSel))
+        moveSel ? h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"), moveSel) : null)
         : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
       msg),
-    groups.map(folderBox)));
+    groups.map(folderBox),
+    others.length ? folderBox({ id: OTHERS, name: profile && profile.admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : "공유받은 수업" }) : null));
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.
