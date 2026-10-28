@@ -26,7 +26,7 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      // 접속 QR은 머리말 수업 코드 옆, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
+      // 접속 QR은 「접속 QR」 탭, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
       hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
@@ -383,14 +383,18 @@ function joinUrl(l) {
   return new URL("index.html?c=" + encodeURIComponent(l.code), location.href).href;
 }
 
-function showJoin() {
+// 「접속 QR」 탭: 학생 접속 QR·수업 코드·주소를 화면에 크게(교실 TV에 띄우기 좋게)
+function drawJoin() {
   const url = joinUrl(lesson);
   const qr = h("div", { class: "qr" });
-  openModal("학생 접속", h("div", { class: "join" }, qr,
+  main.replaceChildren(h("section", { class: "card join join-page" }, qr,
     h("div", { class: "stack" },
+      h("h2", {}, "학생 접속"),
       h("p", { class: "join-code" }, "수업 코드 ", h("strong", {}, lesson.code)),
       h("p", { class: "join-url" }, url),
-      h("button", { class: "ghost", type: "button", onclick(e) { navigator.clipboard.writeText(url).then(() => { e.target.textContent = "복사했습니다"; }); } }, "주소 복사"))));
-  if (window.QRCode) new QRCode(qr, { text: url, width: 320, height: 320 });
+      h("div", { class: "row" },
+        h("button", { class: "ghost", type: "button", onclick(e) { navigator.clipboard.writeText(url).then(() => { e.target.textContent = "복사했습니다"; }); } }, "주소 복사"),
+        h("a", { class: "ghost btn-link", href: url, target: "_blank", rel: "noopener" }, "학생 화면 열기")))));
+  if (window.QRCode) new QRCode(qr, { text: url, width: 480, height: 480 });
   else qr.textContent = "QR을 만들지 못했습니다(인터넷 연결 확인).";
 }

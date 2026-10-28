@@ -197,24 +197,39 @@ main.lesson .slide { cursor: zoom-in; }
   background: none; border: 0; border-radius: 8px; color: var(--ink); transition: color .15s, background-color .15s, padding-left .2s; }
 .set-item::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent);
   transform: scaleY(0); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
-.set-item:hover:not(.on), .set-item:focus-visible:not(.on) { color: var(--accent); background: var(--accent-soft); padding-left: .95rem; }
+.set-item:hover:not(.on):not(:disabled), .set-item:focus-visible:not(.on) { color: var(--accent); background: var(--accent-soft); padding-left: .95rem; }
 .set-item:hover::before, .set-item:focus-visible::before { transform: scaleY(1); }
 .set-item:hover .tab-icon { transform: translateY(-1px) scale(1.08); background: #fff; }
 .set-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .set-item.on { background: var(--accent); color: #fff; font-weight: 700; }
 .set-item.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
 @media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon, .set-drop, .set-caret, .set-item, .set-item::before { transition: none; } }
-/* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기) */
-.lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(36rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+/* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기) · 오른쪽에 편집 모드 단추 */
+.lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(18rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .lesson-box:focus-within { border-color: var(--accent); }
 .lesson-code { display: flex; align-items: center; padding: 0 .7rem; border-right: 1px solid var(--line); border-radius: 10px 0 0 10px; background: var(--accent-soft);
   color: var(--accent); font-weight: 700; letter-spacing: .05em; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; user-select: all; }
-.teacher .lesson-box .lesson-title { flex: 1 1 14rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0 10px 10px 0; background: none; font-weight: 700; }
+.teacher .lesson-box .lesson-title { flex: 1 1 7rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0 10px 10px 0; background: none; font-weight: 700; }
 .teacher .lesson-box .lesson-title:focus { outline: none; background: var(--accent-soft); }
 @media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
 .teacher .top-title .lesson-box { flex: 1 1 auto; }
 .teacher .top-title .eyebrow { white-space: nowrap; }
-.qr-btn { flex: 0 0 auto; white-space: nowrap; padding-inline: .7rem; }
+/* 편집 모드 단추: 올리면 탭처럼 색이 바뀌고 기호가 살짝 뜬다. 켜면 파랗게 채워지고 오른쪽 작은 스위치가 옮겨 간다 */
+.edit-btn { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .4rem; padding-inline: .55rem .7rem; white-space: nowrap;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line); transition: color .2s, background-color .2s, border-color .2s, box-shadow .2s; }
+.edit-btn:hover:not(.on) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.edit-btn:hover .tab-icon { transform: translateY(-1px) rotate(-8deg) scale(1.08); background: #fff; }
+.edit-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.edit-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+.edit-btn.on:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.edit-btn.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
+.edit-switch { position: relative; width: 1.9rem; height: 1.05rem; border-radius: 1rem; background: var(--line); transition: background-color .2s; }
+.edit-switch::after { content: ""; position: absolute; top: .15rem; left: .15rem; width: .75rem; height: .75rem; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+.edit-btn:hover:not(.on) .edit-switch { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.edit-btn.on .edit-switch { background: rgba(255, 255, 255, .35); }
+.edit-btn.on .edit-switch::after { transform: translateX(.85rem); }
+@media (prefers-reduced-motion: reduce) { .edit-btn, .edit-switch, .edit-switch::after { transition: none; } }
 /* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다 */
 @media (min-width: 1100px) {
   .teacher .top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
@@ -241,6 +256,11 @@ main.lesson .slide { cursor: zoom-in; }
 .qr img, .qr canvas { display: block; width: min(320px, 70vw); height: auto; }
 .join-code { font-size: 1.4rem; }
 .join-code strong { font-size: 2rem; color: var(--accent-ink); }
+/* 「접속 QR」 탭: QR을 화면에 크게 */
+.join-page { justify-content: center; gap: 2.5rem; padding: 2rem; }
+.join-page .qr img, .join-page .qr canvas { width: min(480px, 80vw, 62vh); }
+.join-page .join-code strong { font-size: 3rem; letter-spacing: .08em; }
+.btn-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1rem; border-radius: 10px; text-decoration: none; }
 .join-url { font-family: ui-monospace, Consolas, monospace; font-size: .9rem; overflow-wrap: anywhere; background: var(--bg); border-radius: 8px; padding: .5rem .7rem; }
 
 /* 교사: 만들기 */

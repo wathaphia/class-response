@@ -1,4 +1,5 @@
-// 교사 화면(버전 2): 로그인 → 수업 고르기 → [수업 진행] [자료 추가] [학생 관리] · 설정▾[슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
+// 교사 화면(버전 2): 로그인 → 수업 고르기 → [접속 QR] [수업 진행] [학생 관리] · 설정▾[자료 추가 · 슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
+// 제목 칸 옆 「편집 모드」를 켜면 [수업 진행] [자료 추가] [학생 관리] [슬라이드 편집] [기타 관리] 다섯 탭이 모두 위에 나온다(접속 QR·설정은 숨김).
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
 // 교사 화면 스크립트는 탭별로 나뉘어 teacher.html 이 이 순서로 불러온다(모두 같은 전역 공간을 쓴다):
@@ -20,6 +21,7 @@ let lesson = null;        // 지금 고른 수업(없으면 새 수업 만들기
 let activities = [];
 let students = [];
 let responses = [];
+let editMode = localStorage.getItem("cra-edit") === "1";   // 편집 모드: 자료 추가·슬라이드 편집·기타 관리를 위쪽 탭으로 꺼낸다
 let tab = (localStorage.getItem("cra-tab") || "run").replace(/^manage$/, "profile");   // 예전 「전체 수업」 탭은 프로필 안으로
 let timer = null;
 let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
@@ -265,8 +267,10 @@ const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentB
 const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.page + "~" + a.page_to + "쪽" : a.page + "쪽";
 
 // ---------- 틀 ----------
-// 탭 기호(선 그림): 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 슬라이드 편집 조절기 · 기타 관리 계기판 · 설정 톱니바퀴
+// 탭 기호(선 그림): 접속 QR 네모 칸 · 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 슬라이드 편집 조절기 · 기타 관리 계기판 · 설정 톱니바퀴
 const TAB_ICONS = {
+  join: '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 20.5h1M20.5 14v1"/>',
+  edit: '<path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   run: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   build: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>',
   students: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M15.5 5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
@@ -281,7 +285,7 @@ function tabIcon(k) {
 }
 function draw() {
   clearTimeout(timer);
-  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 학생 접속 QR. 수업 옮기기·새 수업은 「전체 수업」에서
+  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 편집 모드 켜고 끄기. 수업 옮기기·새 수업은 「전체 수업」에서
   const titleBox = h("input", {
     type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
     value: lesson ? lesson.title : "", placeholder: lesson ? "수업 제목" : "새 수업 (슬라이드 편집에서 만듭니다)",
@@ -299,9 +303,13 @@ function draw() {
   });
   const lessonBox = h("div", { class: "lesson-box" },
     h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox);
-  const tabs = [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"]];
-  // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 세 탭
-  const setTabs = [["settings", "슬라이드 편집"], ["etc", "기타 관리"]];
+  // 평소: 접속 QR · 수업 진행 · 학생 관리 + 설정▾(자료 추가 · 슬라이드 편집 · 기타 관리)
+  // 편집 모드: 설정 안의 탭이 모두 위로 나와 다섯 탭(접속 QR과 설정 단추는 숨김)
+  const tabs = editMode
+    ? [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"]]
+    : [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"]];
+  // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 탭
+  const setTabs = editMode ? [] : [["build", "자료 추가"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"]];
   if (![...tabs, ...setTabs, ["profile"]].some(([k]) => k === tab)) tab = "run";
   const go = (k) => { tab = k; localStorage.setItem("cra-tab", k); draw(); };
   const menu = h("div", { class: "set-menu" },
@@ -310,7 +318,7 @@ function draw() {
       onclick() { menu.classList.toggle("open"); },
     }, tabIcon("gear"), h("span", {}, "설정"), h("span", { class: "set-caret", "aria-hidden": "true" })),
     h("div", { class: "set-drop", role: "menu" }, setTabs.map(([k, label]) => h("button", {
-      type: "button", role: "menuitem", class: tab === k ? "set-item on" : "set-item",
+      type: "button", role: "menuitem", class: tab === k ? "set-item on" : "set-item", disabled: !lesson && k === "build",
       onclick() {
         go(k);
         // 고른 뒤에는 마우스가 아직 위에 있어도 접어 두고, 메뉴를 벗어나거나 설정 단추에 다시 올리면 펼칠 수 있다.
@@ -322,22 +330,26 @@ function draw() {
         m.querySelector(".set-btn").addEventListener("mouseenter", open, { once: true });
       },
     }, tabIcon(k), h("span", {}, label)))));
+  const editBtn = h("button", {
+    type: "button", class: editMode ? "edit-btn on" : "edit-btn", "aria-pressed": String(editMode),
+    title: editMode ? "편집 모드 끄기: 자료 추가·슬라이드 편집·기타 관리를 설정 안으로" : "편집 모드 켜기: 자료 추가·슬라이드 편집·기타 관리를 위쪽 탭으로",
+    onclick() { editMode = !editMode; localStorage.setItem("cra-edit", editMode ? "1" : "0"); draw(); },
+  }, tabIcon("edit"), h("span", {}, "편집 모드"), h("span", { class: "edit-switch", "aria-hidden": "true" }));
   main = h("main", { class: "wide" });
   app.replaceChildren(
     h("header", { class: "top" },
-      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox,
-        lesson ? h("button", { class: "ghost qr-btn", type: "button", title: "학생 접속 주소·QR 크게 보기", onclick: showJoin }, "접속 QR") : null),
+      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox, editBtn),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
-        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson,
+        type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "etc",
         onclick() { go(k); },
       }, tabIcon(k), h("span", {}, label)))),
-      h("div", { class: "top-actions" }, menu,
+      h("div", { class: "top-actions" }, setTabs.length ? menu : null,
         // 프로필: 내 정보 · 로그아웃 · 비밀번호 재설정 · 공동 작업자 · 전체 수업
         h("button", { class: tab === "profile" ? "tab profile-btn on" : "tab profile-btn", type: "button", title: (me.email || "") + " · 프로필", onclick() { go("profile"); } },
           h("span", { class: "avatar", "aria-hidden": "true" }, ((me.email || "?")[0]).toUpperCase()), h("span", {}, "프로필")))),
     main);
   if (!lesson && tab !== "profile" && tab !== "etc") tab = "settings";
   if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
-  ({ run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, etc: drawEtc })[tab]();
+  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, etc: drawEtc })[tab]();
   schedule();
 }
