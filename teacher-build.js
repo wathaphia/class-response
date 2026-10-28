@@ -215,10 +215,16 @@ function layoutBySlide(grid) {
     grid.querySelectorAll(":scope > .act-slide").forEach((el) => el.remove());
     for (let n = 1; on && n <= total + (anytime ? 1 : 0); n++) grid.append(slideCell(n, total));
   }
+  const overs = on ? activities.filter(isOverSim) : [];
+  grid.querySelectorAll(":scope > .act-slide .sim-layer").forEach((layer) => {
+    const n = +layer.closest(".act-slide").dataset.n, list = overs.filter((a) => simOnSlide(a, n));
+    renderSimLayer(layer, list, { load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: false });
+  });
   const col = new Map();
   for (const a of activities) {
     const row = grid.querySelector(':scope > .act-row[data-id="' + a.id + '"]');
     if (!row) continue;
+    row.classList.toggle("on-slide", on && a.page != null && overs.includes(a));   // 미리보기는 왼쪽 슬라이드 위에 있으니 카드에서는 접는다
     if (!on) { row.style.gridRow = row.style.gridColumn = ""; continue; }
     const r = rowOf(a), c = (col.get(r) || 1) + 1;
     col.set(r, c);
@@ -232,9 +238,10 @@ function slideCell(n, total) {
   const label = n > total ? "언제든" : n + "쪽";
   const steps = slideSteps(lesson);
   const last = pageOfSlide(lesson, n) + (steps ? steps[n - 1] - 1 : 0);   // 애니메이션이 모두 끝난 모습
+  // 슬라이드 위에 얹은 시뮬레이션은 수업 화면처럼 그 자리에 함께 보인다(layoutBySlide 가 .sim-layer 를 채움)
   const pic = n > total || isPptx(lesson) ? h("div", { class: "act-slide-blank" }, label)
-    : h("img", { src: slideSrc(lesson, last, true), alt: "슬라이드 " + n, loading: "lazy" });
-  const cell = h("div", { class: "act-slide", style: "grid-row:" + n + ";grid-column:1" }, pic, h("span", {}, label));
+    : h("div", { class: "act-slide-pic" }, h("img", { src: slideSrc(lesson, last, true), alt: "슬라이드 " + n, loading: "lazy" }), h("div", { class: "sim-layer" }));
+  const cell = h("div", { class: "act-slide", "data-n": n, style: "grid-row:" + n + ";grid-column:1" }, pic, h("span", {}, label));
   if (n <= total) {
     cell.addEventListener("dragover", (ev) => { if (!dragActId) return; ev.preventDefault(); cell.classList.add("drop"); });
     cell.addEventListener("dragleave", () => cell.classList.remove("drop"));

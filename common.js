@@ -130,6 +130,7 @@ function swapSlide(img, src, fx, dir) {
     img.classList.remove("fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev");
     img.src = src;
     if (cls && prev) { void img.offsetWidth; img.classList.add(cls); }   // 처음 열 때는 효과 없이 바로 보인다
+    img.dispatchEvent(new CustomEvent("slideswap", { detail: prev ? cls : "" }));   // 얹은 시뮬레이션이 같은 순간 같은 효과로 바뀐다(renderSimLayer)
   };
   if (!img.getAttribute("src")) return show();
   const pre = new Image();
@@ -302,17 +303,17 @@ function syncSimLayer(layer, img) {
 // list: 이 쪽에 얹을 시뮬레이션들, all: 수업의 얹기 시뮬레이션 전부. load(a) → html, ver(a) → 바뀌었는지 볼 값.
 // all을 미리 모두 불러 두고 다른 쪽 것은 숨겨 멈춰 두므로, 쪽을 넘기면 슬라이드의 일부처럼 바로 보인다.
 // 같은 시뮬레이션은 다시 불러오지 않아 조작 상태가 남는다.
-// img·fx: 그 슬라이드 그림(swapSlide)과 전환 효과. 새 그림을 받는 동안에는 보이고 숨기기를 미뤘다가, 그림이 바뀔 때 같은 효과로 함께 바꾼다.
+// img: 그 슬라이드 그림(swapSlide). 새 그림을 받는 동안에는 보이고 숨기기를 미뤘다가, 그림이 바뀌는 순간(slideswap)
+// 그림과 같은 효과로 바꾼다: 새 쪽 것은 그림과 함께 들어오고, 떠나는 것은 아래에 남은 옛 그림처럼 사라진다.
 function renderSimLayer(layer, list, opts) {
-  const { all = list, load, ver, editable, onMove, img, fx } = opts;
+  const { all = list, load, ver, editable, onMove, img } = opts;
   const waiting = !!img && !!img.dataset.want && img.getAttribute("src") !== img.dataset.want;
   layer._next = [list, opts];
   if (waiting && !layer._wait) {
     layer._wait = true;
-    const done = () => { if (!layer._wait) return; layer._wait = false; layer._swap = true; renderSimLayer(layer, ...layer._next); layer._swap = false; };
-    img.addEventListener("load", done, { once: true });
-    img.addEventListener("error", done, { once: true });
+    img.addEventListener("slideswap", (e) => { layer._wait = false; layer._fx = e.detail; renderSimLayer(layer, ...layer._next); layer._fx = ""; }, { once: true });
   }
+  const fx = layer._fx || "";
   const ids = new Set(all.map((a) => a.id));
   const shown = new Set(list.map((a) => a.id));
   layer.querySelectorAll(":scope > .sim-over").forEach((b) => { if (!ids.has(b.dataset.sim)) b.remove(); });
@@ -340,18 +341,37 @@ function renderSimLayer(layer, list, opts) {
       box.prepend(view);
       Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = withSimPause(html); }).catch(() => {});
     }
-    const off = !shown.has(a.id);
-    if (!waiting && box.classList.contains("off") !== off) {
-      box.classList.toggle("off", off);
-      simOverPause(box);
-      if (!off && layer._swap && fx && fx !== "none") {
-        const cls = "fx-" + (fx === "push" ? "push-next" : fx);
-        box.classList.add(cls);
-        box.addEventListener("animationend", () => box.classList.remove(cls), { once: true });
-      }
-    }
     if (!box.classList.contains("moving")) placeBox(box, a.sim_place || SIM_PLACE_DEFAULT);
+    if (waiting) continue;
+    const off = !shown.has(a.id), was = !box.classList.contains("off") && !box.classList.contains("fx-out");
+    if (!fx && off && box.classList.contains("fx-out")) continue;   // 사라지는 중에 다시 그려도 끊지 않는다
+    if (fx) simBoxFx(layer, box, "");
+    if (off && was && fx) {
+      // 떠나는 것: 옛 그림이 덮이는 동안 제자리에서 흐려진 뒤 숨는다
+      box.classList.add("fx-out");
+      const end = () => { if (!box.classList.contains("fx-out")) return; box.classList.remove("fx-out"); box.classList.add("off"); simOverPause(box); };
+      box.addEventListener("animationend", end, { once: true });
+      setTimeout(end, 700);
+      continue;
+    }
+    box.classList.remove("fx-out");
+    if (box.classList.contains("off") !== off) { box.classList.toggle("off", off); simOverPause(box); }
+    // 새 그림과 함께 들어온다. 이어서 보이는 것은 겹쳐 사라지기(fade·단계)에선 그대로, 밀기·확대에선 그림과 함께 움직인다
+    if (!off && fx && (!was || /push|zoom/.test(fx))) simBoxFx(layer, box, fx);
   }
+}
+// 얹은 시뮬레이션 하나에 슬라이드 그림과 같은 효과를 준다. 밀기 거리는 슬라이드 너비의 10%, 확대 중심은 슬라이드 가운데로 맞춰
+// 그림과 정확히 함께 움직인다.
+const SIM_FX = ["fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"];
+function simBoxFx(layer, box, cls) {
+  box.classList.remove(...SIM_FX);
+  if (!cls) return;
+  const W = layer.clientWidth, H = layer.clientHeight;
+  box.style.setProperty("--fx-dx", (cls === "fx-push-prev" ? -0.1 : 0.1) * W + "px");
+  box.style.transformOrigin = (W / 2 - box.offsetLeft) + "px " + (H / 2 - box.offsetTop) + "px";
+  void box.offsetWidth;
+  box.classList.add(cls);
+  box.addEventListener("animationend", () => box.classList.remove(cls), { once: true });
 }
 // 보이는 얹기 시뮬레이션은 계속 돌고, 숨긴 것은 멈춘다(다시 보이면 이어서)
 function simOverPause(box) {

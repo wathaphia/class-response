@@ -846,7 +846,7 @@ function render(pageChanged) {
   here = here.filter((a) => !isOverSim(a));
   shell.simLayer.hidden = !allOvers.length;
   syncSimLayer(shell.simLayer, shell.img);
-  renderSimLayer(shell.simLayer, overs, { all: allOvers, load: (a) => loadSim(a).then(withSimAgent), ver: (a) => a.html_ver, editable: false, img: shell.img, fx: slideFx(L) });
+  renderSimLayer(shell.simLayer, overs, { all: allOvers, load: (a) => loadSim(a).then(withSimAgent), ver: (a) => a.html_ver, editable: false, img: shell.img });
   stopHiddenSimAgents();
   const els = here.map(cardFor);
   if (anytime.length) els.push(shell.anytimeHead, anytime.map(cardFor));
