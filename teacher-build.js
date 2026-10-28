@@ -82,7 +82,7 @@ function dragRow(row, a) {
   const after = (ev) => {
     const r = row.getBoundingClientRect();
     const cols = getComputedStyle(row.parentNode).gridTemplateColumns.split(" ").length;
-    return cols > 1 ? ev.clientX > r.left + r.width / 2 : ev.clientY > r.top + r.height / 2;
+    return cols > 1 || row.parentNode.classList.contains("by-slide") ? ev.clientX > r.left + r.width / 2 : ev.clientY > r.top + r.height / 2;
   };
   const clear = () => main.querySelectorAll(".act-row.drop-before, .act-row.drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
   // 입력칸·버튼·시뮬레이션 칸에서 누르면 끌지 않는다(숫자를 고치거나 버튼을 누를 수 있게)
@@ -162,7 +162,13 @@ function drawBuild() {
     h("aside", { class: "stack" }, asideKids),
     h("div", { class: "build-main stack" },
       h("section", { class: "card stack act-list" },
-        h("div", { class: "row between" }, h("h2", {}, listTitle),
+        h("div", { class: "row between" },
+          h("div", { class: "act-list-head" }, h("h2", {}, listTitle),
+            lesson.slide_count ? h("label", { class: "act-toggle" }, h("input", { type: "checkbox", checked: bySlide, onchange(ev) {
+              bySlide = ev.target.checked;
+              try { localStorage.setItem("cra-build-slides", bySlide ? "1" : "0"); } catch {}
+              syncRows(grid);
+            } }), "슬라이드와 함께 보기") : null),
           h("div", { class: "act-hint" }, hint())),
         h("div", { class: "act-scroll" }, grid)))));
   [".build > aside", ".act-scroll"].forEach((q, i) => { const el = main.querySelector(q); if (el) el.scrollTop = keep[i]; });
@@ -191,6 +197,56 @@ function syncRows(grid) {
   });
   old.forEach((r) => r.remove());
   if (!activities.length) grid.append(h("p", { class: "muted small act-empty" }, "아직 활동이 없습니다."));
+  layoutBySlide(grid);
+}
+
+// 「슬라이드와 함께 보기」: 슬라이드 n은 n번째 줄 맨 왼쪽, 그 쪽 활동은 목록 순서대로 오른쪽으로(여러 쪽에 걸친 활동은 첫 쪽에),
+// 「언제든」 활동은 맨 아래 줄. 칸은 grid-row/grid-column으로만 옮긴다(DOM에서 옮기면 시뮬레이션이 다시 불러와짐)
+let bySlide = (() => { try { return localStorage.getItem("cra-build-slides") === "1"; } catch { return false; } })();
+function layoutBySlide(grid) {
+  const on = bySlide && lesson.slide_count > 0;
+  const total = on ? Math.max(slideTotal(lesson), 1) : 0;
+  const rowOf = (a) => (a.page == null ? total + 1 : Math.min(Math.max(a.page, 1), total));
+  grid.classList.toggle("by-slide", on);
+  const anytime = on && activities.some((a) => a.page == null);
+  const key = on ? lesson.slide_dir + "|" + total + "|" + anytime : "";
+  if (grid.dataset.slides !== key) {
+    grid.dataset.slides = key;
+    grid.querySelectorAll(":scope > .act-slide").forEach((el) => el.remove());
+    for (let n = 1; on && n <= total + (anytime ? 1 : 0); n++) grid.append(slideCell(n, total));
+  }
+  const col = new Map();
+  for (const a of activities) {
+    const row = grid.querySelector(':scope > .act-row[data-id="' + a.id + '"]');
+    if (!row) continue;
+    if (!on) { row.style.gridRow = row.style.gridColumn = ""; continue; }
+    const r = rowOf(a), c = (col.get(r) || 1) + 1;
+    col.set(r, c);
+    row.style.gridRow = r;
+    row.style.gridColumn = c;
+  }
+}
+
+// 왼쪽 열의 작은 슬라이드. 활동을 여기로 끌어 놓으면 그 쪽으로 옮긴다
+function slideCell(n, total) {
+  const label = n > total ? "언제든" : n + "쪽";
+  const steps = slideSteps(lesson);
+  const last = pageOfSlide(lesson, n) + (steps ? steps[n - 1] - 1 : 0);   // 애니메이션이 모두 끝난 모습
+  const pic = n > total || isPptx(lesson) ? h("div", { class: "act-slide-blank" }, label)
+    : h("img", { src: slideSrc(lesson, last, true), alt: "슬라이드 " + n, loading: "lazy" });
+  const cell = h("div", { class: "act-slide", style: "grid-row:" + n + ";grid-column:1" }, pic, h("span", {}, label));
+  if (n <= total) {
+    cell.addEventListener("dragover", (ev) => { if (!dragActId) return; ev.preventDefault(); cell.classList.add("drop"); });
+    cell.addEventListener("dragleave", () => cell.classList.remove("drop"));
+    cell.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      cell.classList.remove("drop");
+      const a = activities.find((x) => x.id === dragActId);
+      dragActId = null;
+      if (a) movePage(a, n);
+    });
+  }
+  return cell;
 }
 
 function activityRow(a) {
