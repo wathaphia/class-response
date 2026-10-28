@@ -204,7 +204,24 @@ main.lesson .slide { cursor: zoom-in; }
 .set-item.on { background: var(--accent); color: #fff; font-weight: 700; }
 .set-item.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
 @media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon, .set-drop, .set-caret, .set-item, .set-item::before { transition: none; } }
-.teacher .top-title select { min-height: 40px; padding: .3rem .6rem; font-weight: 700; max-width: 70vw; }
+/* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기) · 수업 이동/추가 */
+.lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(36rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.lesson-box:focus-within { border-color: var(--accent); }
+.lesson-code { display: flex; align-items: center; padding: 0 .7rem; border-right: 1px solid var(--line); border-radius: 10px 0 0 10px; background: var(--accent-soft);
+  color: var(--accent); font-weight: 700; letter-spacing: .05em; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; user-select: all; }
+.teacher .lesson-box .lesson-title { flex: 1 1 14rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0; background: none; font-weight: 700; }
+.teacher .lesson-box .lesson-title:focus { outline: none; background: var(--accent-soft); }
+.teacher .lesson-box select { flex: 0 0 auto; width: 9.5rem; min-height: 40px; padding: .3rem .5rem; border: 0; border-left: 1px solid var(--line); border-radius: 0 10px 10px 0; background-color: transparent; color: var(--muted); font-size: .9rem; }
+@media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
+.teacher .top-title .lesson-box { flex: 1 1 auto; }
+.teacher .top-title .eyebrow { white-space: nowrap; }
+.qr-btn { flex: 0 0 auto; white-space: nowrap; padding-inline: .7rem; }
+/* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다 */
+@media (min-width: 1100px) {
+  .teacher .top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .teacher .top > .tabs { justify-self: center; }
+  .teacher .top > .top-actions { justify-self: end; }
+}
 
 /* 교사: 수업 진행 */
 .run { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
