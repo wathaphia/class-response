@@ -321,10 +321,24 @@ function ensureScreenChannel() {
   screenChannel = sb.channel(key, { config: { broadcast: { self: false }, presence: { key: screenStudentId } } });
   screenChannel.on("broadcast", { event: "signal" }, ({ payload }) => handleScreenSignal(payload));
   screenChannel.on("broadcast", { event: "nudge" }, pollSoon);
-  screenChannel.subscribe((status) => {
+  const ch = screenChannel;
+  ch.subscribe((status, err) => {
+    if (ch !== screenChannel) return;
     liveOk = status === "SUBSCRIBED";
-    if (liveOk) trackPresence(true);
+    if (liveOk) return trackPresence(true);
+    console.warn("수업 채널: " + status + (err ? " · " + (err.message || err) : ""));
+    // 서버가 채널을 닫으면(CLOSED) 스스로 다시 붙지 않는다: 교사 신호·접속 표시가 멈추므로 새로 만든다.
+    // (CHANNEL_ERROR·TIMED_OUT 은 supabase-js 가 알아서 다시 붙는다)
+    if (status === "CLOSED") setTimeout(() => rejoinScreenChannel(ch), 2000);
   });
+}
+function rejoinScreenChannel(ch) {
+  if (ch !== screenChannel || !state) return;
+  sb.removeChannel(ch);
+  screenChannel = null;
+  screenChannelKey = "";
+  ensureScreenChannel();
+  if (mirrorOn) { lastMirror = ""; sendMirror(); offerDesk(); }   // 끊긴 동안 교사 답을 못 받았으니 영상도 다시 잇는다
 }
 
 // 수업 중 화면 보기 동의: 가입할 때 묻고 학생 계정에 저장한다(모든 수업·기기에 적용, 언제든 바꿀 수 있다).
@@ -456,8 +470,11 @@ async function startDesk() {
     return;
   }
   const track = stream.getVideoTracks()[0];
-  const surface = track && track.getSettings().displaySurface;
-  if (!track || (surface && surface !== "monitor")) {   // 창·탭만 고르면 그 밖의 활동이 보이지 않는다
+  const set = track ? track.getSettings() : {};
+  // 창·탭만 고르면 그 밖의 활동이 보이지 않는다. 종류를 알려 주지 않는 브라우저는 영상 비율이 모니터와 같을 때만 받는다
+  const whole = set.displaySurface ? set.displaySurface === "monitor"
+    : !!(set.width && set.height) && Math.abs(set.width / set.height - screen.width / screen.height) < 0.02;
+  if (!track || !whole) {
     stream.getTracks().forEach((t) => t.stop());
     deskMsg = " 창이나 탭이 아니라 「전체 화면」을 골라 주세요.";
     return renderScreenNotice();
@@ -593,6 +610,13 @@ function trackPresence(force) {
   };
   screenChannel.track(p).then((r) => { if (r !== "ok") failed(); }, failed);
 }
+// 「ok」를 받고도 서버에 예전 상태가 남는 때가 있다(교사 명단에 「공유 안 함」이 남음).
+// 15초마다 서버가 가진 내 상태(presenceState)를 보고 다르면 다시 보낸다.
+setInterval(() => {
+  if (!lastPresence || !screenChannel || screenChannel.state !== "joined") return;
+  const metas = screenChannel.presenceState()[screenStudentId] || [];
+  if (!metas.some((m) => JSON.stringify({ away: m.away, desk: m.desk, multi: m.multi }) === lastPresence)) trackPresence(true);
+}, 15000);
 
 // 지금 수업 화면을 복사한다(쓰고 있는 답을 속성으로 옮겨 적어 그대로 보이게)
 function mirrorSnapshot() {
