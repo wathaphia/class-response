@@ -1,5 +1,5 @@
-// 교사 화면(버전 2): 로그인 → 수업 고르기 → [접속 QR] [수업 진행] [학생 관리] · 설정▾[자료 추가 · 슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
-// 오른쪽 위 프로필 왼쪽 「편집 모드」를 켜면 [수업 진행] [자료 추가] [학생 관리] [슬라이드 편집] [기타 관리] 다섯 탭이 모두 위에 나온다(접속 QR·설정은 숨김).
+// 교사 화면(버전 2): 로그인 → 수업 고르기 → [접속 QR] [수업 진행] [학생 관리] [수업용 화면 띄우기(창)] · 설정▾[자료 추가 · 슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
+// 오른쪽 위 프로필 왼쪽 「편집 모드」를 켜면 [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [기타 관리] 다섯 탭이 모두 위에 나온다(접속 QR·설정·수업용 화면 띄우기는 숨김).
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
 // 교사 화면 스크립트는 탭별로 나뉘어 teacher.html 이 이 순서로 불러온다(모두 같은 전역 공간을 쓴다):
@@ -270,6 +270,7 @@ const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.p
 // 탭 기호(선 그림): 접속 QR 네모 칸 · 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 슬라이드 편집 조절기 · 기타 관리 계기판 · 설정 톱니바퀴
 const TAB_ICONS = {
   join: '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 20.5h1M20.5 14v1"/>',
+  present: '<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/>',
   edit: '<path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   run: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   build: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>',
@@ -303,10 +304,10 @@ function draw() {
   });
   const lessonBox = h("div", { class: "lesson-box" },
     h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox);
-  // 평소: 접속 QR · 수업 진행 · 학생 관리 + 설정▾(자료 추가 · 슬라이드 편집 · 기타 관리)
+  // 평소: 접속 QR · 수업 진행 · 학생 관리 · 수업용 화면 띄우기 + 설정▾(자료 추가 · 슬라이드 편집 · 기타 관리)
   // 편집 모드: 설정 안의 탭이 모두 위로 나와 다섯 탭(접속 QR과 설정 단추는 숨김)
   const tabs = editMode
-    ? [["run", "수업 진행"], ["build", "자료 추가"], ["students", "학생 관리"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"]]
+    ? [["run", "수업 진행"], ["students", "학생 관리"], ["build", "자료 추가"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"]]
     : [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"]];
   // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 탭
   const setTabs = editMode ? [] : [["build", "자료 추가"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"]];
@@ -342,7 +343,12 @@ function draw() {
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
         type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "etc",
         onclick() { go(k); },
-      }, tabIcon(k), h("span", {}, label)))),
+      }, tabIcon(k), h("span", {}, label))),
+        // 평소에만: 탭 줄 끝의 「수업용 화면 띄우기」(teacher-run.js openPresent, 탭이 아니라 창을 연다)
+        editMode ? null : h("button", {
+          type: "button", class: "tab present-btn", disabled: !lesson, title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)",
+          onclick() { openPresent(); },
+        }, tabIcon("present"), h("span", {}, "수업용 화면 띄우기"))),
       // 오른쪽 위: 설정▾(편집 모드에서는 없음) · 편집 모드 · 프로필. 편집 모드 단추는 켜고 꺼도 늘 프로필 바로 왼쪽
       h("div", { class: "top-actions" }, setTabs.length ? menu : null, editBtn,
         // 프로필: 내 정보 · 로그아웃 · 비밀번호 재설정 · 공동 작업자 · 전체 수업
