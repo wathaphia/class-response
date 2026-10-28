@@ -347,8 +347,9 @@ input[type=text].act-num:focus { background: #fff; }
 label.act-toggle { display: inline-flex; flex-direction: row; align-items: center; gap: .35rem; font-size: .9rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .act-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
 .build .act-scroll:has(> .by-slide) { overflow-x: auto; }
-.build .act-scroll .act-grid.by-slide { display: grid; grid-template-columns: 170px; grid-auto-columns: 260px; grid-auto-rows: auto; gap: .75rem; }
-.act-grid.by-slide > .act-row { height: 230px; display: flex; flex-direction: column; align-items: stretch; gap: .5rem; min-height: 0; overflow: hidden; padding: .6rem; border: 1px solid var(--line); border-radius: 12px; }
+/* 활동 카드는 보통 크기의 가로·세로 절반(넓이 1/4): 칸 130px 에 zoom .5 → 안쪽은 260×230 그대로 그려 줄인다 */
+.build .act-scroll .act-grid.by-slide { display: grid; grid-template-columns: 170px; grid-auto-columns: 130px; grid-auto-rows: auto; gap: .5rem; }
+.act-grid.by-slide > .act-row { zoom: .5; height: 230px; display: flex; flex-direction: column; align-items: stretch; gap: .5rem; min-height: 0; overflow: hidden; padding: .6rem; border: 1px solid var(--line); border-radius: 12px; }
 .act-grid.by-slide > .act-row.on { padding: .6rem; }
 .act-grid.by-slide .act-head { flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: .4rem; }
 .act-grid.by-slide .act-id { flex: 1 1 140px; min-width: 0; }
@@ -357,7 +358,13 @@ label.act-toggle { display: inline-flex; flex-direction: row; align-items: cente
 .act-grid.by-slide .act-body { flex: 1 1 0; min-height: 0; overflow-y: auto; container-type: size; font-size: .9rem; }
 .act-grid.by-slide .act-body:has(> .sim-scale) { overflow: hidden; }
 .act-grid.by-slide .act-body > .sim-scale { width: min(100cqw, 100cqh * 16 / 9); margin: 0 auto; }
+.act-grid.by-slide > .act-row.on-slide { height: auto; align-self: start; }
+.act-grid.by-slide > .act-row.on-slide .act-body { display: none; }
 .act-grid.by-slide > p { grid-column: 2 / -1; }
+.act-slide-pic { position: relative; }
+.act-slide-pic > img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.act-slide-pic > .sim-layer { inset: 1px; overflow: hidden; border-radius: 8px; }
+.act-slide-pic .sim-over { pointer-events: none; }
 .act-slide { position: sticky; left: 0; z-index: 1; display: flex; flex-direction: column; gap: .3rem; padding-right: .25rem; background: var(--card); }
 .act-slide > img, .act-slide-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .act-slide-blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
@@ -533,10 +540,14 @@ body.desk-locked { overflow: hidden; }
 .sim-over-view { position: absolute; inset: 0; overflow: hidden; }
 .sim-over-view > .sim-frame { position: absolute; left: 0; top: 0; width: 1120px; height: 630px; transform: scale(var(--s, .4)); transform-origin: 0 0; }
 .sim-over.off { visibility: hidden; pointer-events: none; }   /* 다른 쪽의 얹기 시뮬레이션: 미리 불러 숨겨 둠 */
-/* 쪽을 넘길 때 슬라이드 그림과 같은 전환 효과로 함께 나타난다(renderSimLayer의 fx) */
+/* 쪽을 넘길 때 슬라이드 그림과 같은 전환 효과로 함께 움직인다(simBoxFx: 밀기 거리 --fx-dx = 슬라이드 너비의 10%, 확대 중심 = 슬라이드 가운데) */
+@keyframes fx-push-box { from { opacity: .3; transform: translateX(var(--fx-dx)); } }
+@keyframes fx-out { to { opacity: 0; } }
+.sim-over.fx-step { animation: fx-fade .25s ease-out; }
 .sim-over.fx-fade { animation: fx-fade .5s ease-out; }
 .sim-over.fx-zoom { animation: fx-zoom .5s cubic-bezier(.2, .8, .2, 1); }
-.sim-over.fx-push-next { animation: fx-push-next .45s cubic-bezier(.2, .8, .2, 1); }
+.sim-over.fx-push-next, .sim-over.fx-push-prev { animation: fx-push-box .45s cubic-bezier(.2, .8, .2, 1); }
+.sim-over.fx-out { animation: fx-out .5s ease-out forwards; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .sim-over[class*="fx-"] { animation: none; } }
 .sim-over .sim-frame { min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: transparent; }
 .sim-over.editable:hover, .sim-over.moving { outline: 2px dashed rgba(37, 99, 235, .7); }

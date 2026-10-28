@@ -14,13 +14,13 @@
 | 파일 | 내용 | 주요 함수 | 시나리오 |
 |---|---|---|---|
 | `config.js` | Supabase 주소·키, TURN Worker 주소 | | |
-| `common.js` | 공용: `h()`, 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드(`slideSrc`), WebRTC/TURN(`iceServers` `relayFirst`), 시뮬레이션(`withSimPause` `renderSimLayer` `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
+| `common.js` | 공용: `h()`, 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드(`slideSrc`), WebRTC/TURN(`iceServers` `relayFirst`), 시뮬레이션(`withSimPause` `renderSimLayer`(swapSlide 의 slideswap 에 맞춰 같은 효과 `simBoxFx`) `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
 | `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), `init`, 로그인, `loadLesson` `loadResponses` `save`, 탭 틀 `draw`(접속 QR·수업 진행·학생 관리·수업용 화면 띄우기(편집 모드에선 없음) + 「설정」 메뉴 + 「프로필」; 「편집 모드」 `editMode` cra-edit `.editing` 이면 설정 탭이 위로) | | teacher |
 | `teacher-library.js` | 「전체 수업」(프로필 화면 `.manage-pane`) 폴더·카드·「+ 수업 추가」·「공유받은 수업」, 슬라이드 PDF | `drawManage` `exportSlidesPdf` | manage |
 | `teacher-profile.js` | 「프로필」: 내 정보·교사 ID·로그아웃·비밀번호, 공동 작업자(`add_collaborator`, `my_profile.colleagues`), 개발자(`is_admin`)의 선생님 관리 | `drawProfile` `paintProfile` `addCollaborator` | manage, promote |
 | `teacher-etc.js` | 「기타 관리」 사용량 원·캐시 전송량 막대(오늘 = 매시 집계 + Worker `egressTail`), 동기화(`lastSync()`)/비용, `kstIso` | `drawEtc` `syncUsage` `supabaseView` `cloudflareView` `syncCostView` | etc |
 | `teacher-run.js` | 「수업 진행」 슬라이드·제출 현황·Presence, 「수업 시작하기」 50분/「시간 연장하기」(30분 밑, TURN 새로) — 이때만 TURN·화면 보기, 평소 탭 줄의 「수업용 화면 띄우기」 창(`openPresent`, 무대 그리기 `paintStage` 공유) | `classOn` `startClass` `extendClass` `endClass` `drawRun` `setPage` `drawRoster` `drawJoin` `deskTag` | class, teacher |
-| `teacher-build.js` | 「자료 추가」 활동 목록(옮기기·끌기, `syncRows`, 「슬라이드와 함께 보기」 `layoutBySlide` cra-build-slides), 시뮬레이션 편집기, 작성기(`composeEditor`), 저장 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
+| `teacher-build.js` | 「자료 추가」 활동 목록(옮기기·끌기, `syncRows`, 「슬라이드와 함께 보기」 `layoutBySlide` cra-build-slides: 카드 절반 크기, 얹은 시뮬레이션은 작은 슬라이드 위에), 시뮬레이션 편집기, 작성기(`composeEditor`), 저장 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
 | `teacher-students.js` | 「학생 관리」 승격 표(`promotedCard`, `promote_student` `demote_student`, 개발자만), 학생 표, 화면 크게 보기(교사 전용 채널 `:t`; PC 화면 전체 WebRTC, 휴대폰은 화면 복사 + 시뮬레이션 WebRTC), 일괄 미리보기 | `drawStudents` `promoteStudent` `watchStudentScreen` `startGrid` `simRtc` `deskAnswer` | promote, live-* |
 | `teacher-settings.js` | 「슬라이드 편집」, 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call`/Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
 | `student.js` | 입장, `poll`(`student_state` RPC, `nudge`→`pollSoon`), 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk`→`offerDesk`, 공유 중엔 화면 복사 안 보냄), 공유 전 가림막 `renderDeskGate`, Presence `desk`·`multi` | `start` `render` `cardFor` `buildForm` | live-* |
