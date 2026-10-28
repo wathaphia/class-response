@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `config.js` | Supabase 주소·키, TURN Worker 주소 | | |
 | `common.js` | 교사·학생 공용: `h()` DOM 도우미, 데이터 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드 단계·주소(`slideSrc`), WebRTC/TURN(`iceServers`, `relayFirst`), 시뮬레이션 재생·얹기·전체 화면(`withSimPause`, `renderSimLayer`, `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
-| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw`(평소 위쪽 탭 접속 QR·수업 진행·학생 관리 + 「설정」 펼침 메뉴: 자료 추가·슬라이드 편집·기타 관리 + 맨 오른쪽 「프로필」. 제목 칸 옆 「편집 모드」(`editMode`, localStorage cra-edit)를 켜면 설정 안의 탭이 모두 위로 나와 5개, 접속 QR·설정은 숨김) | | teacher |
+| `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), 시작(DOMContentLoaded→`init`), 로그인, 데이터 읽기/저장(`loadLesson` `loadResponses` `save`), 탭 틀 `draw`(평소 위쪽 탭 접속 QR·수업 진행·학생 관리 + 「설정」 펼침 메뉴: 자료 추가·슬라이드 편집·기타 관리 + 맨 오른쪽 「프로필」. 프로필 바로 왼쪽 「편집 모드」(`editMode`, localStorage cra-edit, 켜면 머리말에 `.editing`)를 켜면 설정 안의 탭이 모두 위로 나와 5개, 접속 QR·설정은 숨김) | | teacher |
 | `teacher-library.js` | 「전체 수업」(프로필 화면 오른쪽 2/3, `.manage-pane`) 폴더·카드·불러오기, 「+ 수업 추가」, 슬라이드 PDF. 남의 수업은 「공유받은 수업」 묶음 | `drawManage` `exportSlidesPdf` | manage |
 | `teacher-profile.js` | 「프로필」(오른쪽 위 단추): 내 정보·교사 ID(6자리)·로그아웃·비밀번호 재설정, 공동 작업자(`add_collaborator`, `my_profile` 의 `colleagues`: 「선생님 추가」로 넣은 선생님·승격된 학생 중에서 고름), 개발자(`teachers.is_admin`)의 선생님 관리 | `drawProfile` `paintProfile` `addCollaborator` | manage, promote |
 | `teacher-etc.js` | 「기타 관리」 사용량 원 그래프(Supabase 아래는 날마다 캐시 전송량 막대만, 오늘 막대 = 매시 집계 + Worker `egressTail`), 동기화(모든 받는 곳 한꺼번에, 숫자는 `lastSync()` 기준)/비용, 한국 시간(`kstIso`) | `drawEtc` `syncUsage` `supabaseView` `cloudflareView` `syncCostView` | etc |

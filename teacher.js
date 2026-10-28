@@ -1,5 +1,5 @@
 // 교사 화면(버전 2): 로그인 → 수업 고르기 → [접속 QR] [수업 진행] [학생 관리] · 설정▾[자료 추가 · 슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
-// 제목 칸 옆 「편집 모드」를 켜면 [수업 진행] [자료 추가] [학생 관리] [슬라이드 편집] [기타 관리] 다섯 탭이 모두 위에 나온다(접속 QR·설정은 숨김).
+// 오른쪽 위 프로필 왼쪽 「편집 모드」를 켜면 [수업 진행] [자료 추가] [학생 관리] [슬라이드 편집] [기타 관리] 다섯 탭이 모두 위에 나온다(접속 QR·설정은 숨김).
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
 // 교사 화면 스크립트는 탭별로 나뉘어 teacher.html 이 이 순서로 불러온다(모두 같은 전역 공간을 쓴다):
@@ -285,7 +285,7 @@ function tabIcon(k) {
 }
 function draw() {
   clearTimeout(timer);
-  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장) · 편집 모드 켜고 끄기. 수업 옮기기·새 수업은 「전체 수업」에서
+  // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장). 수업 옮기기·새 수업은 「전체 수업」에서
   const titleBox = h("input", {
     type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
     value: lesson ? lesson.title : "", placeholder: lesson ? "수업 제목" : "새 수업 (슬라이드 편집에서 만듭니다)",
@@ -337,13 +337,14 @@ function draw() {
   }, tabIcon("edit"), h("span", {}, "편집 모드"), h("span", { class: "edit-switch", "aria-hidden": "true" }));
   main = h("main", { class: "wide" });
   app.replaceChildren(
-    h("header", { class: "top" },
-      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox, editBtn),
+    h("header", { class: editMode ? "top editing" : "top" },
+      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox),
       h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
         type: "button", class: tab === k ? "tab on" : "tab", disabled: !lesson && k !== "settings" && k !== "etc",
         onclick() { go(k); },
       }, tabIcon(k), h("span", {}, label)))),
-      h("div", { class: "top-actions" }, setTabs.length ? menu : null,
+      // 오른쪽 위: 설정▾(편집 모드에서는 없음) · 편집 모드 · 프로필. 편집 모드 단추는 켜고 꺼도 늘 프로필 바로 왼쪽
+      h("div", { class: "top-actions" }, setTabs.length ? menu : null, editBtn,
         // 프로필: 내 정보 · 로그아웃 · 비밀번호 재설정 · 공동 작업자 · 전체 수업
         h("button", { class: tab === "profile" ? "tab profile-btn on" : "tab profile-btn", type: "button", title: (me.email || "") + " · 프로필", onclick() { go("profile"); } },
           h("span", { class: "avatar", "aria-hidden": "true" }, ((me.email || "?")[0]).toUpperCase()), h("span", {}, "프로필")))),
