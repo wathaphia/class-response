@@ -22,11 +22,21 @@ let shell = null;
 const cards = new Map(); // 활동 id → 화면 카드
 let screenChannel = null;
 let screenChannelKey = "";
-let screenPc = null;
 let screenPending = false;
 let screenStudentId = null;
-let screenQueuedCandidates = [];
-// 실시간 수업 화면: 학생이 허용하면 이 수업 화면(쪽, 쓰고 있는 답)만 교사에게 보낸다. 모든 기기·브라우저에서 된다.
+// 전체 화면 공유(PC): 동의한 학생이 「전체 화면 공유 시작」으로 화면 전체를 한 번 고르면 수업 내내 켜 두고,
+// 교사가 볼 때만 영상(WebRTC)으로 보낸다. 다른 창·앱으로 옮겨도 그대로 보인다. 창·탭만 고르면 다시 고르게 한다.
+// 휴대폰·태블릿 브라우저는 화면 공유가 없어 아래 수업 화면 복사로 대신한다.
+let deskStream = null;
+let deskPc = null;
+let deskId = 0;                      // 지금 연결 번호(예전 연결의 답·후보는 버린다)
+let deskLive = false;                // 교사에게 영상이 실제로 가는 중(그동안은 수업 화면 복사를 보내지 않는다)
+let deskQueued = [];
+let deskMsg = "";
+const canDesk = () => !!navigator.mediaDevices?.getDisplayMedia;
+// 크게 보기: 높이 720·8 FPS·약 600 kbps. 일괄 미리보기(작은 칸 320×180): 높이 180·5 FPS·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
+const DESK = { full: { h: 720, fps: 8, br: 600000 }, lite: { h: 180, fps: 5, br: 70000 } };
+// 실시간 수업 화면: 화면 공유가 없을 때 이 수업 화면(쪽, 쓰고 있는 답)을 복사해 보낸다. 모든 기기·브라우저에서 된다.
 let mirrorOn = false;
 let mirrorTimer = null;
 let mirrorBeat = null;
@@ -105,7 +115,7 @@ function showEntry(notice) {
   const consentNo = h("input", { type: "radio", name: "monitor-consent", value: "no" });
   const consentRow = h("fieldset", { class: "options consent", hidden: true },
     h("legend", {}, "수업 중 화면 보기"),
-    h("p", { class: "muted small" }, "수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있게 할까요? 다른 앱이나 탭은 보이지 않습니다. 선생님이 보고 있을 때는 화면에 표시되고, 나중에 언제든 바꿀 수 있습니다. 동의하지 않아도 수업에 참여할 수 있습니다."),
+    h("p", { class: "muted small" }, "수업하는 동안 선생님이 이 기기 화면을 볼 수 있게 할까요? PC에서는 공유한 화면 전체(다른 창·앱 포함)가, 휴대폰·태블릿에서는 이 수업 화면만 보입니다. 선생님이 보고 있을 때는 화면에 표시되고, 나중에 언제든 바꿀 수 있습니다. 동의하지 않아도 수업에 참여할 수 있습니다."),
     h("label", { class: "option" }, consentYes, h("span", {}, "동의합니다")),
     h("label", { class: "option" }, consentNo, h("span", {}, "동의하지 않습니다")));
   let newAccount = false;
@@ -196,7 +206,7 @@ function logout(notice) {
 
 function leaveScreenShare() {
   stopMirror();
-  if (screenPc) stopScreenShare();
+  stopDesk();
   if (screenChannel) sb.removeChannel(screenChannel);
   screenChannel = null;
   liveOk = false;
@@ -297,7 +307,7 @@ function ensureScreenChannel() {
   const key = screenChannelName(state.lesson.code || code);
   if (!key) return;
   if (screenChannel && screenChannelKey === key) return;
-  if (screenPc) stopScreenShare();
+  closeDeskPc();
   if (screenChannel) sb.removeChannel(screenChannel);
   screenChannelKey = key;
   // 학생 id가 없으면 학번·이름으로 알아본다(교사 화면도 같은 이름을 함께 보냄)
@@ -321,7 +331,7 @@ function monitorChoice() {
   try { return localStorage.getItem(monitorKey()); } catch { return null; }
 }
 async function setMonitorChoice(v) {
-  if (v === "no") { stopMirror(); if (screenPc) stopScreenShare(); }
+  if (v === "no") { stopMirror(); stopDesk(); }
   if (monitorInAccount()) {
     state.me.monitor = v === "yes";
     renderScreenNotice();
@@ -335,29 +345,32 @@ async function setMonitorChoice(v) {
 function renderScreenNotice() {
   if (!shell || !shell.screenNotice) return;
   const choice = monitorChoice();
-  const canScreen = !!navigator.mediaDevices?.getDisplayMedia && !screenPc;
+  const deskBtn = canDesk() && !deskStream ? h("button", { class: "primary", type: "button", onclick: startDesk }, "전체 화면 공유 시작") : null;
+  const deskAsk = deskMsg || (deskBtn ? " 「전체 화면 공유 시작」을 누르고 「전체 화면」을 골라 주세요." : "");
   let text, buttons;
   if (!choice) {
-    text = "수업하는 동안 선생님이 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)을 볼 수 있게 할까요? 다른 앱이나 탭은 보이지 않습니다. 한 번 정하면 모든 수업에 적용되고, 언제든 바꿀 수 있습니다.";
+    text = "수업하는 동안 선생님이 이 기기 화면을 볼 수 있게 할까요? PC에서는 공유한 화면 전체(다른 창·앱 포함)가, 휴대폰·태블릿에서는 이 수업 화면만 보입니다. 한 번 정하면 모든 수업에 적용되고, 언제든 바꿀 수 있습니다.";
     buttons = [h("button", { class: "primary", type: "button", onclick() { setMonitorChoice("yes"); if (screenPending) startMirror(); } }, "동의"),
       h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "동의 안 함")];
   } else if (choice === "yes") {
-    text = screenPc ? "PC 화면을 선생님께 공유 중입니다. 언제든 끌 수 있습니다."
-      : mirrorOn && mirrorLite ? "● 선생님이 지금 여러 학생의 수업 화면을 작게 함께 보고 있습니다."
-      : mirrorOn ? "● 선생님이 지금 이 수업 화면을 보고 있습니다." : "선생님이 수업 중 이 화면을 볼 수 있습니다(동의함).";
-    buttons = [mirrorOn && !mirrorLite && canScreen ? h("button", { class: "ghost", type: "button", onclick: startScreenShare }, "PC 화면 전체 공유") : null,
-      h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "보기 허용 끄기")];
+    text = deskStream ? (mirrorOn && mirrorLite ? "● 선생님이 지금 여러 학생의 화면을 작게 함께 보고 있습니다(전체 화면)."
+        : mirrorOn ? "● 선생님이 지금 이 PC의 화면 전체를 보고 있습니다." : "전체 화면을 공유해 두었습니다. 선생님이 볼 때만 보냅니다(동의함).")
+      : mirrorOn && mirrorLite ? "● 선생님이 지금 여러 학생의 수업 화면을 작게 함께 보고 있습니다." + deskAsk
+      : mirrorOn ? "● 선생님이 지금 이 수업 화면을 보고 있습니다." + deskAsk
+      : "선생님이 수업 중 이 화면을 볼 수 있습니다(동의함)." + deskAsk;
+    buttons = [deskBtn, h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("no"); } }, "보기 허용 끄기")];
   } else if (screenPending) {
-    text = "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면만 보입니다.";
+    text = "선생님이 실시간 화면 보기를 요청했습니다. 허용하면 이 수업 화면이 보이고, PC에서 전체 화면 공유까지 켜면 화면 전체가 보입니다.";
     buttons = [h("button", { class: "primary", type: "button", onclick: startMirror }, "이번만 허용"),
       h("button", { class: "ghost", type: "button", onclick() { setMonitorChoice("yes"); startMirror(); } }, "수업 내내 허용"),
       h("button", { class: "ghost", type: "button", onclick() { stopMirror(); } }, "거절")];
-  } else if (mirrorOn || screenPc) {
-    text = "● 이 수업 화면을 선생님께 보여 주는 중입니다.";
-    buttons = [h("button", { class: "ghost", type: "button", onclick() { stopMirror(); if (screenPc) stopScreenShare(); } }, "그만 보여 주기")];
+  } else if (mirrorOn) {
+    text = deskStream ? "● 이 PC의 화면 전체를 선생님께 보여 주는 중입니다." : "● 이 수업 화면을 선생님께 보여 주는 중입니다." + deskAsk;
+    buttons = [deskBtn, h("button", { class: "ghost", type: "button", onclick() { stopMirror(); stopDesk(); } }, "그만 보여 주기")];
   }
   shell.screenNotice.hidden = !text;
-  shell.screenNotice.classList.toggle("live", !!(mirrorOn || screenPc));
+  shell.screenNotice.classList.toggle("live", mirrorOn);
+  shell.screenNotice.classList.toggle("ask", !!(mirrorOn && deskBtn));   // 선생님이 보는데 전체 화면 공유가 꺼져 있음
   shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
 }
 
@@ -371,6 +384,7 @@ function startMirror(lite = false) {
   mirrorBeat = setInterval(sendMirror, 4000);
   renderScreenNotice();
   sendMirror();
+  offerDesk();
 }
 
 function stopMirror(send = true) {
@@ -381,10 +395,95 @@ function stopMirror(send = true) {
   clearInterval(mirrorBeat);
   clearTimeout(mirrorTimer);
   mirrorBeat = mirrorTimer = null;
+  closeDeskPc();
   // 멈춘 시뮬레이션은 다음에 보여 줄 때(일괄 미리보기 ↔ 크게 보기) 촬영기·영상을 다시 시작해야 한다
-  simFrames().forEach((f) => { f.contentWindow?.postMessage({ craMirror: "stop" }, "*"); simStarted.delete(f); });
+  stopSimAgents();
   if (send && was) sendScreenSignal({ type: "stopped", from: screenStudentId, to: "teacher" });
   renderScreenNotice();
+}
+function stopSimAgents() {
+  simFrames().forEach((f) => { f.contentWindow?.postMessage({ craMirror: "stop" }, "*"); simStarted.delete(f); });
+}
+
+// ---- 전체 화면 공유 ----
+// 브라우저가 학생에게 직접 고르게 한다(누를 때마다). 고른 뒤에는 브라우저가 「공유 중」 표시를 계속 띄우고, 학생이 끄면 선생님 화면에도 바로 나온다.
+async function startDesk() {
+  if (!canDesk()) return alert("이 기기에서는 전체 화면 공유를 쓸 수 없습니다. 수업 화면은 계속 선생님께 보입니다.");
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: "monitor", height: { max: 1080 }, frameRate: { ideal: 8, max: 10 } }, audio: false,
+      monitorTypeSurfaces: "include", selfBrowserSurface: "exclude", surfaceSwitching: "exclude", systemAudio: "exclude",
+    });
+  } catch (e) {
+    if (e.name !== "NotAllowedError") alert("전체 화면 공유를 시작하지 못했습니다: " + e.message);
+    return;
+  }
+  const track = stream.getVideoTracks()[0];
+  const surface = track && track.getSettings().displaySurface;
+  if (!track || (surface && surface !== "monitor")) {   // 창·탭만 고르면 그 밖의 활동이 보이지 않는다
+    stream.getTracks().forEach((t) => t.stop());
+    deskMsg = " 창이나 탭이 아니라 「전체 화면」을 골라 주세요.";
+    return renderScreenNotice();
+  }
+  stopDesk();
+  deskMsg = "";
+  track.contentHint = "detail";   // 글자가 또렷하게(움직임보다 선명함 우선)
+  track.addEventListener("ended", () => { if (deskStream === stream) deskEnded(); });
+  deskStream = stream;
+  renderScreenNotice();
+  if (mirrorOn) sendMirror();
+  offerDesk();
+}
+
+// 학생이 브라우저의 「공유 중지」를 눌렀다: 선생님께 알리고 수업 화면 복사로 돌아간다
+function deskEnded() {
+  stopDesk();
+  if (mirrorOn) sendScreenSignal({ type: "desk-off", from: screenStudentId, to: "teacher" }).catch(() => {});
+  if (mirrorOn) sendMirror();
+}
+
+function stopDesk() {
+  closeDeskPc();
+  if (deskStream) deskStream.getTracks().forEach((t) => t.stop());
+  deskStream = null;
+  renderScreenNotice();
+}
+
+function closeDeskPc() {
+  deskId++;
+  if (deskPc) deskPc.close();
+  deskPc = null;
+  deskQueued = [];
+  if (deskLive) lastMirror = "";   // 영상이 끊기면 수업 화면 복사를 다시 처음부터
+  deskLive = false;
+}
+
+// 교사가 볼 때마다(크게 보기 ↔ 일괄 미리보기) 새 연결로 보낸다. 화질은 그때 방식에 맞춘다.
+async function offerDesk() {
+  closeDeskPc();
+  if (!deskStream || !mirrorOn || !state || typeof RTCPeerConnection !== "function") return;
+  const id = deskId;
+  const ice = await iceServers({ body: { token, code: state.lesson.code || code } });
+  if (id !== deskId || !deskStream) return;
+  const pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relayFirst(ice) ? "relay" : "all" });
+  deskPc = pc;
+  const track = deskStream.getVideoTracks()[0];
+  const o = mirrorLite ? DESK.lite : DESK.full;
+  pc.addTransceiver(track, { direction: "sendonly", streams: [deskStream],
+    sendEncodings: [{ maxBitrate: o.br, maxFramerate: o.fps, scaleResolutionDownBy: Math.max(1, (track.getSettings().height || o.h) / o.h) }] });
+  pc.onicecandidate = (e) => e.candidate && id === deskId && sendScreenSignal({ type: "candidate", from: screenStudentId, to: "teacher", pid: id, candidate: e.candidate.toJSON() });
+  pc.onconnectionstatechange = () => {
+    if (id !== deskId) return;
+    const live = pc.connectionState === "connected";
+    if (live === deskLive) return;
+    if (live) stopSimAgents();   // 시뮬레이션도 화면 영상에 함께 보인다
+    else lastMirror = "";
+    deskLive = live;
+    sendMirror();
+  };
+  await pc.setLocalDescription(await pc.createOffer());
+  if (id === deskId) await sendScreenSignal({ type: "offer", from: screenStudentId, to: "teacher", pid: id, lite: mirrorLite, sdp: pc.localDescription.toJSON() });
 }
 
 // 바꾼 직후 0.25초 안에 보내고, 그 사이 변화는 한 번으로 모은다
@@ -475,19 +574,24 @@ function mirrorSnapshot() {
   return clone.outerHTML;
 }
 
-// 화면이 그대로면 무거운 화면 내용은 빼고 상태만 보낸다(4초마다 살아 있음 알림)
+// 화면이 그대로면 무거운 화면 내용은 빼고 상태만 보낸다(4초마다 살아 있음 알림).
+// 전체 화면 영상이 가는 동안에는 수업 화면 복사·시뮬레이션 그림을 보내지 않는다(영상에 모두 보임).
+// desk: on(영상 전송 중) · ready(공유했고 연결 중) · off(PC인데 전체 화면 공유 안 함) · none(이 기기는 화면 공유 없음)
 function sendMirror() {
   if (!mirrorOn || !state) return;
   if (mirrorLite && Date.now() - liteKeep > 45000) return stopMirror(false);   // 교사가 일괄 미리보기를 닫았다
-  startSimAgents();
+  if (!deskLive) startSimAgents();
   const max = document.documentElement.scrollHeight - innerHeight;
-  const html = mirrorSnapshot();
   const msg = {
     type: "mirror", from: screenStudentId, to: "teacher",
     where: state.lesson.slide_count ? slideLabel(state.lesson, viewing) : "", away: document.hidden,
     scroll: max > 0 ? scrollY / max : 0, narrow: innerWidth < 700, t: Date.now(),
+    desk: deskLive ? "on" : deskStream ? "ready" : canDesk() ? "off" : "none",
   };
-  if (html !== lastMirror) { msg.html = html; lastMirror = html; }
+  if (!deskLive) {
+    const html = mirrorSnapshot();
+    if (html !== lastMirror) { msg.html = html; lastMirror = html; }
+  }
   sendScreenData(msg).catch(() => {});
 }
 
@@ -519,10 +623,12 @@ async function handleScreenSignal(message) {
     if (mirrorOn) {   // 새로 연 교사 창에 전부 다시(크게 보기 ↔ 일괄 미리보기면 방식도 바꾼다)
       mirrorLite = lite;
       liteKeep = Date.now();
+      closeDeskPc();   // 영상은 새 방식으로 다시 잇는다. 그동안 볼 수 있게 수업 화면 복사를 먼저 보낸다
       lastMirror = "";
       simFrames().forEach((f) => simStarted.delete(f));
       renderScreenNotice();
-      return sendMirror();
+      sendMirror();
+      return offerDesk();
     }
     if (monitorChoice() === "yes") return startMirror(lite);   // 수업 중 보기에 동의한 학생은 묻지 않고 바로
     if (lite) return;   // 일괄 미리보기는 동의한 학생만. 동의하지 않은 학생에게는 묻지 않는다
@@ -532,71 +638,22 @@ async function handleScreenSignal(message) {
   }
   if (message.type === "stop") {
     stopMirror(false);
-    if (screenPc) stopScreenShare(false);
     return;
   }
   if (message.type === "sim-rtc") {   // 교사가 보낸 영상 연결 신호를 해당 시뮬레이션으로
     if (mirrorOn) simFrames()[message.k]?.contentWindow?.postMessage({ craRtc: message.rtc, sdp: message.sdp, candidate: message.candidate }, "*");
     return;
   }
-  if (!screenPending && !screenPc) return;
-  if (message.type === "answer" && screenPc && message.sdp) {
-    await screenPc.setRemoteDescription(message.sdp);
-    for (const c of screenQueuedCandidates) await screenPc.addIceCandidate(c);
-    screenQueuedCandidates = [];
-  } else if (message.type === "candidate" && screenPc && message.candidate) {
-    if (screenPc.remoteDescription) await screenPc.addIceCandidate(message.candidate);
-    else screenQueuedCandidates.push(message.candidate);
-  } else if (message.type === "stop") {
-    stopScreenShare(false);
+  // 전체 화면 영상 연결 신호(예전 연결 번호는 버린다)
+  if (!deskPc || message.pid !== deskId) return;
+  if (message.type === "answer" && message.sdp) {
+    await deskPc.setRemoteDescription(message.sdp);
+    for (const c of deskQueued) await deskPc.addIceCandidate(c).catch(() => {});
+    deskQueued = [];
+  } else if (message.type === "candidate" && message.candidate) {
+    if (deskPc.remoteDescription) await deskPc.addIceCandidate(message.candidate).catch(() => {});
+    else deskQueued.push(message.candidate);
   }
-}
-
-async function startScreenShare() {
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    return alert("이 기기에서는 PC 화면 공유를 쓸 수 없습니다. 수업 화면은 계속 선생님께 보입니다.");
-  }
-  try {
-    // 화면 선택과 브라우저 권한은 학생이 직접 승인해야 한다.
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 6, max: 8 } }, audio: false });
-    screenPending = false;
-    const ice = await iceServers({ body: { token, code: state.lesson.code || code } });
-    screenPc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relayFirst(ice) ? "relay" : "all" });
-    screenQueuedCandidates = [];
-    stream.getTracks().forEach((track) => {
-      if (track.kind === "video") track.applyConstraints({ width: { max: 640 }, height: { max: 360 }, frameRate: { max: 8 } }).catch(() => {});
-      screenPc.addTrack(track, stream);
-      track.addEventListener("ended", () => stopScreenShare());
-    });
-    for (const sender of screenPc.getSenders()) {
-      const params = sender.getParameters();
-      params.encodings = params.encodings || [{}];
-      params.encodings[0].maxBitrate = 250000;
-      params.encodings[0].maxFramerate = 8;
-      await sender.setParameters(params).catch(() => {});
-    }
-    screenPc.onicecandidate = (e) => e.candidate && sendScreenSignal({ type: "candidate", from: screenStudentId, to: "teacher", candidate: e.candidate });
-    const offer = await screenPc.createOffer();
-    await screenPc.setLocalDescription(offer);
-    await sendScreenSignal({ type: "offer", from: screenStudentId, to: "teacher", sdp: screenPc.localDescription });
-    renderScreenNotice();
-  } catch (e) {
-    screenPending = false;
-    renderScreenNotice();
-    if (e.name !== "NotAllowedError") alert("화면 공유를 시작하지 못했습니다: " + e.message);
-  }
-}
-
-function stopScreenShare(send = true) {
-  if (send && screenPc) sendScreenSignal({ type: "video-stopped", from: screenStudentId, to: "teacher" });
-  if (screenPc) {
-    screenPc.getSenders().forEach((s) => s.track && s.track.stop());
-    screenPc.close();
-  }
-  screenPc = null;
-  screenPending = false;
-  screenQueuedCandidates = [];
-  renderScreenNotice();
 }
 
 // 슬라이드를 화면 가득 띄운다. 누르거나 Esc로 닫는다. 선생님이 쪽을 넘기면 띄운 그림도 바뀐다.

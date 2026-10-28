@@ -1,4 +1,4 @@
-// 교사 화면 · 「학생 관리」 탭: 명단·응답 표, 학생 화면 크게 보기(동의한 학생만, 시뮬레이션 WebRTC 영상),
+// 교사 화면 · 「학생 관리」 탭: 명단·응답 표, 학생 화면 크게 보기(동의한 학생만, PC는 화면 전체 WebRTC 영상, 아니면 수업 화면 복사·시뮬레이션 영상),
 // 실시간 화면 일괄 미리보기(동의 학생 작은 칸, 교사 전용 채널 :t).
 
 // ---------- 학생 관리 ----------
@@ -48,22 +48,17 @@ async function handleTeacherScreenSignal(message) {
     } else if (message.type === "sim-rtc") {
       await simRtc(watch, message);
     } else if (message.type === "offer" && message.sdp) {
-      await watch.pc.setRemoteDescription(message.sdp);
-      for (const candidate of watch.queued) await watch.pc.addIceCandidate(candidate);
-      watch.queued = [];
-      await watch.pc.setLocalDescription(await watch.pc.createAnswer());
-      await sendTeacherScreenSignal({ type: "answer", from: "teacher", to: message.from, sdp: watch.pc.localDescription });
-      watch.status.textContent = "학생 화면에 연결했습니다.";
+      await deskAnswer(watch, message);
     } else if (message.type === "candidate" && message.candidate) {
-      if (watch.pc.remoteDescription) await watch.pc.addIceCandidate(message.candidate);
-      else watch.queued.push(message.candidate);
-    } else if (message.type === "video-stopped") {
-      watch.video.srcObject = null;
-      watch.video.hidden = true;
+      deskCandidate(watch, message);
+    } else if (message.type === "desk-off" || message.type === "video-stopped") {
+      deskClose(watch);
+      watch.deskOff = true;
+      paintWatchDesk(watch);
     } else if (message.type === "stopped") {
       watch.status.textContent = "학생이 보여 주기를 멈췄거나 거절했습니다. 다시 요청하려면 창을 닫고 다시 여세요.";
-      watch.video.srcObject = null;
-      watch.video.hidden = true;
+      deskClose(watch);
+      paintWatchDesk(watch);
     }
   } catch (e) {
     watch.status.textContent = "화면 연결 오류: " + e.message;
@@ -142,6 +137,56 @@ function paintSim(watch, k) {
   if (d.scrollingElement) { d.scrollingElement.scrollTop = s.sy || 0; d.scrollingElement.scrollLeft = s.sx || 0; }
 }
 
+// ---------- 학생 PC 화면 전체(WebRTC 영상) ----------
+// 학생이 「전체 화면 공유 시작」으로 고른 화면 전체를 받는다. 학생은 교사가 볼 때마다(크게 보기 ↔ 일괄 미리보기) 새 연결 번호(pid)로 보낸다.
+// x: 크게 보기 창(watch) 또는 미리보기 칸(tile). 영상이 오면 x.deskStream 을 채우고 그 화면을 다시 그린다.
+async function deskAnswer(x, m) {
+  deskClose(x);
+  const d = { pid: m.pid, pc: null, queued: [] };
+  x.desk = d;
+  const pc = new RTCPeerConnection({ iceServers: await teacherIce(), iceTransportPolicy: forceRelay() ? "relay" : "all" });
+  if (x.desk !== d) return pc.close();
+  d.pc = pc;
+  const paint = () => (x.paint ? x.paint() : paintWatchDesk(x));
+  pc.ontrack = (e) => { if (x.desk === d) { x.deskStream = e.streams[0] || new MediaStream([e.track]); x.deskOff = false; paint(); } };
+  pc.onicecandidate = (e) => e.candidate && sendTeacherScreenSignal({ type: "candidate", from: "teacher", to: m.from, pid: m.pid, candidate: e.candidate.toJSON() });
+  pc.onconnectionstatechange = () => {
+    if (x.desk === d && pc.connectionState === "failed") { x.deskStream = null; paint(); }
+  };
+  await pc.setRemoteDescription(m.sdp);
+  for (const c of d.queued) await pc.addIceCandidate(c).catch(() => {});
+  d.queued = [];
+  await pc.setLocalDescription(await pc.createAnswer());
+  await sendTeacherScreenSignal({ type: "answer", from: "teacher", to: m.from, pid: m.pid, sdp: pc.localDescription.toJSON() });
+}
+function deskCandidate(x, m) {
+  const d = x.desk;
+  if (!d || d.pid !== m.pid) return;
+  if (d.pc && d.pc.remoteDescription) d.pc.addIceCandidate(m.candidate).catch(() => {});
+  else d.queued.push(m.candidate);
+}
+function deskClose(x) {
+  if (x.desk && x.desk.pc) x.desk.pc.close();
+  x.desk = null;
+  x.deskStream = null;
+}
+// 크게 보기: 전체 화면 영상이 오면 영상을 크게, 수업 화면 복사는 숨긴다(영상이 끊기면 다시 수업 화면 복사)
+function paintWatchDesk(w) {
+  const on = !!w.deskStream;
+  if (w.video.srcObject !== w.deskStream) w.video.srcObject = w.deskStream;
+  w.video.hidden = !on;
+  w.frame.hidden = on;
+  w.deskNote.hidden = !w.deskOff;
+}
+// 학생 화면 상태(학생 sendMirror 의 desk)를 글로: [글, 경고인지]
+function deskLabel(desk, short) {
+  if (desk === "on") return [short ? "전체 화면" : "PC 화면 전체", false];
+  if (desk === "ready") return ["전체 화면 연결 중", false];
+  if (desk === "off") return [short ? "수업 창만(전체 화면 공유 안 함)" : "전체 화면 공유 안 함 · 수업 창만 보임(다른 창·앱은 안 보임)", true];
+  if (desk === "none") return [short ? "수업 화면(휴대폰·태블릿)" : "휴대폰·태블릿: 화면 공유가 없어 수업 화면만 보임", false];
+  return null;
+}
+
 // 시뮬레이션 영상(WebRTC): 학생 시뮬레이션의 가장 큰 캔버스를 15~30 FPS 영상으로 받는다.
 // 연결되면 학생 쪽은 그 캔버스의 JPEG 전송을 멈추고, 연결되지 않으면(학교망이 막는 등) 그림 전송이 그대로 이어진다.
 async function teacherIce() {
@@ -185,7 +230,8 @@ async function simRtc(watch, m) {
 
 // 영상의 실제 FPS와 지연(왕복 시간의 절반 + 재생 대기 시간)을 1초마다 WebRTC 통계에서 읽는다
 async function readRtcStats(watch) {
-  for (const r of watch.rtc.values()) {
+  for (const r of [watch.desk, ...watch.rtc.values()]) {
+    if (!r) continue;
     if (!r.pc || r.pc.connectionState !== "connected") continue;
     let fps = 0, rtt = 0, jb = 0, relay = false;
     const stats = await r.pc.getStats();
@@ -200,7 +246,7 @@ async function readRtcStats(watch) {
         relay = [x.localCandidateId, x.remoteCandidateId].some((id) => stats.get(id)?.candidateType === "relay");
       }
     });
-    watch.videoText = "영상 " + Math.round(fps) + " FPS · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
+    watch.videoText = (r === watch.desk ? "전체 화면 " : "") + "영상 " + Math.round(fps) + " FPS · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
     watch.simInfo.textContent = watch.videoText;
     return;
   }
@@ -234,7 +280,10 @@ async function showMirror(watch, m) {
   const el = doc.scrollingElement;
   if (el && typeof m.scroll === "number") el.scrollTop = m.scroll * (el.scrollHeight - el.clientHeight);
   watch.frame.style.maxWidth = m.narrow ? "420px" : "";
+  if (m.desk === "off" || m.desk === "none") { watch.deskOff = m.desk === "off"; if (!watch.desk) paintWatchDesk(watch); }
+  const desk = deskLabel(m.desk);
   watch.status.replaceChildren(
+    desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : null, desk ? " · " : null,
     h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱이나 탭으로 나가 있음" : "수업 화면을 보고 있음"),
     m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신 · ", watch.simInfo);
 }
@@ -248,33 +297,28 @@ async function watchStudentScreen(s) {
     await ensureTeacherScreenChannel();
     const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, muted: true, controls: true, hidden: true });
     const status = h("p", { class: "muted small" }, "학생 화면에 요청을 보냈습니다. 수업 중 보기에 동의한 학생은 바로 보이고, 아니면 학생이 허용할 때까지 기다립니다.");
+    const deskNote = h("p", { class: "desk-warn", hidden: true }, "이 학생은 전체 화면 공유를 켜지 않았거나 껐습니다. 지금은 수업 창 안만 보이고, 다른 창·앱에서 하는 일은 보이지 않습니다. 학생 화면에 「전체 화면 공유 시작」 단추가 떠 있습니다.");
     const simInfo = h("span", {});
     // 학생이 보낸 화면은 스크립트를 쓸 수 없는 iframe 안에만 그린다(allow-scripts 없음)
     const frame = h("iframe", { class: "mirror-frame", sandbox: "allow-same-origin", title: nameOf(s) + " 수업 화면",
       srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
         + "<style>body{margin:0;padding:8px;background:#f6f7fb}body *{pointer-events:none}</style><body></body>" });
     const ready = new Promise((ok) => frame.addEventListener("load", ok, { once: true }));
-    const pc = new RTCPeerConnection({ iceServers: await teacherIce(), iceTransportPolicy: forceRelay() ? "relay" : "all" });
-    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, frame, video,
-      h("p", { class: "muted small" }, "학생의 수업 화면(보고 있는 쪽, 쓰고 있는 답)은 바뀔 때마다, 시뮬레이션은 초당 최대 5장으로 갱신됩니다. 노트북·태블릿·휴대폰 모두 됩니다. PC에서 학생이 「PC 화면 전체 공유」까지 누르면 아래에 영상도 나옵니다.")), () => {
+    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, deskNote, video, frame,
+      h("p", { class: "muted small" }, "PC에서는 학생이 공유한 화면 전체(다른 창·앱 포함)를 영상으로 봅니다. 학생이 공유를 끄면 위에 바로 표시됩니다. 휴대폰·태블릿처럼 화면 공유가 없는 기기는 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다.")), () => {
       const back = grid && grid.tiles.get(s.id);
       if (back) { tileReset(back, "작은 화면으로 돌아오는 중…"); askTile(back); }
       else sendTeacherScreenSignal({ type: "stop", from: "teacher", to: s.id, key: screenKey(s) });
-      pc.close();
+      deskClose(watch);
       clearInterval(watch.statsTimer);
       for (const r of watch.rtc.values()) r.pc?.close();
       screenWatchers.delete(s.id);
       screenWatchers.delete(screenKey(s));
     });
-    const watch = { pc, video, status, frame, ready, html: "", sims: new Map(), simInfo, rtc: new Map(), videoText: "", queued: [], close };
+    const watch = { video, status, deskNote, frame, ready, html: "", sims: new Map(), simInfo, rtc: new Map(), videoText: "", desk: null, deskStream: null, deskOff: false, close };
     watch.statsTimer = setInterval(() => readRtcStats(watch).catch(() => {}), 1000);
     screenWatchers.set(s.id, watch);
     screenWatchers.set(screenKey(s), watch);   // 예전 setup.sql 이면 학생이 학번·이름으로 답한다
-    pc.ontrack = (e) => { video.srcObject = e.streams[0]; video.hidden = false; };
-    pc.onicecandidate = (e) => e.candidate && sendTeacherScreenSignal({ type: "candidate", from: "teacher", to: s.id, key: screenKey(s), candidate: e.candidate });
-    pc.onconnectionstatechange = () => {
-      if (["failed", "disconnected"].includes(pc.connectionState)) status.textContent = "연결이 끊겼습니다. 학생에게 다시 요청해 주세요.";
-    };
     await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id, key: screenKey(s) });
   } catch (e) {
     alert(e.message || e);
@@ -322,6 +366,8 @@ function dropTile(t) {
 
 // 영상 연결을 닫고 받은 화면을 비운다(크게 보기로 넘길 때, 끌 때)
 function tileReset(t, text) {
+  deskClose(t);
+  t.deskState = "";
   for (const r of t.rtc.values()) r.pc?.close();
   t.rtc.clear();
   t.sims.clear();
@@ -346,11 +392,13 @@ function gridTile(s) {
       + ".sim-mirror p{padding:1.5rem;text-align:center;color:#5b6475;background:#fff;border:1px dashed #c9d1de;border-radius:8px}"
       + "body *{pointer-events:none}</style><body></body>" });
   const cap = h("span", { class: "tile-cap" }, "연결 중…");
-  t = { s, frame, cap, html: "", drawn: null, scroll: 0, narrow: false, sims: new Map(), rtc: new Map(), seen: 0, asked: 0, videoText: "", simInfo: h("span") };
+  const video = h("video", { class: "tile-video", autoplay: true, playsinline: true, hidden: true });
+  video.muted = true;
+  t = { s, frame, video, cap, html: "", desk: null, deskStream: null, deskState: "", drawn: null, scroll: 0, narrow: false, sims: new Map(), rtc: new Map(), seen: 0, asked: 0, videoText: "", simInfo: h("span") };
   t.paint = () => paintTile(t);
   frame.addEventListener("load", () => { t.loaded = true; t.drawn = null; paintTile(t); });
   t.el = h("div", { class: "live-tile" },
-    h("div", { class: "tile-view" }, frame,
+    h("div", { class: "tile-view" }, frame, video,
       h("button", { class: "tile-hit", type: "button", title: nameOf(s) + " 화면 크게 보기", "aria-label": nameOf(s) + " 화면 크게 보기", onclick() { watchStudentScreen(t.s); } },
         h("span", {}, "⤢ 크게 보기"))),
     cap);
@@ -365,7 +413,10 @@ async function gridSignal(t, m) {
     if (typeof m.html === "string") t.html = m.html;
     t.scroll = typeof m.scroll === "number" ? m.scroll : 0;
     t.narrow = !!m.narrow;
-    t.cap.replaceChildren(h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱·탭" : "수업 화면"),
+    t.deskState = m.desk || "";
+    const desk = deskLabel(m.desk, true);
+    t.cap.replaceChildren(desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : null, desk ? " · " : null,
+      h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱·탭" : "수업 화면"),
       m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString());
     paintTile(t);
   } else if (m.type === "sim") {
@@ -375,6 +426,13 @@ async function gridSignal(t, m) {
     paintTile(t);
   } else if (m.type === "sim-rtc") {
     await simRtc(t, m);
+  } else if (m.type === "offer" && m.sdp) {
+    await deskAnswer(t, m);
+  } else if (m.type === "candidate" && m.candidate) {
+    deskCandidate(t, m);
+  } else if (m.type === "desk-off") {
+    deskClose(t);
+    paintTile(t);
   } else if (m.type === "stopped") {
     tileReset(t, "학생이 보여 주기를 멈췄습니다");
     t.html = "";
@@ -384,6 +442,11 @@ async function gridSignal(t, m) {
 
 // 받은 수업 화면을 작은 칸에 그린다: 1000px 너비로 그려 320px로 줄인다. 시뮬레이션 자리에는 영상(없으면 가장 큰 캔버스 그림).
 function paintTile(t) {
+  // 전체 화면 영상이 오면 칸 전체에 영상(수업 화면 복사는 그 밑에 그대로 둔다)
+  if (t.video.srcObject !== t.deskStream) t.video.srcObject = t.deskStream;
+  t.video.hidden = !t.deskStream;
+  if (t.deskStream && t.video.paused) t.video.play().catch(() => {});
+  t.el.classList.toggle("no-desk", t.deskState === "off");
   const doc = t.loaded && t.frame.contentDocument;
   if (!doc || !doc.body) return;
   if (t.drawn !== t.html) {
