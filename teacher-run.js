@@ -142,14 +142,15 @@ function paintStage(s, editable) {
   s.simStage.hidden = !stageSim;
   if (simKey !== s.simKey) {
     s.simKey = simKey;
-    s.simStage.replaceChildren(...(stageSim ? [simFrame(stageSim.html, stageSim.title)] : []));
+    // 교사 화면 것에는 촬영기를 넣어 둔다(수업용 화면이 그대로 비춘다, presentMirrorSync)
+    s.simStage.replaceChildren(...(stageSim ? [simFrame(editable ? withSimAgent(stageSim.html) : stageSim.html, stageSim.title)] : []));
   }
   // 슬라이드 위에 얹는 시뮬레이션: 위쪽 막대를 끌어 옮기면 바로 저장되고 학생 화면에도 그 자리에 보인다
   const allOvers = L.slide_count > 0 && !isPptx(L) ? activities.filter(isOverSim) : [];
   const overs = stageSim ? [] : allOvers.filter((a) => simOnSlide(a, sn));
   syncSimLayer(s.simLayer, s.img);
   renderSimLayer(s.simLayer, overs, {
-    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable, img: s.img,
+    all: allOvers, load: (a) => (editable ? withSimAgent(a.html) : a.html), ver: (a) => (a.html || "").length + ":" + a.title, editable, img: s.img,
     onMove: editable ? (a, p) => setActivity(a, { sim_place: p }) : null,
   });
 }
@@ -157,7 +158,7 @@ function paintStage(s, editable) {
 // ---------- 수업용 화면(TV·빔 프로젝터에 띄우는 창) ----------
 // 따로 연 창에 지금 슬라이드(애니메이션 단계·시뮬레이션 포함)만 검은 바탕에 가득 그리고, 어느 탭에 있든 0.3초마다 따라간다.
 // 창 이름(cra-present)이 같아 늘 한 개만 생기고(교사 화면을 새로 고쳐도 같은 창을 다시 쓴다), 맨 위 가림막이 마우스를 모두 막는다.
-// 시뮬레이션은 창마다 따로 돌아가므로 교사 화면에서 조작한 상태까지 옮겨 오지는 않는다.
+// 시뮬레이션은 교사 화면에서 조작한 모습을 그대로 비춘다(presentMirrorSync). 교사 화면에 같은 시뮬레이션이 안 보일 때만 이 창이 직접 돌린다.
 let present = null;
 function openPresent() {
   if (present && !present.w.closed) { present.w.focus(); return; }
@@ -186,6 +187,9 @@ function openPresent() {
     if (e.key === "ArrowLeft") setPage(lesson.page - 1);
   });
   present = { w, img, stage, simStage, simLayer, note, simKey: "", pptKey: "" };
+  // 비추개가 보내는 영상 연결 답을 교사 쪽 시뮬레이션에 넘긴다(같은 창을 다시 쓰면 바꿔 끼운다)
+  w.onmessage = presentViewMessage;
+  w.onpagehide = () => presentMirrorStop();
   img.addEventListener("load", paintPresent);
   w.craTick = w.setInterval(paintPresent, 300);   // 이 창의 타이머라서 교사 창이 가려져도 느려지지 않는다
   paintPresent();
@@ -193,7 +197,7 @@ function openPresent() {
 }
 function paintPresent() {
   const p = present;
-  if (!p || p.w.closed) return;
+  if (!p || p.w.closed) return presentMirrorStop();
   const has = !!lesson && lesson.slide_count > 0;
   p.stage.hidden = !has;
   p.note.hidden = has;
@@ -201,6 +205,107 @@ function paintPresent() {
   paintStage(p, false);
   // 얹기 시뮬레이션 크기: 교사 창의 ResizeObserver는 다른 창의 칸을 보지 못하므로 여기서 맞춘다
   p.simLayer.querySelectorAll(":scope > .sim-over").forEach((b) => b.style.setProperty("--s", b.clientWidth / SIM_VIEW.w));
+  presentMirrorSync(p);
+}
+
+// 수업용 화면의 시뮬레이션 비추기: 교사 화면의 시뮬레이션(촬영기 SIM_AGENT)이 바뀐 화면 구조와 캔버스를 보내면
+// 수업용 화면의 같은 자리에 겹친 비추개(PRESENT_VIEW)에 넘긴다. 가장 큰 캔버스는 WebRTC 영상으로(같은 PC 안이라 중계 없이) 받는다.
+// 첫 장면이 오면 수업용 화면이 직접 돌리던 것은 숨겨 멈추고, 교사 화면에서 그 시뮬레이션이 사라지면 다시 직접 돌린다.
+const PRESENT_VIEW = `<!doctype html><html><head><meta charset="utf-8"></head><body><script>(function(){
+var w=0,h=0,cv={},vid=null,el=null,idx=-1,pc=null,P=parent;
+function fit(){if(w&&h)document.documentElement.style.zoom=Math.min(innerWidth/w,innerHeight/h);}
+function putVid(){if(!vid)return;var img=document.querySelector('img[data-cra-canvas="'+idx+'"]');if(!img)return;
+if(!el){el=document.createElement("video");el.muted=true;el.autoplay=true;el.playsInline=true;el.srcObject=vid;}
+el.className=img.className;el.setAttribute("style",(img.getAttribute("style")||"")+";object-fit:contain");img.replaceWith(el);el.play().catch(function(){});}
+addEventListener("resize",fit);
+addEventListener("message",function(e){var m=e.data||{};
+if(m.craSim){if(m.head!=null){document.head.innerHTML=m.head;document.body.innerHTML=m.body;document.body.setAttribute("style",m.bs||"");putVid();}
+for(var i in m.canvases)cv[i]=m.canvases[i];
+for(var k in cv){var ims=document.querySelectorAll('img[data-cra-canvas="'+k+'"]');for(var j=0;j<ims.length;j++)if(ims[j].getAttribute("src")!==cv[k])ims[j].setAttribute("src",cv[k]);}
+if(m.w&&m.h){w=m.w;h=m.h;fit();}
+var se=document.scrollingElement;if(se){se.scrollTop=m.sy||0;se.scrollLeft=m.sx||0;}}
+else if(m.craRtc==="offer"){if(pc)pc.close();vid=null;el=null;idx=m.idx;pc=new RTCPeerConnection();var me=pc;
+pc.onicecandidate=function(ev){if(ev.candidate)P.postMessage({craView:"ice",candidate:ev.candidate.toJSON()},"*");};
+pc.ontrack=function(ev){if(pc!==me)return;vid=ev.streams[0]||new MediaStream([ev.track]);putVid();P.postMessage({craView:"ok"},"*");};
+pc.setRemoteDescription(m.sdp).then(function(){return me.createAnswer();}).then(function(a){return me.setLocalDescription(a);})
+.then(function(){P.postMessage({craView:"answer",sdp:me.localDescription.toJSON()},"*");}).catch(function(){});}
+else if(m.craRtc==="ice"&&pc&&m.candidate){pc.addIceCandidate(m.candidate).catch(function(){});}});})();<\/script></body></html>`;
+const presentMirrors = new Map();   // 교사 쪽 시뮬레이션 iframe → { live: 수업용 화면이 직접 돌리는 iframe, view: 비추개, shown }
+function presentPairs(p) {
+  const pairs = new Map();
+  if (!run) return pairs;
+  const vis = (f) => f && f.isConnected && f.offsetWidth > 0;   // 교사 화면에서 다른 탭을 보는 중이면 0
+  const tf = run.simStage.querySelector("iframe.sim-frame"), pf = p.simStage.querySelector("iframe.sim-frame:not(.sim-mirror)");
+  if (vis(tf) && pf && !p.simStage.hidden && run.simKey === p.simKey) pairs.set(tf, pf);
+  p.simLayer.querySelectorAll(":scope > .sim-over:not(.off)").forEach((box) => {
+    const tb = run.simLayer.querySelector(':scope > .sim-over[data-sim="' + box.dataset.sim + '"]');
+    const tf = tb && tb.querySelector("iframe.sim-frame"), pf = box.querySelector("iframe.sim-frame:not(.sim-mirror)");
+    if (vis(tf) && pf && tb.dataset.ver === box.dataset.ver && !tb.classList.contains("off")) pairs.set(tf, pf);
+  });
+  return pairs;
+}
+function presentMirrorDrop(tf) {
+  const x = presentMirrors.get(tf);
+  if (!x) return;
+  presentMirrors.delete(tf);
+  tf.contentWindow?.postMessage({ craMirror: "stop" }, "*");
+  x.view.remove();
+  if (x.live.isConnected) {
+    x.live.style.visibility = "";
+    const box = x.live.closest(".sim-over");
+    if (box) simOverPause(box); else x.live.contentWindow?.postMessage({ craPause: false }, "*");
+  }
+}
+function presentMirrorStop() {
+  for (const tf of [...presentMirrors.keys()]) presentMirrorDrop(tf);
+}
+function presentMirrorSync(p) {
+  const pairs = presentPairs(p);
+  for (const [tf, x] of presentMirrors) if (pairs.get(tf) !== x.live || !x.view.isConnected) presentMirrorDrop(tf);
+  for (const [tf, live] of pairs) {
+    const x = presentMirrors.get(tf);
+    if (x) {
+      // 수업용 화면 쪽 것은 계속 숨겨 멈춰 둔다(보이고 숨길 때 renderSimLayer가 다시 돌릴 수 있어서)
+      if (x.shown) live.contentWindow?.postMessage({ craPause: true }, "*");
+      continue;
+    }
+    const view = simFrame(PRESENT_VIEW, live.title);
+    view.loading = "eager";
+    view.classList.add("sim-mirror");
+    view.style.visibility = "hidden";   // 첫 장면이 올 때까지는 직접 돌리는 것을 보인다
+    live.after(view);
+    presentMirrors.set(tf, { live, view, shown: false });
+    view.addEventListener("load", () => {
+      if (presentMirrors.get(tf)?.view !== view) return;
+      tf.contentWindow?.postMessage({ craMirror: "start", every: 100, maxW: 1280, q: 0.8 }, "*");
+      tf.contentWindow?.postMessage({ craRtc: "start", ice: [], relay: false }, "*");
+    }, { once: true });
+    tf.addEventListener("load", () => presentMirrorDrop(tf), { once: true });   // 교사 쪽을 새로 불러오면 처음부터 다시
+  }
+}
+addEventListener("message", (e) => {
+  const m = e.data || {};
+  if (!m.craSim && !m.craRtc) return;
+  for (const [tf, x] of presentMirrors) {
+    if (tf.contentWindow !== e.source) continue;
+    if (!present || present.w.closed) return presentMirrorStop();
+    if (m.craSim) {
+      if (m.w) x.view.contentWindow?.postMessage(m, "*");   // 크기 0(숨은 칸)인 장면은 버린다
+      if (m.head != null && m.w && !x.shown) {
+        x.shown = true;
+        x.view.style.visibility = "";
+        x.live.style.visibility = "hidden";
+        x.live.contentWindow?.postMessage({ craPause: true }, "*");
+      }
+      tf.contentWindow?.postMessage({ craAck: 1 }, "*");
+    } else x.view.contentWindow?.postMessage({ craRtc: m.craRtc, sdp: m.sdp, candidate: m.candidate, idx: m.idx }, "*");
+    return;
+  }
+});
+function presentViewMessage(e) {
+  const m = e.data || {};
+  if (!m.craView) return;
+  for (const [tf, x] of presentMirrors) if (x.view.contentWindow === e.source) tf.contentWindow?.postMessage({ craRtc: m.craView, sdp: m.sdp, candidate: m.candidate }, "*");
 }
 
 addEventListener("resize", () => { if (run && run.simLayer) syncSimLayer(run.simLayer, run.img); });
