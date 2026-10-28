@@ -242,7 +242,7 @@ if(!h){var w=wait,l=later;wait=[];later=[];w.forEach(function(id){raf(frame(id))
 function endWarm(){if(warm){warm=false;sync();}}
 function warmUp(){raf(function(){raf(endWarm);});}
 if(document.readyState==="complete")warmUp();else W.addEventListener("load",warmUp);st(endWarm,3000);
-W.addEventListener("message",function(e){var m=e.data||{};if(e.source===parent&&typeof m.craPause==="boolean"){paused=m.craPause;sync();}});})();<\/script>`;
+W.addEventListener("message",function(e){var m=e.data||{};if((e.source===parent||e.source===parent.opener)&&typeof m.craPause==="boolean"){paused=m.craPause;sync();}});})();<\/script>`;
 function withSimPause(html) {
   if (!html || html.includes("__craPause")) return html;
   if (html.includes(SIM_AGENT)) return html.replace(SIM_AGENT, () => SIM_AGENT + SIM_PAUSE);
@@ -302,14 +302,24 @@ function syncSimLayer(layer, img) {
 // list: 이 쪽에 얹을 시뮬레이션들, all: 수업의 얹기 시뮬레이션 전부. load(a) → html, ver(a) → 바뀌었는지 볼 값.
 // all을 미리 모두 불러 두고 다른 쪽 것은 숨겨 멈춰 두므로, 쪽을 넘기면 슬라이드의 일부처럼 바로 보인다.
 // 같은 시뮬레이션은 다시 불러오지 않아 조작 상태가 남는다.
-function renderSimLayer(layer, list, { all = list, load, ver, editable, onMove }) {
+// img·fx: 그 슬라이드 그림(swapSlide)과 전환 효과. 새 그림을 받는 동안에는 보이고 숨기기를 미뤘다가, 그림이 바뀔 때 같은 효과로 함께 바꾼다.
+function renderSimLayer(layer, list, opts) {
+  const { all = list, load, ver, editable, onMove, img, fx } = opts;
+  const waiting = !!img && !!img.dataset.want && img.getAttribute("src") !== img.dataset.want;
+  layer._next = [list, opts];
+  if (waiting && !layer._wait) {
+    layer._wait = true;
+    const done = () => { if (!layer._wait) return; layer._wait = false; layer._swap = true; renderSimLayer(layer, ...layer._next); layer._swap = false; };
+    img.addEventListener("load", done, { once: true });
+    img.addEventListener("error", done, { once: true });
+  }
   const ids = new Set(all.map((a) => a.id));
   const shown = new Set(list.map((a) => a.id));
   layer.querySelectorAll(":scope > .sim-over").forEach((b) => { if (!ids.has(b.dataset.sim)) b.remove(); });
   for (const a of all) {
     let box = layer.querySelector(':scope > .sim-over[data-sim="' + a.id + '"]');
     if (!box) {
-      box = h("div", { class: "sim-over" + (editable ? " editable" : ""), "data-sim": a.id });
+      box = h("div", { class: "sim-over off" + (editable ? " editable" : ""), "data-sim": a.id });
       if (editable) {
         box.append(h("div", { class: "sim-grip", title: "끌어서 옮기기" }, "⠿ 끌어서 옮기기"), h("div", { class: "sim-resize", title: "끌어서 크기 바꾸기" }));
         dragSim(layer, box, onMove);
@@ -331,7 +341,15 @@ function renderSimLayer(layer, list, { all = list, load, ver, editable, onMove }
       Promise.resolve(load(a)).then((html) => { if (box.dataset.ver === v) f.srcdoc = withSimPause(html); }).catch(() => {});
     }
     const off = !shown.has(a.id);
-    if (box.classList.contains("off") !== off) { box.classList.toggle("off", off); simOverPause(box); }
+    if (!waiting && box.classList.contains("off") !== off) {
+      box.classList.toggle("off", off);
+      simOverPause(box);
+      if (!off && layer._swap && fx && fx !== "none") {
+        const cls = "fx-" + (fx === "push" ? "push-next" : fx);
+        box.classList.add(cls);
+        box.addEventListener("animationend", () => box.classList.remove(cls), { once: true });
+      }
+    }
     if (!box.classList.contains("moving")) placeBox(box, a.sim_place || SIM_PLACE_DEFAULT);
   }
 }

@@ -149,7 +149,7 @@ function paintStage(s, editable) {
   const overs = stageSim ? [] : allOvers.filter((a) => simOnSlide(a, sn));
   syncSimLayer(s.simLayer, s.img);
   renderSimLayer(s.simLayer, overs, {
-    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable,
+    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable, img: s.img, fx: slideFx(L),
     onMove: editable ? (a, p) => setActivity(a, { sim_place: p }) : null,
   });
 }

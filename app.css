@@ -343,6 +343,26 @@ input[type=text].act-num:focus { background: #fff; }
   .build.pinned .act-body > .sim-scale { width: min(100cqw, 100cqh * 16 / 9); margin: 0 auto; }
   .build.pinned .act-grid > p { grid-column: 1 / -1; }
 }
+/* 「슬라이드와 함께 보기」: 왼쪽 열에 슬라이드가 위에서 아래로, 그 쪽 활동은 오른쪽에 목록 순서대로(위의 것이 왼쪽) 작게 */
+label.act-toggle { display: inline-flex; flex-direction: row; align-items: center; gap: .35rem; font-size: .9rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.act-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
+.build .act-scroll:has(> .by-slide) { overflow-x: auto; }
+.build .act-scroll .act-grid.by-slide { display: grid; grid-template-columns: 170px; grid-auto-columns: 260px; grid-auto-rows: auto; gap: .75rem; }
+.act-grid.by-slide > .act-row { height: 230px; display: flex; flex-direction: column; align-items: stretch; gap: .5rem; min-height: 0; overflow: hidden; padding: .6rem; border: 1px solid var(--line); border-radius: 12px; }
+.act-grid.by-slide > .act-row.on { padding: .6rem; }
+.act-grid.by-slide .act-head { flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: .4rem; }
+.act-grid.by-slide .act-id { flex: 1 1 140px; min-width: 0; }
+.act-grid.by-slide .act-page { font-size: 1.1rem; }
+.act-grid.by-slide .act-head h3 { font-size: .95rem; }
+.act-grid.by-slide .act-body { flex: 1 1 0; min-height: 0; overflow-y: auto; container-type: size; font-size: .9rem; }
+.act-grid.by-slide .act-body:has(> .sim-scale) { overflow: hidden; }
+.act-grid.by-slide .act-body > .sim-scale { width: min(100cqw, 100cqh * 16 / 9); margin: 0 auto; }
+.act-grid.by-slide > p { grid-column: 2 / -1; }
+.act-slide { position: sticky; left: 0; z-index: 1; display: flex; flex-direction: column; gap: .3rem; padding-right: .25rem; background: var(--card); }
+.act-slide > img, .act-slide-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.act-slide-blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.act-slide > span { font-weight: 700; }
+.act-slide.drop > img, .act-slide.drop > .act-slide-blank { outline: 3px dashed var(--accent); outline-offset: 2px; }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
 .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
@@ -513,6 +533,11 @@ body.desk-locked { overflow: hidden; }
 .sim-over-view { position: absolute; inset: 0; overflow: hidden; }
 .sim-over-view > .sim-frame { position: absolute; left: 0; top: 0; width: 1120px; height: 630px; transform: scale(var(--s, .4)); transform-origin: 0 0; }
 .sim-over.off { visibility: hidden; pointer-events: none; }   /* 다른 쪽의 얹기 시뮬레이션: 미리 불러 숨겨 둠 */
+/* 쪽을 넘길 때 슬라이드 그림과 같은 전환 효과로 함께 나타난다(renderSimLayer의 fx) */
+.sim-over.fx-fade { animation: fx-fade .5s ease-out; }
+.sim-over.fx-zoom { animation: fx-zoom .5s cubic-bezier(.2, .8, .2, 1); }
+.sim-over.fx-push-next { animation: fx-push-next .45s cubic-bezier(.2, .8, .2, 1); }
+@media (prefers-reduced-motion: reduce) { .sim-over[class*="fx-"] { animation: none; } }
 .sim-over .sim-frame { min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: transparent; }
 .sim-over.editable:hover, .sim-over.moving { outline: 2px dashed rgba(37, 99, 235, .7); }
 .sim-grip { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; padding: 0 .6rem; background: rgba(37, 99, 235, .92); color: #fff; font-size: .8rem; cursor: move; opacity: 0; touch-action: none; user-select: none; }
