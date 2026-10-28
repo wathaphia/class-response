@@ -248,12 +248,13 @@ main.lesson .slide { cursor: zoom-in; }
 .edit-btn.on .edit-switch { background: var(--accent); }
 .edit-btn.on .edit-switch::after { transform: translateX(.85rem); }
 @media (prefers-reduced-motion: reduce) { .edit-btn, .edit-switch, .edit-switch::after { transition: none; } }
-/* 편집 모드: 탭이 다섯이라 한 줄에 들어가게 탭 사이·안쪽 여백만 조금 줄인다(색은 평소와 같음) */
-.teacher .top.editing > .tabs { gap: .1rem; }
-.teacher .top.editing .tabs .tab { padding-inline: .6rem; }
+/* 탭이 많아(평소 셋 + 수업용 화면 띄우기, 편집 모드 다섯) 한 줄에 들어가게 탭 사이·안쪽 여백만 조금 줄이고 글자는 줄바꿈하지 않는다 */
+.teacher .top > .tabs { gap: .1rem; }
+.teacher .top .tabs .tab { padding-inline: .6rem; }
+.teacher .top .tab { white-space: nowrap; }
 /* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다. 편집 모드에서는 제목 칸 바로 오른쪽부터 차례로 늘어놓는다 */
 @media (min-width: 1100px) {
-  .teacher .top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .teacher .top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr); }   /* 오른쪽 단추들은 줄어들지 않게 */
   .teacher .top > .tabs { justify-self: center; }
   .teacher .top > .top-actions { justify-self: end; }
   .teacher .top.editing { display: flex; flex-wrap: wrap; justify-content: flex-start; }
@@ -665,3 +666,12 @@ td.grid-cell > span { white-space: nowrap; }
 .promoted-table td, .promoted-table th { white-space: nowrap; }
 .collab-people { border: 1px solid var(--line); border-radius: 10px; max-height: 30vh; overflow: auto; }
 .students-table .promote-btn { min-height: 0; padding: 0; font-size: .8rem; }
+
+/* 수업용 화면(교사 화면의 「수업용 화면 띄우기」로 연 창): 슬라이드만 검은 바탕 가운데에 가득. 맨 위 가림막이 마우스를 모두 막는다 */
+body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; background: #000; display: grid; place-items: center; }
+.present-body > .stage { width: min(100vw, 100vh * 16 / 9); border-radius: 0; }
+.present-body .slide { border: 0; border-radius: 0; }
+.present-body .sim-stage { position: absolute; inset: 0; }
+.present-body .sim-stage .sim-frame { height: 100%; min-height: 0; border: 0; border-radius: 0; }
+.present-note { color: #cfd6e4; font-size: 1.2rem; }
+.present-shield { position: fixed; inset: 0; z-index: 99; cursor: none; }

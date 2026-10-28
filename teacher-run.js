@@ -89,24 +89,8 @@ function pinRun() {
 function refreshRun() {
   if (!run) return;
   const L = lesson;
+  paintStage(run, true);
   if (L.slide_count > 0) {
-    if (isPptx(L)) {
-      const key = L.slide_dir + ":" + L.page;
-      run.img.hidden = true;
-      if (run.pptKey !== key) {
-        run.stage.querySelector(".pptx-frame")?.remove();
-        run.stage.insertBefore(pptxFrame(L, L.page), run.simStage);
-        run.pptKey = key;
-      }
-    } else {
-      run.stage.querySelector(".pptx-frame")?.remove();
-      run.pptKey = "";
-      run.img.hidden = false;
-      const last = run.lastPage || L.page;
-      swapSlide(run.img, slideSrc(L, L.page), slideFx(L), slideNo(L, last) === slideNo(L, L.page) ? (last === L.page ? 1 : 0) : Math.sign(L.page - last));
-      run.lastPage = L.page;
-      run.img.alt = "슬라이드 " + L.page;
-    }
     run.where.textContent = slideLabel(L, L.page);
     run.prev.disabled = L.page <= 1;
     run.next.disabled = L.page >= L.slide_count;
@@ -120,28 +104,103 @@ function refreshRun() {
 
   const sn = slideNo(L, L.page);
   const shown = activities.filter((a) => L.slide_count === 0 || onPage(a, sn) || a.page == null);
+  drawRoster(shown.filter((a) => a.kind !== "sim"));
+  run.panel.replaceChildren(...(shown.length ? shown.map(runBlock)
+    : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「자료 추가」에서 추가하세요.")]));
+  paintPresent();
+}
+
+// 무대(s: img·stage·simStage·simLayer)에 지금 쪽의 슬라이드·PPTX·시뮬레이션을 그린다. 「수업 진행」과 수업용 화면이 함께 쓴다
+function paintStage(s, editable) {
+  const L = lesson;
+  if (L.slide_count > 0) {
+    if (isPptx(L)) {
+      const key = L.slide_dir + ":" + L.page;
+      s.img.hidden = true;
+      if (s.pptKey !== key) {
+        s.stage.querySelector(".pptx-frame")?.remove();
+        s.stage.insertBefore(pptxFrame(L, L.page), s.simStage);
+        s.pptKey = key;
+      }
+    } else {
+      s.stage.querySelector(".pptx-frame")?.remove();
+      s.pptKey = "";
+      s.img.hidden = false;
+      const last = s.lastPage || L.page;
+      swapSlide(s.img, slideSrc(L, L.page), slideFx(L), slideNo(L, last) === slideNo(L, L.page) ? (last === L.page ? 1 : 0) : Math.sign(L.page - last));
+      s.lastPage = L.page;
+      s.img.alt = "슬라이드 " + L.page;
+    }
+  }
+  const sn = slideNo(L, L.page);
   // 「슬라이드 자리에 띄우기」 시뮬레이션: 교사 화면에서도 슬라이드 대신 띄운다(다시 그릴 때마다 새로 띄우지 않게 key로 확인)
-  const stageSim = L.slide_count > 0 ? shown.find((a) => a.kind === "sim" && a.sim_full && onPage(a, sn)) || shown.find((a) => a.sim_full && allPagesSim(a)) || null : null;
+  const stageSim = L.slide_count > 0 ? activities.find((a) => a.kind === "sim" && a.sim_full && onPage(a, sn)) || activities.find((a) => a.sim_full && allPagesSim(a)) || null : null;
   const simKey = stageSim ? stageSim.id + ":" + (stageSim.html || "").length + ":" + stageSim.title : "";
-  if (!isPptx(L)) run.img.hidden = !!stageSim;
-  const pptFrame = run.stage.querySelector(".pptx-frame");
+  if (!isPptx(L)) s.img.hidden = !!stageSim;
+  const pptFrame = s.stage.querySelector(".pptx-frame");
   if (pptFrame) pptFrame.hidden = !!stageSim;
-  run.simStage.hidden = !stageSim;
-  if (simKey !== run.simKey) {
-    run.simKey = simKey;
-    run.simStage.replaceChildren(...(stageSim ? [simFrame(stageSim.html, stageSim.title)] : []));
+  s.simStage.hidden = !stageSim;
+  if (simKey !== s.simKey) {
+    s.simKey = simKey;
+    s.simStage.replaceChildren(...(stageSim ? [simFrame(stageSim.html, stageSim.title)] : []));
   }
   // 슬라이드 위에 얹는 시뮬레이션: 위쪽 막대를 끌어 옮기면 바로 저장되고 학생 화면에도 그 자리에 보인다
   const allOvers = L.slide_count > 0 && !isPptx(L) ? activities.filter(isOverSim) : [];
   const overs = stageSim ? [] : allOvers.filter((a) => simOnSlide(a, sn));
-  syncSimLayer(run.simLayer, run.img);
-  renderSimLayer(run.simLayer, overs, {
-    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: true,
-    onMove: (a, p) => setActivity(a, { sim_place: p }),
+  syncSimLayer(s.simLayer, s.img);
+  renderSimLayer(s.simLayer, overs, {
+    all: allOvers, load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable,
+    onMove: editable ? (a, p) => setActivity(a, { sim_place: p }) : null,
   });
-  drawRoster(shown.filter((a) => a.kind !== "sim"));
-  run.panel.replaceChildren(...(shown.length ? shown.map(runBlock)
-    : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「자료 추가」에서 추가하세요.")]));
+}
+
+// ---------- 수업용 화면(TV·빔 프로젝터에 띄우는 창) ----------
+// 따로 연 창에 지금 슬라이드(애니메이션 단계·시뮬레이션 포함)만 검은 바탕에 가득 그리고, 어느 탭에 있든 0.3초마다 따라간다.
+// 창 이름(cra-present)이 같아 늘 한 개만 생기고(교사 화면을 새로 고쳐도 같은 창을 다시 쓴다), 맨 위 가림막이 마우스를 모두 막는다.
+// 시뮬레이션은 창마다 따로 돌아가므로 교사 화면에서 조작한 상태까지 옮겨 오지는 않는다.
+let present = null;
+function openPresent() {
+  if (present && !present.w.closed) { present.w.focus(); return; }
+  const w = open("", "cra-present", "popup=yes,width=1280,height=720");
+  if (!w) { alert("창을 열지 못했습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요."); return; }
+  try { w.clearInterval(w.craTick); } catch (e) { /* 처음 여는 창 */ }
+  const d = w.document;
+  // 모양은 교사 창이 이미 읽은 규칙(app.css)을 그대로 옮겨 적는다(빈 창에서는 link로 불러오지 않아서)
+  const css = [...document.styleSheets].map((s) => { try { return [...s.cssRules].map((r) => r.cssText).join("\n"); } catch (e) { return ""; } }).join("\n");
+  d.open(); d.write("<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>수업용 화면</title></head><body></body></html>"); d.close();
+  const style = d.createElement("style");
+  style.textContent = css;
+  d.head.append(style);
+  const img = h("img", { class: "slide", alt: "" });
+  const simStage = h("div", { class: "sim-stage", hidden: true });
+  const simLayer = h("div", { class: "sim-layer" });
+  const stage = h("div", { class: "stage" }, img, simStage, simLayer);
+  const note = h("p", { class: "present-note", hidden: true });
+  d.body.className = "present-body";
+  d.body.append(stage, note, h("div", { class: "present-shield", "aria-hidden": "true" }));
+  d.addEventListener("contextmenu", (e) => e.preventDefault());
+  // 창을 눌러 초점이 넘어가도 키보드 ← → 로는 교사 화면처럼 넘길 수 있다
+  d.addEventListener("keydown", (e) => {
+    if (!lesson) return;
+    if (e.key === "ArrowRight") setPage(lesson.page + 1);
+    if (e.key === "ArrowLeft") setPage(lesson.page - 1);
+  });
+  present = { w, img, stage, simStage, simLayer, note, simKey: "", pptKey: "" };
+  img.addEventListener("load", paintPresent);
+  w.craTick = w.setInterval(paintPresent, 300);   // 이 창의 타이머라서 교사 창이 가려져도 느려지지 않는다
+  paintPresent();
+  w.focus();
+}
+function paintPresent() {
+  const p = present;
+  if (!p || p.w.closed) return;
+  const has = !!lesson && lesson.slide_count > 0;
+  p.stage.hidden = !has;
+  p.note.hidden = has;
+  if (!has) { p.note.textContent = lesson ? "슬라이드가 없는 수업입니다." : "수업을 고르면 슬라이드가 나옵니다."; return; }
+  paintStage(p, false);
+  // 얹기 시뮬레이션 크기: 교사 창의 ResizeObserver는 다른 창의 칸을 보지 못하므로 여기서 맞춘다
+  p.simLayer.querySelectorAll(":scope > .sim-over").forEach((b) => b.style.setProperty("--s", b.clientWidth / SIM_VIEW.w));
 }
 
 addEventListener("resize", () => { if (run && run.simLayer) syncSimLayer(run.simLayer, run.img); });
