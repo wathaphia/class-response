@@ -14,7 +14,7 @@
 | 파일 | 내용 | 주요 함수 | 시나리오 |
 |---|---|---|---|
 | `config.js` | Supabase 주소·키, TURN Worker 주소 | | |
-| `common.js` | 공용: `h()`, 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드(`slideSrc`), WebRTC/TURN(`iceServers` `relayFirst`), 시뮬레이션(`withSimPause` `renderSimLayer`(swapSlide 의 slideswap 에 맞춰 같은 효과 `simBoxFx`) `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
+| `common.js` | 공용: `h()`, 쓰기 감시(`watchedFetch`→`onDataWrite`), 슬라이드(`slideSrc`), WebRTC/TURN(`iceServers` `relayFirst`), 시뮬레이션(`withSimPause` `renderSimLayer`(swapSlide 의 slideswap 에 맞춰 들어오기·물러나기(fx-out-*) 같은 효과 `simBoxFx`) `openSimFull`), 답 요약 | `reloadIfStale`(맨 위) | 모두 |
 | `teacher.js` | 공유 상태(`lessons` `lesson` `activities` `students` `responses` `tab` `editing` `me`), `init`, 로그인, `loadLesson` `loadResponses` `save`, 탭 틀 `draw`(접속 QR·수업 진행·학생 관리·수업용 화면 띄우기(편집 모드에선 없음) + 「설정」 메뉴 + 「프로필」; 「편집 모드」 `editMode` cra-edit `.editing` 이면 설정 탭이 위로) | | teacher |
 | `teacher-library.js` | 「전체 수업」(프로필 화면 `.manage-pane`) 폴더·카드·「+ 수업 추가」·「공유받은 수업」, 슬라이드 PDF | `drawManage` `exportSlidesPdf` | manage |
 | `teacher-profile.js` | 「프로필」: 내 정보·교사 ID·로그아웃·비밀번호, 공동 작업자(`add_collaborator`, `my_profile.colleagues`), 개발자(`is_admin`)의 선생님 관리 | `drawProfile` `paintProfile` `addCollaborator` | manage, promote |

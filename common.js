@@ -120,7 +120,8 @@ function swapSlide(img, src, fx, dir) {
       const box = img.parentNode;
       if (getComputedStyle(box).position === "static") box.style.position = "relative";
       box.querySelectorAll(":scope > .slide-under").forEach((u) => u.remove());
-      const under = h("img", { class: "slide slide-under", src: prev, alt: "", "aria-hidden": "true" });
+      // 옛 장면도 효과에 맞춰 물러난다(fx-out-*). 그 쪽의 얹은 시뮬레이션도 같은 효과로 함께 물러난다(renderSimLayer)
+      const under = h("img", { class: "slide slide-under " + cls.replace("fx-", "fx-out-"), src: prev, alt: "", "aria-hidden": "true" });
       under.style.cssText = "left:" + img.offsetLeft + "px;top:" + img.offsetTop + "px;width:" + img.offsetWidth + "px;height:" + img.offsetHeight + "px";
       box.insertBefore(under, img);
       const drop = () => under.remove();
@@ -347,9 +348,10 @@ function renderSimLayer(layer, list, opts) {
     if (!fx && off && box.classList.contains("fx-out")) continue;   // 사라지는 중에 다시 그려도 끊지 않는다
     if (fx) simBoxFx(layer, box, "");
     if (off && was && fx) {
-      // 떠나는 것: 옛 그림이 덮이는 동안 제자리에서 흐려진 뒤 숨는다
+      // 떠나는 것: 옛 그림과 같은 효과(fx-out-*)로 함께 물러난 뒤 숨는다
       box.classList.add("fx-out");
-      const end = () => { if (!box.classList.contains("fx-out")) return; box.classList.remove("fx-out"); box.classList.add("off"); simOverPause(box); };
+      simBoxFx(layer, box, fx.replace("fx-", "fx-out-"));
+      const end = () => { if (!box.classList.contains("fx-out")) return; box.classList.remove("fx-out"); simBoxFx(layer, box, ""); box.classList.add("off"); simOverPause(box); };
       box.addEventListener("animationend", end, { once: true });
       setTimeout(end, 700);
       continue;
@@ -362,12 +364,12 @@ function renderSimLayer(layer, list, opts) {
 }
 // 얹은 시뮬레이션 하나에 슬라이드 그림과 같은 효과를 준다. 밀기 거리는 슬라이드 너비의 10%, 확대 중심은 슬라이드 가운데로 맞춰
 // 그림과 정확히 함께 움직인다.
-const SIM_FX = ["fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"];
+const SIM_FX = ["fx-step", "fx-fade", "fx-zoom", "fx-push-next", "fx-push-prev"].flatMap((c) => [c, c.replace("fx-", "fx-out-")]);
 function simBoxFx(layer, box, cls) {
   box.classList.remove(...SIM_FX);
   if (!cls) return;
   const W = layer.clientWidth, H = layer.clientHeight;
-  box.style.setProperty("--fx-dx", (cls === "fx-push-prev" ? -0.1 : 0.1) * W + "px");
+  box.style.setProperty("--fx-dx", (cls.endsWith("push-prev") ? -0.1 : 0.1) * W + "px");
   box.style.transformOrigin = (W / 2 - box.offsetLeft) + "px " + (H / 2 - box.offsetTop) + "px";
   void box.offsetWidth;
   box.classList.add(cls);
