@@ -34,7 +34,29 @@ function paintProfile() {
   const info = (label, value) => h("div", { class: "profile-row" }, h("dt", {}, label), h("dd", {}, value));
   const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code),
     h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(p.code).then(() => { e.target.textContent = "복사했습니다"; }); } }, "복사")) : "—";
+  // 재설정 메일의 링크로 들어옴(로그인된 채): 여기서 새 비밀번호를 정한다
+  const pw1 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
+  const pw2 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
+  const pwMsg = h("p", { class: "msg" });
+  const recovery = passwordRecovery ? h("form", {
+    class: "card stack recovery-card",
+    async onsubmit(e) {
+      e.preventDefault();
+      if (pw1.value.length < 6) { pwMsg.textContent = "6자 이상으로 정해 주세요."; return pw1.focus(); }
+      if (pw1.value !== pw2.value) { pwMsg.textContent = "두 비밀번호가 다릅니다."; return pw2.focus(); }
+      pwMsg.textContent = "바꾸는 중…";
+      const { error } = await sb.auth.updateUser({ password: pw1.value });
+      if (error) { pwMsg.textContent = "바꾸지 못했습니다: " + error.message; return; }
+      passwordRecovery = false;
+      centerNote("새 비밀번호로 바꿨습니다");
+      paintProfile();
+    },
+  }, h("h3", {}, "새 비밀번호 설정"),
+    h("label", {}, "새 비밀번호 (6자 이상)", pw1), h("label", {}, "한 번 더", pw2),
+    h("button", { class: "primary", type: "submit" }, "비밀번호 바꾸기"), pwMsg) : "";
+  if (recovery) requestAnimationFrame(() => { recovery.scrollIntoView({ block: "center" }); pw1.focus(); });
   side.replaceChildren(
+    recovery,
     h("section", { class: "card stack profile-card" },
       h("div", { class: "profile-head" },
         h("span", { class: "avatar big", "aria-hidden": "true" }, (email[0] || "?").toUpperCase()),
@@ -57,7 +79,7 @@ function paintProfile() {
             e.currentTarget.disabled = true;
             msg.textContent = "재설정 메일을 보내는 중…";
             const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: new URL(location.pathname, location.origin).href });
-            msg.textContent = error ? "보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
+            msg.textContent = error ? "보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다).";
           },
         }, "비밀번호 재설정")),
       msg),
@@ -147,7 +169,7 @@ function bulkBar(set, ids, repaint, ...actions) {
 // 여러 학생 승격: 학생마다 로그인 이메일을 받는다
 function promoteMany(list) {
   if (list.length === 1) return promoteStudent(list[0]);
-  const emails = list.map((s) => h("input", { type: "email", required: true, placeholder: "로그인 이메일", "aria-label": nameOf(s) + " 로그인 이메일" }));
+  const emails = list.map((s) => h("input", { type: "email", placeholder: "로그인 이메일 (비워도 됨)","aria-label": nameOf(s) + " 로그인 이메일" }));
   const msg = h("p", { class: "msg" });
   const close = openModal(list.length + "명을 선생님으로 승격", h("form", {
     class: "stack promote-form",
@@ -169,7 +191,7 @@ function promoteMany(list) {
     },
   },
     list.map((s, i) => h("label", {}, nameOf(s), emails[i])),
-    h("p", { class: "muted small" }, "학생은 교사 화면에서 이 이메일로 「가입하기」를 한 뒤 메일의 확인 링크를 누르면 로그인할 수 있습니다."),
+    h("p", { class: "muted small" }, "이메일을 적으면 학생은 그 이메일로 「가입하기」를 하면 됩니다. 비워 두면 학생이 「가입하기」에서 학번·이름과 쓸 이메일을 적어 가입 요청을 보내고, 「전체 선생님 및 학생」에서 승인합니다."),
     h("button", { class: "primary", type: "submit" }, list.length + "명 승격"), msg));
   emails[0].focus();
 }
@@ -276,9 +298,12 @@ function addCollaborator() {
     h("fieldset", { class: "stack collab-people" }, h("legend", {}, "함께 쓸 선생님"),
       people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + (p.name ? nameOf(p) : p.email),
         h("span", { class: "muted small" }, (p.name ? " · " + p.email : "") + " · ID " + p.code + (p.account ? "" : " · 아직 가입 전"))))
-        : h("p", { class: "muted small" }, "고를 수 있는 선생님이 없습니다. 「선생님 추가」로 선생님을 넣거나 학생을 승격해 주세요.")),
+        : h("p", { class: "muted small" }, "고를 수 있는 선생님이 없습니다. 선생님 관리 표의 「추가」로 선생님을 넣거나 학생을 승격해 주세요.")),
     h("fieldset", { class: "stack collab-lessons" }, h("legend", {}, "함께 쓸 수업"),
-      all.length ? all.map((l, i) => h("label", { class: "check" }, boxes[i], " " + l.title + " (" + l.code + ")"))
+      all.length ? all.map((l, i) => h("label", { class: "check collab-lesson" }, boxes[i],
+        l.slide_count && !isPptx(l) ? h("img", { class: "lesson-thumb mini", src: slideSrc(l, 1, true), alt: "", loading: "lazy" })
+          : h("span", { class: "lesson-thumb mini empty", "aria-hidden": "true" }),
+        " " + l.title + " (" + l.code + ")"))
         : h("p", { class: "muted small" }, "수업이 없습니다.")),
     h("p", { class: "muted small" }, "공동 작업자는 고른 수업을 보고 고치고 진행할 수 있습니다. 수업을 지우거나 다른 선생님에게 다시 나누지는 못합니다."),
     h("button", { class: "primary", type: "submit", disabled: !people.length }, "추가"), msg));
@@ -286,15 +311,36 @@ function addCollaborator() {
 
 // 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
-  const email = h("input", { type: "email", placeholder: "새 선생님 이메일", "aria-label": "새 선생님 이메일" });
   const set = async (who, on) => {
-    if (!on && !confirm(who + " 선생님을 교사 목록에서 뺄까요? 그 선생님의 수업은 지워지지 않고 개발자가 계속 볼 수 있습니다.")) return;
+    if (!on && !confirm(who + " 선생님을 교사 목록에서 뺄까요? 그 선생님의 수업은 지워지지 않고 개발자가 계속 볼 수 있습니다.")) return false;
     const { data, error } = await sb.rpc("admin_set_teacher", { p_email: who, p_on: on });
-    const why = { bad_email: "이메일 모양이 아닙니다.", self: "내 계정은 뺄 수 없습니다." };
-    if (error || data.error) return alert(error ? error.message : why[data.error] || data.error);
-    if (on) flash(who + " 선생님을 추가했습니다(ID " + data.code + ").");
+    const why = { bad_email: "이메일 형식이 올바르지 않습니다", self: "내 계정은 뺄 수 없습니다" };
+    if (error || data.error) { centerNote((on ? "추가하지 못했습니다: " : "빼지 못했습니다: ") + (error ? error.message : why[data.error] || data.error)); return false; }
+    centerNote(on ? who + " 선생님을 추가했습니다 (ID " + data.code + ")" : who + " 선생님을 뺐습니다");
+    await loadProfile();
+    return true;
+  };
+  // 표 맨 아래 줄: 「추가」 → 이메일 칸에 입력란이 열리고 단추가 「이메일로 추가」로 바뀐다
+  const newEmail = h("input", { type: "email", class: "add-email", placeholder: "새 선생님 이메일", "aria-label": "새 선생님 이메일", hidden: true,
+    onkeydown(e) { if (e.key === "Enter") { e.preventDefault(); addBtn.click(); } } });
+  const addBtn = h("button", {
+    class: "link", type: "button",
+    async onclick() {
+      if (newEmail.hidden) { newEmail.hidden = false; addBtn.textContent = "이메일로 추가"; newEmail.focus(); return; }
+      const who = newEmail.value.trim().toLowerCase();
+      if (!EMAIL_RE.test(who)) { centerNote("이메일 형식이 올바르지 않습니다"); newEmail.focus(); return; }
+      addBtn.disabled = true;
+      if (!(await set(who, true))) { addBtn.disabled = false; newEmail.focus(); }
+    },
+  }, "추가");
+  const decide = async (r, ok) => {
+    if (!ok && !confirm(nameOf(r) + " 의 가입 요청(" + r.email + ")을 거절할까요?")) return;
+    const { data, error } = await sb.rpc("decide_teacher_request", { p_student: r.student_id, p_ok: ok });
+    const why = { no_request: "요청이 이미 처리되었습니다", not_promoted: "승격이 해제된 학생이라 요청을 지웠습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
+    centerNote(error ? "처리하지 못했습니다: " + error.message : data.error ? why[data.error] || data.error : ok ? nameOf(r) + " 가입을 승인했습니다" : "가입 요청을 거절했습니다");
     await loadProfile();
   };
+  const requests = p.requests || [];
   const picked = peoplePick.teachers;
   const ids = (p.teachers || []).filter((t) => !t.admin).map((t) => t.email);   // 개발자는 뺄 수 없어 고르지 않는다
   pickPrune(picked, ids);
@@ -317,9 +363,18 @@ function teachersCard(p) {
       h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "수업", "마지막 로그인", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, (p.teachers || []).map((t) => h("tr", { class: picked.has(t.email) ? "picked-row" : null },
         t.admin ? h("td", { class: "pick" }) : pickCell(picked, t.email, t.email, repaint),
-        h("td", {}, t.code), h("td", {}, t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
+        h("td", {}, t.code), h("td", {}, isPendingEmail(t.email) ? h("span", { class: "muted" }, "가입 전") : t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
         h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"),
-        h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기"))))))),
-    h("div", { class: "row" }, email, h("button", { class: "ghost", type: "button", onclick() { if (email.value.trim()) set(email.value.trim(), true); } }, "선생님 추가")),
-    h("p", { class: "muted small" }, "추가한 선생님은 교사 화면의 「가입하기」에서 같은 이메일로 가입하면 로그인할 수 있습니다."));
+        h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기")))),
+        h("tr", { class: "add-row" }, h("td", { class: "pick" }), h("td", {}, addBtn), h("td", {}, newEmail), h("td"), h("td"), h("td"))))),
+    requests.length ? h("div", { class: "stack" }, h("h4", {}, "가입 요청 (" + requests.length + ")"),
+      h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
+        h("thead", {}, h("tr", {}, ["학번", "이름", "가입 이메일", "요청한 때", ""].map((t) => h("th", {}, t)))),
+        h("tbody", {}, requests.map((r) => h("tr", {},
+          h("td", {}, r.class_no || "—"), h("td", {}, r.name || "—"),
+          h("td", {}, r.email, r.confirmed ? null : h("span", { class: "tag info" }, "메일 인증 전")), h("td", {}, dateText(r.at)),
+          h("td", { class: "row" },
+            h("button", { class: "link", type: "button", onclick() { decide(r, true); } }, "승인"),
+            h("button", { class: "link danger", type: "button", onclick() { decide(r, false); } }, "거절")))))))) : "",
+    h("p", { class: "muted small" }, "추가한 선생님은 교사 화면의 「가입하기」에서 같은 이메일로 가입하면 로그인할 수 있습니다. 승격된 학생은 「가입하기」에서 학번·이름을 적어 가입 요청을 보내고, 여기서 승인하면 그 이메일로 로그인합니다."));
 }

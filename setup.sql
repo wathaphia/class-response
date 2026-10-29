@@ -633,7 +633,11 @@ begin
       where c.email = me), '[]'::jsonb),
     'teachers', case when t.is_admin then coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'admin', x.is_admin,
         'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id)) order by x.created_at)
-      from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end);
+      from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end,
+    -- (개발자) 승격된 학생의 가입 요청(아래 teacher_requests)
+    'requests', case when t.is_admin then coalesce((select jsonb_agg(jsonb_build_object('student_id', r.student_id, 'class_no', s.class_no, 'name', s.name,
+        'email', r.email, 'at', r.created_at, 'confirmed', u.email_confirmed_at is not null) order by r.created_at)
+      from teacher_requests r join students s on s.id = r.student_id left join auth.users u on lower(u.email) = r.email), '[]'::jsonb) end);
 end $$;
 
 -- 공동 작업자 추가: 상대 교사의 6자리 ID와 나눌 수업들(내 수업만, 개발자는 모든 수업)
@@ -707,6 +711,8 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare e text := lower(trim(p_email));
 begin
   if not is_admin() then raise exception 'admin only'; end if;
+  -- 이메일을 비워 두면 임시 주소(가입 전)를 붙이고, 학생이 「가입하기」에서 보낸 요청을 개발자가 승인할 때 진짜 이메일로 바뀐다
+  if coalesce(e, '') = '' then e := 'pending-' || replace(p_student::text, '-', '') || '@promoted.invalid'; end if;
   if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
   if not exists (select 1 from students where id = p_student) then return jsonb_build_object('error', 'no_student'); end if;
   if exists (select 1 from teachers where student_id = p_student) then return jsonb_build_object('error', 'already'); end if;
@@ -742,6 +748,64 @@ revoke all on function promoted_students() from public;
 grant execute on function promote_student(uuid, text) to authenticated;
 grant execute on function demote_student(uuid) to authenticated;
 grant execute on function promoted_students() to authenticated;
+
+-- ------------------------------------------------------------
+-- 승격된 학생의 가입 요청: 교사 화면 「가입하기」에서 「학생에서 승격되었습니까? 예」를 고르고 학번·이름·이메일을 적는다.
+-- 학번·이름이 승격된 학생과 맞으면 요청이 남고, 개발자가 「전체 선생님 및 학생」 → 선생님 관리에서 승인하면
+-- 그 이메일이 그 학생의 교사 로그인 이메일이 된다(승격할 때 적은 이메일은 바뀐다). 학생 한 명에 요청 하나(다시 보내면 덮어씀).
+-- ------------------------------------------------------------
+create table if not exists teacher_requests (
+  student_id uuid primary key references students(id) on delete cascade,
+  email      text not null,
+  created_at timestamptz not null default now()
+);
+alter table teacher_requests enable row level security;   -- 정책 없음: 아래 RPC로만 읽고 쓴다
+
+-- 승인하면 교사 이메일이 바뀌므로 공동 작업자 표도 따라 바뀌게
+alter table lesson_collaborators drop constraint if exists lesson_collaborators_email_fkey;
+alter table lesson_collaborators add constraint lesson_collaborators_email_fkey
+  foreign key (email) references teachers(email) on delete cascade on update cascade;
+
+create or replace function request_teacher_signup(p_class_no text, p_name text, p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  e text := lower(trim(p_email));
+  sid uuid;
+begin
+  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
+  select s.id into sid from students s join teachers t on t.student_id = s.id
+    where tidy(s.class_no) = tidy(p_class_no) and tidy(s.name) = tidy(p_name) limit 1;
+  if sid is null then return jsonb_build_object('error', 'no_match'); end if;
+  if exists (select 1 from teachers where email = e and student_id is distinct from sid) then return jsonb_build_object('error', 'email_taken'); end if;
+  insert into teacher_requests (student_id, email) values (sid, e)
+    on conflict (student_id) do update set email = excluded.email, created_at = now();
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- 개발자: 가입 요청 승인(p_ok) 또는 거절
+create or replace function decide_teacher_request(p_student uuid, p_ok boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r teacher_requests;
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  select * into r from teacher_requests where student_id = p_student;
+  if not found then return jsonb_build_object('error', 'no_request'); end if;
+  if p_ok then
+    if not exists (select 1 from teachers where student_id = p_student) then
+      delete from teacher_requests where student_id = p_student;
+      return jsonb_build_object('error', 'not_promoted');
+    end if;
+    if exists (select 1 from teachers where email = r.email and student_id is distinct from p_student) then return jsonb_build_object('error', 'email_taken'); end if;
+    update teachers set email = r.email where student_id = p_student;
+  end if;
+  delete from teacher_requests where student_id = p_student;
+  return jsonb_build_object('ok', true, 'email', r.email);
+end $$;
+
+revoke all on function request_teacher_signup(text, text, text) from public;
+revoke all on function decide_teacher_request(uuid, boolean) from public;
+grant execute on function request_teacher_signup(text, text, text) to anon, authenticated;
+grant execute on function decide_teacher_request(uuid, boolean) to authenticated;
 
 -- 버그 제보(편집 모드 「버그 제보」 탭): 선생님 누구나 쓰고 모두 읽는다. 고치기·지우기는 쓴 사람과 개발자(is_admin)만.
 -- 한 사람당 5개까지(지우면 다시 쓸 수 있음). 쓴 사람·이메일·시각은 서버가 채운다.
