@@ -1,12 +1,13 @@
-// 교사 화면(버전 2): 로그인 → 수업 고르기 → [접속 QR] [수업 진행] [학생 관리] [수업용 화면 띄우기(창)] · 설정▾[자료 추가 · 슬라이드 편집 · 기타 관리] · 프로필(내 정보 + 전체 수업)
-// 오른쪽 위 프로필 왼쪽 「수업 모드 | 편집 모드」에서 편집 모드로 바꾸면 [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [기타 관리] [버그 제보] 탭이 모두 위에 나온다(접속 QR·설정·수업용 화면 띄우기는 숨김).
-// 탭 순서·이름은 프로필의 「탭 꾸미기」에서 바꾼다(tabCustom, cra-tabs).
+// 교사 화면(버전 2): 로그인(로그인 · 가입하기) → 수업 고르기 → 위 줄 탭 [접속 QR] [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [버그 제보] + [수업용 화면 띄우기(창)]
+// 오른쪽 위 「수업 모드/편집 모드」 스위치(지금 모드 이름만)로 모드를 바꾸면 그 모드에 보이게 정한 탭만 나온다(SHOW_DEFAULT, 탭 꾸미기에서 바꿈).
+// 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] (+ 개발자만 [전체 선생님 및 학생] [기타 관리]).
+// 탭 이름·순서·두 줄 자리·모드별 보이기는 프로필의 「탭 꾸미기」(startTabEdit: 탭 이름 바로 고치기, 끌어 옮기기)에서 바꾸고 교사 계정(user_metadata.tabs)에 저장한다.
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
 // 교사 화면 스크립트는 탭별로 나뉘어 teacher.html 이 이 순서로 불러온다(모두 같은 전역 공간을 쓴다):
 //   teacher.js          공유 상태 · 시작 · 로그인 · 데이터 읽기/쓰기 · 탭 틀(이 파일)
-//   teacher-library.js  전체 수업(프로필 오른쪽) · 슬라이드 PDF
-//   teacher-profile.js  프로필 · 공동 작업자 · (개발자) 선생님 관리
+//   teacher-library.js  전체 수업(수업 삭제 포함) · 슬라이드 PDF
+//   teacher-profile.js  프로필 · 전체 수업 틀 · (개발자) 전체 선생님 및 학생(선생님 관리 · 공동 작업자 · 모든 학생)
 //   teacher-etc.js      기타 관리(사용량) · 버그 제보
 //   teacher-run.js      수업 진행 · 실시간 접속 표시
 //   teacher-build.js    자료 추가 · 설명 및 질문 작성기
@@ -22,17 +23,46 @@ let lesson = null;        // 지금 고른 수업(없으면 새 수업 만들기
 let activities = [];
 let students = [];
 let responses = [];
-let editMode = localStorage.getItem("cra-edit") === "1";   // 편집 모드: 자료 추가·슬라이드 편집·기타 관리를 위쪽 탭으로 꺼낸다
-// 탭 꾸미기(프로필): { order: [탭 키…], names: { 키: 이름 } }. 이 브라우저에만 저장한다
-let tabCustom = (() => { try { return JSON.parse(localStorage.getItem("cra-tabs")) || {}; } catch { return {}; } })();
-const TAB_DEFAULTS = [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"], ["build", "자료 추가"], ["settings", "슬라이드 편집"], ["etc", "기타 관리"], ["bugs", "버그 제보"]];
-const tabName = (k) => (tabCustom.names && tabCustom.names[k]) || (TAB_DEFAULTS.find(([x]) => x === k) || [, k])[1];
-const tabSort = (list) => {
-  const at = (k) => { const i = (tabCustom.order || []).indexOf(k); return i < 0 ? 99 + TAB_DEFAULTS.findIndex(([x]) => x === k) : i; };
-  return list.map((k) => [k, tabName(k)]).sort((a, b) => at(a[0]) - at(b[0]));
-};
-function saveTabCustom(c) { tabCustom = c; try { localStorage.setItem("cra-tabs", JSON.stringify(c)); } catch {} }
-let tab = (localStorage.getItem("cra-tab") || "run").replace(/^manage$/, "profile");   // 예전 「전체 수업」 탭은 프로필 안으로
+let editMode = localStorage.getItem("cra-edit") === "1";   // 수업 모드 / 편집 모드: 탭마다 어느 모드에서 보일지는 「탭 꾸미기」에서 정한다
+// 탭 두 줄: 위 줄(main) + 「설정」을 누르면 나오는 아래 줄(sub). 개발자 전용 탭(ADMIN_TABS)은 다른 선생님에게는 아예 없다.
+// 탭 꾸미기: { main: [키…], sub: [키…], names: { 키: 이름 }, show: { 키: { class, edit } } }. 교사 계정(user_metadata.tabs)에 저장한다
+const TAB_DEFAULTS = [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"], ["build", "자료 추가"], ["settings", "슬라이드 편집"], ["bugs", "버그 제보"],
+  ["profile", "프로필"], ["library", "전체 수업"], ["people", "전체 선생님 및 학생"], ["etc", "기타 관리"]];
+const MAIN_TABS = ["join", "run", "students", "build", "settings", "bugs"];
+const SUB_TABS = ["profile", "library", "people", "etc"];
+const ADMIN_TABS = ["people", "etc"];
+const SHOW_DEFAULT = { join: { class: true, edit: false }, build: { class: false, edit: true }, settings: { class: false, edit: true }, bugs: { class: false, edit: true } };
+const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "people", "etc"];   // 수업을 고르지 않아도 열리는 탭
+let tabCustom = {};
+const isAdmin = () => !!(profile && profile.admin);
+const tabName = (k, c = tabCustom) => (c.names && c.names[k]) || (TAB_DEFAULTS.find(([x]) => x === k) || [, k])[1];
+const tabShown = (k, mode, c = tabCustom) => { const s = (c.show && c.show[k]) || SHOW_DEFAULT[k] || {}; return s[mode] !== false; };
+// 저장된 순서를 지금 쓸 수 있는 탭으로 맞춘다(없는 탭은 원래 줄 끝에, 프로필은 늘 아래 줄)
+function tabLayout(c = tabCustom) {
+  const ok = (k) => TAB_DEFAULTS.some(([x]) => x === k) && (isAdmin() || !ADMIN_TABS.includes(k));
+  const main = (c.main || MAIN_TABS).filter((k) => ok(k) && k !== "profile");
+  const sub = (c.sub || SUB_TABS).filter((k) => ok(k) && !main.includes(k));
+  if (!sub.includes("profile")) sub.unshift("profile");
+  for (const k of MAIN_TABS) if (ok(k) && !main.includes(k) && !sub.includes(k)) main.push(k);
+  for (const k of SUB_TABS) if (ok(k) && !main.includes(k) && !sub.includes(k)) sub.push(k);
+  return { main, sub };
+}
+function loadTabCustom() {
+  let c = me && me.user_metadata && me.user_metadata.tabs;
+  if (!c) {   // 예전에 이 브라우저에만 저장한 이름은 옮겨 온다
+    try { const old = JSON.parse(localStorage.getItem("cra-tabs")); if (old && old.names) c = { names: old.names }; } catch {}
+  }
+  tabCustom = c || {};
+}
+async function saveTabCustom(c) {
+  const { data, error } = await sb.auth.updateUser({ data: { tabs: c } });
+  if (error) { alert("탭 설정을 저장하지 못했습니다: " + error.message); return false; }
+  tabCustom = c;
+  if (data && data.user) me = data.user;
+  return true;
+}
+let tabEdit = null;   // 탭 꾸미기 중: { draft, base }
+let tab = (localStorage.getItem("cra-tab") || "run").replace(/^manage$/, "library");
 let timer = null;
 let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
@@ -52,11 +82,6 @@ addEventListener("DOMContentLoaded", () => {
       showPasswordRecovery();
     }
   });
-  // 눌러서 펼친 설정 메뉴는 바깥을 누르면 접는다
-  document.addEventListener("click", (e) => {
-    const m = app.querySelector(".set-menu.open");
-    if (m && !m.contains(e.target)) m.classList.remove("open");
-  });
   init();
 });
 
@@ -74,6 +99,8 @@ async function init() {
       error ? h("p", { class: "error" }, error.message) : null,
       h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))));
   }
+  await loadProfile();   // 개발자인지 알아야 탭 줄을 그린다
+  loadTabCustom();
   await loadLessons(localStorage.getItem("cra-lesson"));
   document.addEventListener("keydown", (e) => {
     if (tab !== "run" || !lesson || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
@@ -82,60 +109,64 @@ async function init() {
   });
 }
 
-function showLogin() {
+// 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호 → 「이메일 인증」(확인 메일) → 메일의 링크를 누른 뒤 「가입하기」로 들어온다.
+// 교사 화면은 teachers 표에 있는 이메일(선생님 추가·승격된 학생)만 쓸 수 있다.
+function showLogin(signup) {
+  const here = new URL(location.pathname, location.origin).href;
   const email = h("input", { type: "email", autocomplete: "username", required: true });
-  const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const pw = h("input", { type: "password", autocomplete: signup ? "new-password" : "current-password", minlength: signup ? 6 : null, required: true });
   const msg = h("p", { class: "msg" });
+  const join = h("button", { class: "primary big", type: "submit", disabled: !!signup }, signup ? "가입하기" : "로그인");
+  const verify = signup ? h("button", {
+    class: "ghost", type: "button",
+    async onclick() {
+      const address = email.value.trim();
+      if (!address || pw.value.length < 6) { msg.textContent = "이메일과 비밀번호(6자 이상)를 넣고 다시 눌러 주세요."; (address ? pw : email).focus(); return; }
+      verify.disabled = true;
+      msg.textContent = "인증 메일을 보내는 중…";
+      const { error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: here } });
+      verify.disabled = false;
+      if (error) { msg.textContent = "인증 메일을 보내지 못했습니다: " + error.message; return; }
+      join.disabled = false;
+      msg.textContent = "메일함에서 인증 링크를 누른 뒤 「가입하기」를 눌러 주세요.";
+    },
+  }, "이메일 인증") : null;
+  const resetIn = h("input", { type: "email", autocomplete: "username", placeholder: "가입한 이메일" });
+  const resetMsg = h("p", { class: "msg" });
+  const resetBox = h("form", {
+    class: "card stack", hidden: true,
+    async onsubmit(e) {
+      e.preventDefault();
+      const address = resetIn.value.trim();
+      if (!address) { resetMsg.textContent = "이메일을 입력해 주세요."; resetIn.focus(); return; }
+      resetMsg.textContent = "재설정 메일을 보내는 중…";
+      const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: here });
+      resetMsg.textContent = error ? "재설정 메일을 보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
+    },
+  }, h("label", {}, "이메일", resetIn), h("button", { class: "ghost", type: "submit" }, "비밀번호 재설정 이메일 보내기"), resetMsg);
   app.replaceChildren(h("main", { class: "narrow" },
-    h("header", { class: "intro" }, h("p", { class: "eyebrow" }, "교사용"), h("h1", {}, "로그인")),
+    h("header", { class: "intro" }, h("p", { class: "eyebrow" }, "교사용"), h("h1", {}, signup ? "가입하기" : "로그인")),
+    h("div", { class: "seg login-seg", role: "tablist" },
+      h("button", { type: "button", role: "tab", "aria-selected": String(!signup), class: signup ? "" : "on", onclick() { if (signup) showLogin(false); } }, "로그인"),
+      h("button", { type: "button", role: "tab", "aria-selected": String(!!signup), class: signup ? "on" : "", onclick() { if (!signup) showLogin(true); } }, "가입하기")),
     h("form", {
       class: "card stack",
       async onsubmit(e) {
         e.preventDefault();
         msg.textContent = "로그인 중…";
         const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
-        if (error) msg.textContent = "로그인하지 못했습니다: " + error.message;
-        else init();
+        if (!error) return init();
+        msg.textContent = signup && /confirm/i.test(error.message)
+          ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
+          : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
-    }, h("label", {}, "이메일", email), h("label", {}, "비밀번호", pw),
-      h("button", { class: "primary big", type: "submit" }, "로그인"), msg),
-    h("button", {
-      class: "link",
-      type: "button",
-      async onclick() {
-        const address = email.value.trim();
-        if (!address) {
-          msg.textContent = "먼저 이메일을 입력해 주세요.";
-          email.focus();
-          return;
-        }
-        msg.textContent = "재설정 메일을 보내는 중…";
-        const redirectTo = new URL(location.pathname, location.origin).href;
-        const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo });
-        msg.textContent = error
-          ? "재설정 메일을 보내지 못했습니다: " + error.message
-          : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
-      },
-    }, "비밀번호 재설정 메일 보내기"),
-    // 선생님으로 승격된 학생: 승격할 때 받은 이메일로 처음 한 번 계정을 만든다(확인 메일의 링크를 눌러야 로그인됨)
-    h("button", {
-      class: "link",
-      type: "button",
-      async onclick() {
-        const address = email.value.trim();
-        if (!address || pw.value.length < 6) {
-          msg.textContent = "승격할 때 등록한 이메일과 새 비밀번호(6자 이상)를 넣고 다시 눌러 주세요.";
-          (address ? pw : email).focus();
-          return;
-        }
-        msg.textContent = "계정을 만드는 중…";
-        const { error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: new URL(location.pathname, location.origin).href } });
-        msg.textContent = error
-          ? "계정을 만들지 못했습니다: " + error.message
-          : "메일함에서 확인 링크를 누른 뒤 로그인해 주세요. (선생님으로 승격된 이메일만 교사 화면을 쓸 수 있습니다.)";
-      },
-    }, "선생님으로 승격된 학생: 처음 계정 만들기"),
-    h("p", { class: "muted small center" }, "교사 계정은 Supabase 대시보드 → Authentication → Users 에서 만들거나, 「학생 관리」에서 승격된 학생이 위 단추로 직접 만듭니다.")));
+    }, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, msg),
+    signup ? null : h("p", { class: "center" }, h("button", {
+      class: "link", type: "button",
+      onclick() { resetBox.hidden = !resetBox.hidden; if (!resetBox.hidden) { resetIn.value = email.value.trim(); resetIn.focus(); } },
+    }, "비밀번호 재설정")),
+    signup ? null : resetBox));
+  email.focus();
 }
 
 function showPasswordRecovery() {
@@ -270,7 +301,7 @@ async function save(table, row, id) {
   return data[0];
 }
 
-const nameOf = (s) => s.class_no + " " + s.name;
+const nameOf = (s) => ((s.class_no || "") + " " + s.name).trim();   // 이름만으로 들어온 학생은 학번이 비어 있다
 const studentById = (id) => students.find((s) => s.id === id);
 const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentById(r.student_id))
   .map((r) => ({ name: nameOf(studentById(r.student_id)), answers: r.answers, r }));
@@ -288,6 +319,9 @@ const TAB_ICONS = {
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   bugs: '<rect x="7" y="7" width="10" height="13" rx="5"/><path d="M12 11v9M9 4.5l1.5 2.5M15 4.5L13.5 7M3.5 13H7M17 13h3.5M4.5 8.5L7 10M19.5 8.5L17 10M4.5 18.5L7 16.5M19.5 18.5L17 16.5"/>',
   etc: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/>',
+  profile: '<circle cx="12" cy="8.5" r="4"/><path d="M4 20.5a8 8 0 0 1 16 0"/>',
+  library: '<path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  people: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="11" r="2.5"/><path d="M5.5 16.5a3.5 3.5 0 0 1 7 0M14.5 10h3.5M14.5 13.5h3.5"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 function tabIcon(k) {
@@ -420,6 +454,35 @@ function dragSort(box, opts) {
 
 function draw() {
   clearTimeout(timer);
+  const { main: mainTabs, sub: subTabs } = tabLayout();
+  const mode = editMode ? "edit" : "class";
+  const open = [...mainTabs.filter((k) => tabShown(k, mode)), ...subTabs];
+  if (!open.includes(tab)) tab = open[0] || "profile";
+  if (!lesson && !NO_LESSON_TABS.includes(tab)) tab = mainTabs.includes("settings") && tabShown("settings", mode) ? "settings" : "library";
+  main = h("main", { class: "wide" });
+  main.inert = !!tabEdit;
+  app.classList.toggle("tab-editing", !!tabEdit);
+  app.replaceChildren(topBar(), main);
+  if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
+  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, library: drawLibrary, people: drawPeople, etc: drawEtc, bugs: drawBugs })[tab]();
+  schedule();
+}
+
+// 탭 꾸미기 중에는 위쪽 틀만 다시 그린다(아래 화면은 흐리게 멈춰 둔다)
+function repaintTop() {
+  const old = app.querySelector("header.top");
+  if (old) old.replaceWith(topBar());
+}
+
+function goTab(k) {
+  if (tabEdit) return;
+  tab = k;
+  localStorage.setItem("cra-tab", k);
+  if (tabLayout().sub.includes(k)) localStorage.setItem("cra-subtab", k);
+  draw();
+}
+
+function topBar() {
   // 왼쪽 위: 수업 코드(바꿀 수 없음) · 제목(바로 고쳐 쓰고 Enter 또는 칸을 벗어나면 저장). 수업 옮기기·새 수업은 「전체 수업」에서
   const titleBox = h("input", {
     type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
@@ -438,59 +501,166 @@ function draw() {
   });
   const lessonBox = h("div", { class: "lesson-box" },
     h("span", { class: "lesson-code", title: "수업 코드(바꿀 수 없음)" }, lesson ? lesson.code : "새 수업"), titleBox);
-  // 평소: 접속 QR · 수업 진행 · 학생 관리 · 수업용 화면 띄우기 + 설정▾(자료 추가 · 슬라이드 편집 · 기타 관리)
-  // 편집 모드: 설정 안의 탭이 모두 위로 나오고 버그 제보가 붙는다(접속 QR과 설정 단추는 숨김). 순서·이름은 「탭 꾸미기」를 따른다
-  const tabs = tabSort(editMode ? ["run", "students", "build", "settings", "etc", "bugs"] : ["join", "run", "students"]);
-  // 설정 단추에 마우스를 올리면(누르거나 키보드로 들어가도) 아래로 펼쳐지는 탭
-  const setTabs = editMode ? [] : tabSort(["build", "settings", "etc"]);
-  if (![...tabs, ...setTabs, ["profile"]].some(([k]) => k === tab)) tab = "run";
-  const go = (k) => { tab = k; localStorage.setItem("cra-tab", k); draw(); };
-  const menu = h("div", { class: "set-menu" },
+  const { main: mainTabs, sub: subTabs } = tabEdit ? tabEdit.draft : tabLayout();
+  const mode = editMode ? "edit" : "class";
+  const tabBtn = (k) => h("button", {
+    type: "button", class: tab === k ? "tab on" : "tab", "data-k": k, title: tabName(k), disabled: !lesson && !NO_LESSON_TABS.includes(k),
+    onclick() { goTab(k); },
+  }, tabIcon(k), h("span", {}, tabName(k)));
+  const mainRow = tabEdit ? mainTabs.map((k) => custTab(k, "main")) : mainTabs.filter((k) => tabShown(k, mode)).map(tabBtn);
+  // 수업 모드에서만: 탭 줄 끝의 「수업용 화면 띄우기」(teacher-run.js openPresent, 탭이 아니라 창을 연다)
+  const present = editMode || tabEdit ? null : h("button", {
+    type: "button", class: "tab present-btn", disabled: !lesson, title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)",
+    onclick() { openPresent(); },
+  }, tabIcon("present"), h("span", {}, "수업용 화면 띄우기"));
+  // 수업 모드 ⇄ 편집 모드 스위치: 지금 모드 이름만 보인다
+  const modeSwitch = h("button", {
+    type: "button", role: "switch", "aria-checked": String(editMode), class: editMode ? "mode-switch editing" : "mode-switch",
+    title: editMode ? "누르면 수업 모드로 바꿉니다" : "누르면 편집 모드로 바꿉니다",
+    onclick() { editMode = !editMode; localStorage.setItem("cra-edit", editMode ? "1" : "0"); draw(); },
+  }, h("span", { class: "knob", "aria-hidden": "true" }), h("span", { class: "mode-name" }, editMode ? "편집 모드" : "수업 모드"));
+  const inSub = subTabs.includes(tab);
+  // 설정: 누르면 아래 줄 탭(프로필 · 전체 수업 · …)이 열린다
+  const setBtn = h("button", {
+    class: inSub ? "tab profile-btn on" : "tab profile-btn", type: "button", title: (me.email || "") + " · 설정",
+    onclick() { const last = localStorage.getItem("cra-subtab"); goTab(subTabs.includes(last) ? last : "profile"); },
+  }, h("span", { class: "avatar", "aria-hidden": "true" }, ((me.email || "?")[0]).toUpperCase()), h("span", {}, "설정"));
+  const subRow = tabEdit || inSub ? h("nav", { class: "tabs sub-tabs", "aria-label": "설정 탭" },
+    tabEdit ? subTabs.map((k) => custTab(k, "sub")) : subTabs.map(tabBtn), tabEdit ? tabEditBar() : null) : null;
+  return h("header", { class: "top" + (editMode ? " editing" : "") + (subRow ? " has-sub" : "") },
+    h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox),
+    h("nav", { class: "tabs main-tabs" }, mainRow, present),
+    h("div", { class: "top-actions" }, modeSwitch, setBtn),
+    subRow);
+}
+
+// ---------- 탭 꾸미기 ----------
+// 탭 이름을 누르면 그 자리에 글자 커서가 생겨 바로 고친다. 글자 커서가 없을 때 탭을 끌면 두 줄 사이를 자유롭게 옮긴다.
+// 위 줄 탭에는 「수업」「편집」 작은 단추가 붙어 그 모드에서 보일지 정한다. 탭 줄 말고는 흐리게 막아 둔다.
+function startTabEdit() {
+  const { main: m, sub } = tabLayout();
+  const draft = { main: m, sub, names: {}, show: {} };
+  for (const [k] of TAB_DEFAULTS) {
+    if (tabCustom.names && tabCustom.names[k]) draft.names[k] = tabCustom.names[k];
+    draft.show[k] = { class: tabShown(k, "class"), edit: tabShown(k, "edit") };
+  }
+  tabEdit = { draft, base: JSON.stringify(draft) };
+  draw();
+}
+const tabEditDirty = () => !!tabEdit && JSON.stringify(tabEdit.draft) !== tabEdit.base;
+function endTabEdit() { tabEdit = null; draw(); }
+
+function tabEditBar() {
+  const dirty = tabEditDirty();
+  return h("div", { class: "tab-edit-bar" },
     h("button", {
-      type: "button", class: setTabs.some(([k]) => k === tab) ? "tab set-btn on" : "tab set-btn", "aria-haspopup": "menu",
-      onclick() { menu.classList.toggle("open"); },
-    }, tabIcon("gear"), h("span", {}, "설정"), h("span", { class: "set-caret", "aria-hidden": "true" })),
-    h("div", { class: "set-drop", role: "menu" }, setTabs.map(([k, label]) => h("button", {
-      type: "button", role: "menuitem", class: tab === k ? "set-item on" : "set-item", disabled: !lesson && k === "build",
-      onclick() {
-        go(k);
-        // 고른 뒤에는 마우스가 아직 위에 있어도 접어 두고, 메뉴를 벗어나거나 설정 단추에 다시 올리면 펼칠 수 있다.
-        // (클릭 직후 커서는 숨은 메뉴 자리에 있어 메뉴 「안」으로 치지 않으므로 mouseleave만으로는 풀리지 않는다)
-        const m = app.querySelector(".set-menu");
-        const open = () => m.classList.remove("shut");
-        m.classList.add("shut");
-        m.addEventListener("mouseleave", open, { once: true });
-        m.querySelector(".set-btn").addEventListener("mouseenter", open, { once: true });
+      type: "button", class: "primary save-tabs", disabled: !dirty,
+      async onclick(e) {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = "저장 중…";
+        if (await saveTabCustom(JSON.parse(JSON.stringify(tabEdit.draft)))) tabEdit.base = JSON.stringify(tabEdit.draft);
+        repaintTop();
       },
-    }, tabIcon(k), h("span", {}, label)))));
-  // 수업 모드 ⇄ 편집 모드: 두 칸 중 하나를 고르면 그 모드로 바뀐다(누를 때마다 서로 바꾸기)
-  const setMode = (on) => { if (on === editMode) return; editMode = on; localStorage.setItem("cra-edit", on ? "1" : "0"); draw(); };
-  const editBtn = h("div", { class: editMode ? "mode-swap editing" : "mode-swap", role: "group", "aria-label": "화면 모드" },
-    h("button", { type: "button", class: editMode ? "" : "on", "aria-pressed": String(!editMode), "aria-label": "수업 모드", title: "수업 모드: 접속 QR·수업 진행·학생 관리와 수업용 화면 띄우기",
-      onclick() { setMode(editMode ? false : true); } }, tabIcon("run"), h("span", {}, "수업")),
-    h("button", { type: "button", class: editMode ? "on" : "", "aria-pressed": String(editMode), "aria-label": "편집 모드", title: "편집 모드: 자료 추가·슬라이드 편집·기타 관리·버그 제보를 위쪽 탭으로",
-      onclick() { setMode(editMode ? false : true); } }, tabIcon("edit"), h("span", {}, "편집")));
-  main = h("main", { class: "wide" });
-  app.replaceChildren(
-    h("header", { class: editMode ? "top editing" : "top" },
-      h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox),
-      h("nav", { class: "tabs" }, tabs.map(([k, label]) => h("button", {
-        type: "button", class: tab === k ? "tab on" : "tab", "data-k": k, title: label, disabled: !lesson && k !== "settings" && k !== "etc" && k !== "bugs",
-        onclick() { go(k); },
-      }, tabIcon(k), h("span", {}, label))),
-        // 평소에만: 탭 줄 끝의 「수업용 화면 띄우기」(teacher-run.js openPresent, 탭이 아니라 창을 연다)
-        editMode ? null : h("button", {
-          type: "button", class: "tab present-btn", disabled: !lesson, title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)",
-          onclick() { openPresent(); },
-        }, tabIcon("present"), h("span", {}, "수업용 화면 띄우기"))),
-      // 오른쪽 위: 설정▾(편집 모드에서는 없음) · 수업 모드|편집 모드 · 프로필. 모드 단추는 늘 프로필 바로 왼쪽
-      h("div", { class: "top-actions" }, setTabs.length ? menu : null, editBtn,
-        // 프로필: 내 정보 · 로그아웃 · 비밀번호 재설정 · 공동 작업자 · 전체 수업
-        h("button", { class: tab === "profile" ? "tab profile-btn on" : "tab profile-btn", type: "button", title: (me.email || "") + " · 프로필", onclick() { go("profile"); } },
-          h("span", { class: "avatar", "aria-hidden": "true" }, ((me.email || "?")[0]).toUpperCase()), h("span", {}, "프로필")))),
-    main);
-  if (!lesson && tab !== "profile" && tab !== "etc") tab = "settings";
-  if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
-  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, etc: drawEtc, bugs: drawBugs })[tab]();
-  schedule();
+    }, dirty ? "저장하기" : "저장됨"),
+    h("button", {
+      type: "button", class: "ghost cancel-tabs",
+      onclick() {
+        if (tabEditDirty() && !confirm("바꾼 탭 설정을 저장하지 않고 버릴까요?")) return;
+        endTabEdit();
+      },
+    }, "취소"));
+}
+// 이름을 바꾸는 동안에는 저장 단추만 다시 그린다(글자 커서가 그대로 있도록)
+function paintTabEditBar() {
+  const bar = app.querySelector(".tab-edit-bar");
+  if (bar) bar.replaceWith(tabEditBar());
+}
+
+function custTab(k, row) {
+  const d = tabEdit.draft;
+  const label = h("span", { class: "tab-label", contenteditable: "plaintext-only", spellcheck: "false", "aria-label": tabName(k, {}) + " 탭 이름" }, tabName(k, d));
+  label.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); label.blur(); }
+  });
+  label.addEventListener("input", () => {
+    let t = label.textContent.replace(/\s+/g, " ");
+    if (t.length > 20) { t = t.slice(0, 20); label.textContent = t; }
+    t = t.trim();
+    if (t && t !== tabName(k, {})) d.names[k] = t; else delete d.names[k];
+    paintTabEditBar();
+  });
+  label.addEventListener("blur", () => { if (!label.textContent.trim()) label.textContent = tabName(k, {}); });
+  const modeBtn = (m, text) => h("button", {
+    type: "button", class: d.show[k][m] ? "mini on" : "mini", "data-m": m, "aria-pressed": String(d.show[k][m]), title: text + " 모드에서 " + (d.show[k][m] ? "보임" : "숨김"),
+    onclick() { d.show[k][m] = !d.show[k][m]; repaintTop(); },
+  }, text);
+  const el = h("div", { class: "tab cust" + (row === "main" && !d.show[k].class && !d.show[k].edit ? " hidden-both" : ""), "data-k": k },
+    tabIcon(k), label, row === "main" ? h("span", { class: "mode-picks" }, modeBtn("class", "수업"), modeBtn("edit", "편집")) : null);
+  el.addEventListener("pointerdown", (e) => custDrag(e, el, label));
+  return el;
+}
+
+// 끌기: 놓일 줄은 마우스와 세로로 가까운 줄, 자리는 가로 위치로 정하고 칸을 그 자리로 옮겨 둔다. 끌지 않고 떼면 누른 곳에 글자 커서를 둔다.
+// 프로필은 늘 아래 줄에 둔다.
+function custDrag(e, el, label) {
+  if (e.button !== 0 || e.target.closest(".mode-picks")) return;
+  if (document.activeElement === label && label.contains(e.target)) return;   // 고치는 중: 글자 선택·커서 옮기기
+  e.preventDefault();
+  if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur();
+  const x0 = e.clientX, y0 = e.clientY;
+  const k = el.dataset.k;
+  let ghost = null, dx = 0, dy = 0;
+  const rows = () => [...app.querySelectorAll("header.top nav.main-tabs, header.top nav.sub-tabs")].filter((n) => k !== "profile" || n.classList.contains("sub-tabs"));
+  const move = (ev) => {
+    if (!ghost) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      const r = el.getBoundingClientRect();
+      dx = x0 - r.left;
+      dy = y0 - r.top;
+      ghost = el.cloneNode(true);
+      ghost.classList.add("drag-ghost");
+      ghost.style.width = r.width + "px";
+      document.body.append(ghost);
+      el.classList.add("drag-slot");
+    }
+    ghost.style.left = ev.clientX - dx + "px";
+    ghost.style.top = ev.clientY - dy + "px";
+    const nav = rows().reduce((best, n) => {
+      const r = n.getBoundingClientRect();
+      const dist = ev.clientY < r.top ? r.top - ev.clientY : ev.clientY > r.bottom ? ev.clientY - r.bottom : 0;
+      return !best || dist < best.dist ? { n, dist } : best;
+    }, null).n;
+    const items = [...nav.querySelectorAll(":scope > .tab.cust")].filter((x) => x !== el);
+    const before = items.find((x) => { const r = x.getBoundingClientRect(); return ev.clientY < r.bottom + 4 && (ev.clientY < r.top - 4 || ev.clientX < r.left + r.width / 2); })
+      || nav.querySelector(":scope > .tab-edit-bar");
+    if (before) { if (el.nextElementSibling !== before) nav.insertBefore(el, before); } else if (nav.lastElementChild !== el) nav.append(el);
+  };
+  const up = (ev) => {
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", up);
+    removeEventListener("pointercancel", up);
+    if (!ghost) {   // 누르기만 함: 누른 곳에 글자 커서
+      label.focus();
+      const at = document.caretPositionFromPoint ? document.caretPositionFromPoint(ev.clientX, ev.clientY)
+        : document.caretRangeFromPoint ? document.caretRangeFromPoint(ev.clientX, ev.clientY) : null;
+      const node = at && (at.offsetNode || at.startContainer);
+      const r = document.createRange();
+      if (node && label.contains(node)) r.setStart(node, at.offset != null ? at.offset : at.startOffset);
+      else { r.selectNodeContents(label); r.collapse(false); }
+      r.collapse(true);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return;
+    }
+    ghost.remove();
+    const keys = (cls) => [...app.querySelectorAll("header.top nav." + cls + " > .tab.cust")].map((x) => x.dataset.k);
+    tabEdit.draft.main = keys("main-tabs");
+    tabEdit.draft.sub = keys("sub-tabs");
+    repaintTop();
+  };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+  addEventListener("pointercancel", up);
 }

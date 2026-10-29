@@ -194,34 +194,8 @@ main.lesson .slide { cursor: zoom-in; }
 .tab.on { background: var(--accent); color: #fff; font-weight: 700; }
 .tab.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
 .tab.on:hover .tab-icon { background: rgba(255, 255, 255, .2); }
-/* 설정: 올리면(또는 눌러서·키보드로 들어가면) 아래로 펼쳐지는 메뉴. 단추와 메뉴 사이 틈은 padding으로 메워 마우스가 옮겨 가도 닫히지 않는다 */
-.top-actions { display: flex; align-items: center; gap: .25rem; margin-left: auto; }
-.set-menu { position: relative; }
-.set-caret { width: .42rem; height: .42rem; margin: 0 .1rem .2rem; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
-  transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
-.set-drop { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: .15rem; min-width: 11rem; padding: .45rem .3rem .3rem;
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(0, 0, 0, .14);
-  opacity: 0; visibility: hidden; transform: translateY(-6px) scaleY(.96); transform-origin: top;
-  transition: opacity .18s, transform .22s cubic-bezier(.2, .8, .2, 1), visibility 0s .22s; }
-.set-drop::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
-.set-menu:hover .set-drop, .set-menu:focus-within .set-drop, .set-menu.open .set-drop {
-  opacity: 1; visibility: visible; transform: none; transition: opacity .18s, transform .22s cubic-bezier(.2, .8, .2, 1), visibility 0s; }
-.set-menu:hover .set-caret, .set-menu:focus-within .set-caret, .set-menu.open .set-caret { transform: translateY(.2rem) rotate(225deg); }
-.set-menu.shut .set-drop { opacity: 0; visibility: hidden; transform: translateY(-6px) scaleY(.96); }
-.set-menu.shut .set-caret { transform: rotate(45deg); }
-.set-menu:hover .set-btn:not(.on) { color: var(--accent); background: var(--accent-soft); }
-.set-menu:hover .set-btn:not(.on)::after { transform: scaleX(1); }
-.set-item { position: relative; display: flex; align-items: center; gap: .5rem; width: 100%; padding: .45rem .7rem; text-align: left;
-  background: none; border: 0; border-radius: 8px; color: var(--ink); transition: color .15s, background-color .15s, padding-left .2s; }
-.set-item::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--accent);
-  transform: scaleY(0); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
-.set-item:hover:not(.on):not(:disabled), .set-item:focus-visible:not(.on) { color: var(--accent); background: var(--accent-soft); padding-left: .95rem; }
-.set-item:hover::before, .set-item:focus-visible::before { transform: scaleY(1); }
-.set-item:hover .tab-icon { transform: translateY(-1px) scale(1.08); background: #fff; }
-.set-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.set-item.on { background: var(--accent); color: #fff; font-weight: 700; }
-.set-item.on .tab-icon { background: rgba(255, 255, 255, .2); color: #fff; }
-@media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon, .set-drop, .set-caret, .set-item, .set-item::before { transition: none; } }
+.top-actions { display: flex; align-items: center; gap: .4rem; margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .tab, .tab::after, .tab-icon { transition: none; } }
 /* 왼쪽 위 수업 칸: 코드(고정) · 제목(고쳐 쓰기). 너비는 18rem으로 고정해 탭이 늘어도 밀려 줄지 않는다 */
 .lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(18rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .lesson-box:focus-within { border-color: var(--accent); }
@@ -232,32 +206,41 @@ main.lesson .slide { cursor: zoom-in; }
 @media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
 .teacher .top-title .lesson-box { flex: 0 1 auto; width: 18rem; }
 .teacher .top-title .eyebrow { white-space: nowrap; }
-/* 수업 모드 | 편집 모드 (오른쪽 위, 프로필 바로 왼쪽): 두 칸짜리 바꾸기 단추. 고른 쪽 위로 파란 바탕이 미끄러져 간다 */
-.mode-swap { position: relative; flex: 0 0 auto; display: inline-grid; grid-template-columns: 1fr 1fr; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
-.mode-swap::before { content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px; background: var(--accent);
-  transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
-.mode-swap.editing::before { transform: translateX(100%); }
-.mode-swap > button { position: relative; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: .25rem; min-height: 34px; padding: .25rem .55rem;
-  border: 0; border-radius: 9px; background: none; color: var(--muted); white-space: nowrap; transition: color .2s; }
-.mode-swap > button.on { color: #fff; }
-.mode-swap > button:not(.on):hover { color: var(--accent); }
-.mode-swap > button:not(.on):hover .tab-icon { transform: translateY(-1px) rotate(-8deg) scale(1.08); }
-.mode-swap > button .tab-icon { width: 1.2rem; background: none; color: inherit; }
-.mode-swap > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (max-width: 700px) { .mode-swap > button > span:not(.tab-icon) { display: none; } }
-@media (prefers-reduced-motion: reduce) { .mode-swap::before { transition: none; } }
-/* 탭이 많아(평소 셋 + 수업용 화면 띄우기, 편집 모드 다섯) 한 줄에 들어가게 탭 사이·안쪽 여백만 조금 줄이고 글자는 줄바꿈하지 않는다 */
+/* 수업 모드 ⇄ 편집 모드 스위치(오른쪽 위): 지금 모드 이름만. 수업 모드 파랑(손잡이 왼쪽), 편집 모드 주황(손잡이 오른쪽) */
+.mode-switch { --sw: var(--accent); position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; gap: .5rem; min-height: 36px; padding: .25rem .8rem .25rem .3rem;
+  border: 0; border-radius: 999px; background: var(--sw); color: #fff; font-weight: 700; white-space: nowrap; transition: background-color .25s, padding .25s; }
+.mode-switch.editing { --sw: #e8710a; flex-direction: row-reverse; padding: .25rem .3rem .25rem .8rem; }
+.mode-switch .knob { width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.mode-switch:hover { filter: brightness(1.08); }
+.mode-switch:focus-visible { outline: 2px solid var(--sw); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .mode-switch { transition: none; } }
 .teacher .top > .tabs { gap: .1rem; }
 .teacher .top .tabs .tab { padding-inline: .6rem; }
 .teacher .top.editing .tabs .tab { padding-inline: .45rem; }
-/* 편집 모드 여섯 탭이 한 줄에 들어가도록, 넓지 않은 화면에선 「버그 제보」는 아이콘만(이름은 title) */
-@media (max-width: 1500px) { .teacher .top.editing .tabs .tab[data-k="bugs"] > span:not(.tab-icon) { display: none; } }
 .teacher .top .tab { white-space: nowrap; }
+/* 「설정」 아래 줄 탭: 머리말 전체 너비로 한 줄 더 */
+.teacher .top > .sub-tabs { flex: 1 0 100%; grid-column: 1 / -1; align-items: center; padding-top: .45rem; border-top: 1px solid var(--line); }
+/* 탭 꾸미기: 탭 두 줄만 살아 있고 나머지는 흐리게, 누를 수 없게 */
+#app.tab-editing .top-title, #app.tab-editing .top-actions, #app.tab-editing > main { opacity: .35; filter: grayscale(1) blur(1.5px); pointer-events: none; user-select: none; }
+.tab.cust { cursor: grab; touch-action: none; user-select: none; border: 1px dashed var(--accent); border-radius: 10px; padding-block: .2rem; }
+.tab.cust::after { display: none; }
+.tab-label { min-width: 1.5rem; padding: .1rem .25rem; border-radius: 6px; cursor: text; outline: none; }
+.tab-label:focus { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.mode-picks { display: inline-flex; gap: 2px; }
+.mode-picks .mini { min-height: 0; padding: .05rem .35rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--muted); font-size: .72rem; }
+.mode-picks .mini.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mode-picks .mini.on[data-m="edit"] { background: #e8710a; border-color: #e8710a; }
+.tab.cust.hidden-both { opacity: .45; border-style: dotted; }
+.drag-ghost { position: fixed; z-index: 1000; pointer-events: none; margin: 0; background: var(--card); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+.tab.cust.drag-slot { opacity: .25; }
+.tab-edit-bar { display: inline-flex; gap: .4rem; margin-left: auto; }
+.login-seg { flex: none; min-height: 40px; }
 /* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다. 편집 모드에서는 제목 칸 바로 오른쪽부터 차례로 늘어놓는다 */
 @media (min-width: 1100px) {
   .teacher .top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr); }   /* 오른쪽 단추들은 줄어들지 않게 */
   .teacher .top > .tabs { justify-self: center; }
   .teacher .top > .top-actions { justify-self: end; }
+  .teacher .top > .sub-tabs { justify-self: stretch; }
   .teacher .top.editing { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .teacher .top.editing > .top-title { flex: 0 0 auto; }
 }
@@ -709,11 +692,10 @@ td.grid-cell > span { white-space: nowrap; }
 .tile-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .live-tile.no-desk .tile-view { border: 2px solid var(--bad); }
 
-/* 프로필(오른쪽 위 단추): 왼쪽 1/3 내 정보 · 오른쪽 2/3 전체 수업 */
+/* 「설정」 아래 줄: 프로필(한 칸) · 전체 수업 · 전체 선생님 및 학생 */
 .avatar { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: .85rem; font-weight: 700; flex: none; }
 .avatar.big { width: 52px; height: 52px; font-size: 1.4rem; }
-.profile-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
-.profile-side { position: sticky; top: 5rem; }
+.profile-page { max-width: 46rem; }
 .profile-head { display: flex; align-items: center; gap: .8rem; min-width: 0; }
 .profile-email { display: block; overflow-wrap: anywhere; }
 .profile-info { display: grid; gap: .35rem; margin: 0; }
@@ -727,10 +709,6 @@ td.grid-cell > span { white-space: nowrap; }
 .chip.collab .link { min-height: 0; padding: 0 .2rem; }
 .collab-lessons { border: 1px solid var(--line); border-radius: 10px; max-height: 40vh; overflow: auto; }
 .teachers-table td, .teachers-table th { white-space: nowrap; }
-@media (max-width: 900px) {
-  .profile-page { grid-template-columns: minmax(0, 1fr); }
-  .profile-side { position: static; }
-}
 .class-bar .class-now { gap: .6rem; align-items: center; }
 .class-bar .class-extend { min-height: 0; padding: .3rem .7rem; }
 .promoted-card { margin-bottom: 1rem; }

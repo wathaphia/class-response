@@ -1,4 +1,4 @@
-// 교사 화면 · 「전체 수업」(프로필 화면 오른쪽 2/3, teacher-profile.js): 폴더 정리, 수업 카드 끌어 옮기기, 골라 불러오기, 슬라이드 PDF 받기.
+// 교사 화면 · 「전체 수업」(「설정」 아래 줄 탭, teacher-profile.js drawLibrary): 폴더 정리, 수업 카드 끌어 옮기기, 골라 불러오기, 슬라이드 PDF 받기.
 // 공유 상태(lessons·lesson·me…)와 틀(h·section 등)은 teacher.js, common.js 에 있다.
 
 // ---------- 전체 수업 ----------
@@ -9,7 +9,7 @@ let pickedId = null;
 async function drawManage() {
   const { data, error } = await sb.from("lesson_folders").select("*").eq("owner", me.id).order("sort").order("created_at");
   const pane = main && main.querySelector(".manage-pane");
-  if (tab !== "profile" || !pane) return;
+  if (tab !== "library" || !pane) return;
   folders = error ? [] : data;
   const msg = h("p", { class: "msg" });
   // 다른 선생님 수업(공유받은 것, 개발자는 모든 선생님 것)은 내 폴더에 넣지 않고 따로 묶는다(끌어 옮기기 없음)
@@ -139,6 +139,17 @@ async function drawManage() {
           ? h("button", { class: "primary", type: "button", disabled: true }, "불러오기 완료")
           : h("button", { class: "primary", type: "button", onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
         h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+        // 수업 삭제: 주인 또는 개발자만(공동 작업자는 못 지운다)
+        mine(p) || (profile && profile.admin) ? h("button", { class: "ghost danger delete-lesson", type: "button", async onclick() {
+          const typed = prompt("「" + p.title + "」 수업을 지우면 활동, 학생, 응답, 슬라이드가 모두 지워집니다.\n지우려면 수업 코드 「" + p.code + "」를 입력하세요.");
+          if ((typed || "").trim().toUpperCase() !== p.code) return;
+          await removeSlideFiles(p);
+          const { error } = await sb.from("lessons").delete().eq("id", p.id);
+          if (error) return alert(error.message);
+          pickedId = null;
+          await loadLessons(lesson && lesson.id !== p.id ? lesson.id : null);
+          flash("「" + p.title + "」 수업을 지웠습니다.");
+        } }, "수업 삭제") : null,
         moveSel ? h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"), moveSel) : null)
         : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
       msg),

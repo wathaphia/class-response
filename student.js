@@ -1,4 +1,4 @@
-// 학생 화면: 입장(학번 + 이름 + 비밀번호) → 슬라이드를 따라가며 질문에 답한다.
+// 학생 화면: 입장(수업 코드 + 이름) → 슬라이드를 따라가며 질문에 답한다.
 // 서버에서 수업 상태를 받아 온다(교사가 넘긴 쪽, 제출 열림, 공개된 응답). 교사가 무엇을 바꾸면 수업 채널의 「nudge」 신호로
 // 바로 받고, 신호를 못 받을 때를 위해 10초마다(채널이 끊기면 3초마다) 묻는다. 바뀐 것이 없으면 서버는 {same:true}만 보낸다.
 
@@ -110,12 +110,8 @@ function showEntry(notice) {
   cards.clear();
   const fromLink = !!params.get("c");
   const codeIn = h("input", { type: "text", value: code, autocomplete: "off", maxlength: 20, placeholder: "예: K7P2Q", autocapitalize: "characters", required: true });
-  const noIn = h("input", { type: "text", autocomplete: "off", maxlength: 20, inputmode: "numeric", placeholder: "예: 20243030", required: true });
   const nameIn = h("input", { type: "text", autocomplete: "off", maxlength: 20, required: true });
-  const pinIn = h("input", { type: "password", inputmode: "numeric", maxlength: 4, autocomplete: "off", required: true });
-  const pin2In = h("input", { type: "password", inputmode: "numeric", maxlength: 4, autocomplete: "off" });
-  const pin2Row = h("label", { hidden: true }, "비밀번호 한 번 더", pin2In);
-  // 처음 가입할 때만: 수업 중 화면 보기 동의(둘 중 하나를 직접 고른다. 동의하지 않아도 수업에 참여할 수 있다)
+  // 이 수업에 처음 들어올 때만: 수업 중 화면 보기 동의(둘 중 하나를 직접 고른다. 동의하지 않아도 수업에 참여할 수 있다)
   const consentYes = h("input", { type: "radio", name: "monitor-consent", value: "yes" });
   const consentNo = h("input", { type: "radio", name: "monitor-consent", value: "no" });
   const consentRow = h("fieldset", { class: "options consent", hidden: true },
@@ -126,13 +122,10 @@ function showEntry(notice) {
   let newAccount = false;
   const msg = h("p", { class: "msg" }, notice || "");
   const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
-  let confirming = false;
 
-  // 이름이나 번호를 바꾸면 확인 단계를 처음부터 다시
-  [codeIn, noIn, nameIn].forEach((el) => el.addEventListener("input", () => {
-    confirming = false;
+  // 코드나 이름을 바꾸면 동의 단계를 처음부터 다시
+  [codeIn, nameIn].forEach((el) => el.addEventListener("input", () => {
     newAccount = false;
-    pin2Row.hidden = true;
     consentRow.hidden = true;
   }));
 
@@ -140,65 +133,48 @@ function showEntry(notice) {
     class: "card stack",
     async onsubmit(e) {
       e.preventDefault();
-      const pin = pinIn.value.trim();
-      if (!/^\d{4}$/.test(pin)) { msg.textContent = "비밀번호는 숫자 4자리로 입력하세요."; return; }
-      if (confirming && pin2In.value.trim() !== pin) { msg.textContent = "두 비밀번호가 다릅니다. 다시 입력하세요."; return; }
       if (newAccount && !consentYes.checked && !consentNo.checked) { msg.textContent = "「수업 중 화면 보기」에서 동의 여부를 골라 주세요."; return; }
       btn.disabled = true;
       msg.textContent = "확인 중…";
-      const { data, error } = await sb.rpc("student_enter", {
-        p_code: codeIn.value, p_class_no: noIn.value, p_name: nameIn.value, p_pin: pin, p_confirm: confirming,
+      const { data, error } = await sb.rpc("student_join", {
+        p_code: codeIn.value, p_name: nameIn.value, p_consent: newAccount ? consentYes.checked : null,
       });
       btn.disabled = false;
       if (error) { msg.textContent = "연결하지 못했습니다. 인터넷을 확인하고 다시 시도하세요. (" + error.message + ")"; return; }
       const err = data.error;
       if (err === "no_lesson") msg.textContent = "수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.";
-      else if (err === "bad_name") msg.textContent = "학번과 이름을 확인하세요(각각 20자까지).";
-      else if (err === "bad_pin") msg.textContent = "비밀번호는 숫자 4자리로 입력하세요.";
+      else if (err === "bad_name") msg.textContent = "이름을 확인하세요(20자까지).";
       else if (err === "full") msg.textContent = "이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.";
-      else if (err === "need_confirm") {
-        confirming = true;
-        newAccount = !data.reset;
-        pin2Row.hidden = false;
-        consentRow.hidden = !newAccount;
-        pin2In.value = "";
-        pin2In.focus();
-        msg.textContent = data.reset
-          ? "선생님이 비밀번호를 초기화했습니다. 새 비밀번호를 한 번 더 입력하고 입장하세요."
-          : "처음 들어왔네요. 지금 입력한 번호가 내 비밀번호가 됩니다. 한 번 더 입력하고, 아래에서 화면 보기 동의 여부를 고른 뒤 입장하세요.";
-      } else if (err === "wrong_pin") msg.textContent = "비밀번호가 틀렸습니다. " + data.left + "번 더 틀리면 10분 동안 잠깁니다.";
-      else if (err === "locked") msg.textContent = "비밀번호를 여러 번 틀려 잠겼습니다. " + data.minutes + "분 뒤에 다시 하거나 선생님께 초기화를 부탁하세요.";
-      else if (data.token) {
+      else if (err === "need_consent") {
+        newAccount = true;
+        consentRow.hidden = false;
+        msg.textContent = "처음 들어왔네요. 아래에서 화면 보기 동의 여부를 고른 뒤 입장하세요.";
+      } else if (data.token) {
         token = data.token;
         code = data.code;
         localStorage.setItem("cra-last-code", code);
         localStorage.setItem(TOKEN_KEY, token);
-        localStorage.setItem(ME_KEY, data.class_no + " " + data.name);
-        if (newAccount) { try { await sb.rpc("student_set_monitor", { p_token: token, p_consent: consentYes.checked }); } catch {} }
+        localStorage.setItem(ME_KEY, whoName(data));
         following = true;
         poll();
       } else msg.textContent = "알 수 없는 오류입니다. 다시 시도하세요.";
     },
   },
     fromLink ? null : h("label", {}, "수업 코드", codeIn),
-    h("label", {}, "학번", noIn),
     h("label", {}, "이름", nameIn),
-    h("label", {}, "비밀번호 (숫자 4자리)", pinIn),
-    pin2Row,
     consentRow,
-    h("div", { class: "tip" },
-      h("strong", {}, "처음 들어오나요?"),
-      h("p", {}, "처음 입력한 번호가 내 비밀번호가 됩니다. 다른 수업에서도 같은 학번·이름·비밀번호를 씁니다. 휴대폰 비밀번호나 생일은 쓰지 마세요.")),
     btn, msg);
 
   app.replaceChildren(h("main", { class: "narrow" },
     h("header", { class: "intro" },
       h("p", { class: "eyebrow" }, fromLink ? "수업 코드 " + code : "수업 응답"),
       h("h1", {}, "입장하기")),
-    form,
-    h("p", { class: "muted small center" }, "비밀번호를 잊었다면 선생님께 말하세요. 초기화해도 쓴 답은 지워지지 않습니다.")));
-  (fromLink ? noIn : codeIn).focus();
+    form));
+  (fromLink ? nameIn : codeIn).focus();
 }
+
+// 학번이 없는 학생(이름만으로 들어옴)은 이름만
+function whoName(s) { return ((s.class_no || "") + " " + s.name).trim(); }
 
 function logout(notice) {
   localStorage.removeItem(TOKEN_KEY);
@@ -798,7 +774,7 @@ function render(pageChanged) {
   const L = state.lesson;
   const hasSlides = L.slide_count > 0;
   shell.title.textContent = L.title;
-  shell.who.textContent = state.me.class_no + " " + state.me.name;
+  shell.who.textContent = whoName(state.me);
   shell.closed.hidden = L.open;
   shell.slideBox.hidden = !hasSlides;
   if (hasSlides) {
