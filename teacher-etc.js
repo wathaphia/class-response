@@ -174,11 +174,14 @@ function histNote(it) {
 }
 const histSave = () => { try { localStorage.setItem("cra-usage-hist", JSON.stringify(usageHist)); } catch {} };
 
-// 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(아주 여유 파랑 · 여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
+// 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(아주 여유(초기화까지 10% 미만 예상) 파랑 · 여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
 // 누르면 그 항목이 골라지고(usageSel) 그 묶음 아래에 자세한 정보(usageDetail)가 열린다. where = 어느 묶음에 열지("top" = 맨 위 소진 주의).
 const USAGE_LEVEL = { great: "아주 여유", ok: "여유", warn: "주의", bad: "위험" };
 const USAGE_MARK = { great: "◆ ", ok: "● ", warn: "▲ ", bad: "■ " };
 let usageSel = null;   // { id, where }
+// 초기화 단위 묶음: 하루 이하 → 한 달 → 누적 → 실시간 순서로 놓고, 묶음마다 기간 꼬리표 색을 달리한다(app.css .tag.period-*)
+const PERIOD_ORDER = ["day", "month", "acc", "live"];
+const periodGroup = (p) => p === "이번 달" || p === "한 달" ? "month" : p === "누적" ? "acc" : p === "실시간" ? "live" : "day";
 function usageRing(it, where = "sec") {
   const st = usageStat(it), known = st.known, p = st.p, level = st.level;
   const sel = !!(usageSel && usageSel.id === it.id && usageSel.where === where);
@@ -206,7 +209,7 @@ function usageRing(it, where = "sec") {
       left ? h("span", { class: "muted small" }, left) : null,
       st.win ? h("span", { class: "muted small" }, "평균 몫 " + usageAmount(Math.round(st.avg), it.fmt)) : null,
       h("span", { class: "usage-tags" },
-        h("span", { class: "tag info" }, it.period),
+        h("span", { class: "tag period-" + periodGroup(it.period) }, it.period),
         known ? h("span", { class: "tag " + level }, USAGE_MARK[level] + USAGE_LEVEL[level]) : null,
         st.over ? h("span", { class: "tag warn", title: "초기화까지 고르게 쓸 때의 지금 몫보다 많이 씀" }, "▲ 평균 초과") : null),
       it.hint ? h("span", { class: "muted small" }, it.hint) : null));
@@ -245,19 +248,22 @@ function usageDetail(it) {
     days = list.length ? usageTable(["날짜", diff ? "그날 마지막 값" : "그날 쓴 양", diff ? "그날 늘어난 양" : "—"].slice(0, diff ? 3 : 2), list.map((r) => diff ? r : r.slice(0, 2)))
       : h("p", { class: "muted small" }, "아직 날짜별 기록이 없습니다.");
   }
-  return h("div", { class: "usage-detail" },
-    h("div", { class: "row between" }, h("h4", {}, it.label + " · " + it.period),
-      h("button", { type: "button", class: "ghost small", onclick() { usageSel = null; paintEtc(); } }, "닫기")),
-    h("dl", { class: "usage-facts" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
-    it.hint ? h("p", { class: "muted small" }, it.hint) : null,
-    days,
-    it.days && egressHasDay9(it.days.m) ? h("p", { class: "muted small" }, "「" + DAY9 + "」이 붙은 날은 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다.") : null,
-    !it.days && !it.noRisk ? h("p", { class: "muted small" }, "날짜별 값은 이 서비스가 따로 주지 않아, 이 브라우저가 동기화할 때 남긴 그날 마지막 값입니다(최근 14일).") : null);
+  // 왼쪽에 글(사실·설명), 오른쪽 빈 곳에 날짜별 그래프·표를 알맞게 줄여 둔다(좁은 화면은 아래로)
+  return h("div", { class: "usage-detail" + (days ? " has-side" : "") },
+    h("div", { class: "usage-detail-text" },
+      h("div", { class: "row between" }, h("h4", {}, it.label + " · " + it.period),
+        h("button", { type: "button", class: "ghost small", onclick() { usageSel = null; paintEtc(); } }, "닫기")),
+      h("dl", { class: "usage-facts" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      it.hint ? h("p", { class: "muted small" }, it.hint) : null,
+      it.days && egressHasDay9(it.days.m) ? h("p", { class: "muted small" }, "「" + DAY9 + "」이 붙은 날은 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다.") : null,
+      !it.days && !it.noRisk ? h("p", { class: "muted small" }, "날짜별 값은 이 서비스가 따로 주지 않아, 이 브라우저가 동기화할 때 남긴 그날 마지막 값입니다(최근 14일).") : null),
+    days ? h("div", { class: "usage-detail-side" }, days) : null);
 }
 // 묶음 하나의 원 그래프들 + 고른 것의 자세한 정보. 소진 주의 항목은 맨 위 요약(usageRisky)에도 모은다.
 let usageRisky = [];
 function usageRings(sec, items, opt = {}) {
-  items = items.map((it) => ({ ...it, id: sec + ":" + it.label, sec, noRisk: opt.noRisk || it.noRisk }));
+  items = items.map((it) => ({ ...it, id: sec + ":" + it.label, sec, noRisk: opt.noRisk || it.noRisk }))
+    .sort((a, b) => PERIOD_ORDER.indexOf(periodGroup(a.period)) - PERIOD_ORDER.indexOf(periodGroup(b.period)));
   for (const it of items) { histNote(it); const st = usageStat(it); if (st.risky) usageRisky.push({ it, risk: st.risk }); }
   const pick = usageSel && usageSel.where === "sec" && items.find((it) => it.id === usageSel.id);
   return [h("div", { class: "usage-grid" }, items.map((it) => usageRing(it))), pick ? usageDetail(pick) : null];
@@ -395,6 +401,7 @@ function cloudflareView() {
     { label: "R2 읽기(Class B)", used: a && a.r2ClassBMonth, limit: 10000000, period: "이번 달", missing: a && a.r2ClassBMonth == null ? "Worker 새로 배포 필요" : missing, hint: "학생 기기가 슬라이드 그림을 받은 횟수 · 내보내는 전송량은 무료" },
     { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: day9, hint: daily, missing },
     { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: day9, hint: daily + " · 중계 접속 1장마다 2번", missing },
+    { label: "KV 삭제", used: a && a.kvDeletesToday, limit: 1000, period: day9, missing: a && a.kvDeletesToday == null ? "Worker 새로 배포 필요" : missing, hint: daily },
     { label: "KV 목록", used: a && a.kvListsToday, limit: 1000, period: day9, missing: a && a.kvListsToday == null ? "Worker 새로 배포 필요" : missing, hint: daily + " · 기타 관리 동기화 1번마다 1번" },
     { label: "KV 저장", used: a && a.kvBytes, limit: GB, fmt: "bytes", period: "누적", missing: a && a.kvBytes == null ? (a.kvListsToday == null ? "Worker 새로 배포 필요" : "아직 집계 없음") : missing,
       hint: a && a.kvKeys != null ? a.kvKeys.toLocaleString() + "개 키 · 하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" : "하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" },
@@ -486,11 +493,14 @@ function paintEtc() {
       h("span", { class: "muted small" }, "지금 속도라면 초기화 전에 한도의 " + Math.round(USAGE_RISK * 100) + "% 넘게 쓸 것으로 보이는 자원(누적·실시간은 지금 비율) · 아래 묶음의 같은 원을 모아 둔 것")),
     h("div", { class: "usage-grid" }, risky.map((it) => usageRing(it, "top"))), topPick ? usageDetail(topPick) : null)
     : lastSync() ? h("p", { class: "risk-none small" }, "◆ 지금 속도로는 초기화 전에 다 쓸 것으로 보이는 자원이 없습니다.") : null;
-  main.replaceChildren(h("div", { class: "stack" },
+  // 자세히 보는 중에 원·자세히 칸·단추 밖의 빈 곳을 누르면 고른 것을 푼다
+  main.replaceChildren(h("div", { class: "stack", onclick(e) {
+    if (usageSel && !e.target.closest(".usage-item, .usage-detail, button, a, input, select, textarea")) { usageSel = null; paintEtc(); }
+  } },
     h("div", { class: "row between" },
       h("div", {},
         h("h2", {}, "기타 관리"),
-        h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 파랑 아주 여유(지금 속도로 초기화 때 90% 넘게 남음), 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상) · 원을 누르면 자세히")),
+        h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 파랑 아주 여유(지금 속도면 초기화까지 10% 미만 사용 예상), 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상) · 원을 누르면 자세히")),
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),

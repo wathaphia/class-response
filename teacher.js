@@ -1,4 +1,4 @@
-// 교사 화면(버전 2): 로그인(로그인 · 가입하기) → 수업 고르기 → 위 줄 탭 [접속 QR] [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [버그 제보] + [수업용 화면 띄우기(창)]
+// 교사 화면(버전 2): 로그인(로그인 · 가입하기) → 수업 고르기 → 위 줄 탭 [접속 QR] [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [버그 제보] (「수업용 화면 띄우기」 창은 「수업 진행」 아래 줄)
 // 오른쪽 위 「수업 모드/편집 모드」 스위치(지금 모드 이름만)로 모드를 바꾸면 그 모드에 보이게 정한 탭만 나온다(SHOW_DEFAULT, 탭 꾸미기에서 바꿈).
 // 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] (+ 개발자만 [전체 선생님 및 학생] [기타 관리]).
 // 탭 이름·순서·두 줄 자리·모드별 보이기는 프로필의 「탭 꾸미기」(startTabEdit: 탭 이름 바로 고치기, 끌어 옮기기)에서 바꾸고 교사 계정(user_metadata.tabs)에 저장한다.
@@ -508,11 +508,6 @@ function topBar() {
     onclick() { goTab(k); },
   }, tabIcon(k), h("span", {}, tabName(k)));
   const mainRow = tabEdit ? mainTabs.map((k) => custTab(k, "main")) : mainTabs.filter((k) => tabShown(k, mode)).map(tabBtn);
-  // 수업 모드에서만: 탭 줄 끝의 「수업용 화면 띄우기」(teacher-run.js openPresent, 탭이 아니라 창을 연다)
-  const present = editMode || tabEdit ? null : h("button", {
-    type: "button", class: "tab present-btn", disabled: !lesson, title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)",
-    onclick() { openPresent(); },
-  }, tabIcon("present"), h("span", {}, "수업용 화면 띄우기"));
   // 수업 모드 ⇄ 편집 모드 스위치: 지금 모드 이름만 보인다
   const modeSwitch = h("button", {
     type: "button", role: "switch", "aria-checked": String(editMode), class: editMode ? "mode-switch editing" : "mode-switch",
@@ -529,7 +524,7 @@ function topBar() {
     tabEdit ? subTabs.map((k) => custTab(k, "sub")) : subTabs.map(tabBtn), tabEdit ? tabEditBar() : null) : null;
   return h("header", { class: "top" + (editMode ? " editing" : "") + (subRow ? " has-sub" : "") },
     h("div", { class: "top-title" }, h("span", { class: "eyebrow" }, "교사용"), lessonBox),
-    h("nav", { class: "tabs main-tabs" }, mainRow, present),
+    h("nav", { class: "tabs main-tabs" }, mainRow),
     h("div", { class: "top-actions" }, modeSwitch, setBtn),
     subRow);
 }

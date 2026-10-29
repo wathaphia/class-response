@@ -35,6 +35,7 @@ async function sendTeacherScreenSignal(payload) {
 // 「공유 요청」: 접속한 학생 모두에게 보기 허용·전체 화면 공유를 권한다. 동의 안 한 학생은 묻는 창, 동의했지만 공유 안 한 PC 학생은 공유 막이 뜬다
 async function askAllShare(e) {
   const btn = e.currentTarget;
+  btn.style.width = btn.offsetWidth + "px";   // 글씨만 바뀌고 단추 크기는 그대로
   try {
     await ensureTeacherScreenChannel();
     await sendTeacherScreenSignal({ type: "ask-share", to: "all" });
@@ -42,7 +43,7 @@ async function askAllShare(e) {
   } catch (err) {
     alert(err.message || err);
   }
-  setTimeout(() => { btn.textContent = "공유 요청"; }, 2000);
+  setTimeout(() => { btn.textContent = "공유 요청"; btn.style.width = ""; }, 2000);
 }
 
 async function handleTeacherScreenSignal(message) {
@@ -569,7 +570,7 @@ function promotedCard() {
       h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 개발자가 「전체 선생님 및 학생」에서 공동 작업자로 넣을 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
     list.length && admin ? bulkBar(set, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: demoteMany }, "선생님 자격 해제" + (set.size ? " (" + set.size + ")" : ""))) : null,
     list.length ? h("div", { class: "table-wrap" }, h("table", { class: "promoted-table" },
-      h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번(번호)", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id, class: set.has(p.student_id) ? "picked-row" : null },
         admin ? pickCell(set, p.student_id, p.name, repaint) : null,
         h("td", {}, p.class_no), h("td", {}, p.name), h("td", {}, p.email), h("td", {}, p.code), h("td", {}, dateText(p.since)),
@@ -666,6 +667,6 @@ function drawStudents() {
       live ? null : h("p", { class: "banner class-off" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 진행」에서 「수업 시작하기」를 누른 뒤 50분 동안(연장 가능) 쓸 수 있습니다."),
       h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
     students.length ? h("div", { class: "table-wrap" }, h("table", { class: "students-table", "data-ids": ids, "data-grid": grid ? "1" : "", "data-live": String(live) },
-      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
+      h("thead", {}, h("tr", {}, ["학번(번호)", "이름", "저장한 활동", "마지막 저장", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
 }
