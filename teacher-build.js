@@ -77,45 +77,24 @@ async function movePage(a, n) {
   if (error) alert("쪽을 바꾸지 못했습니다: " + error.message);
 }
 
-// 끌어서 순서 바꾸기: 같은 쪽 활동끼리만. 다른 쪽 활동 위에 놓으면 그 쪽이 앞이면 맨 앞, 뒤면 맨 뒤로 간다
-let dragActId = null;
+// 끌어서 순서 바꾸기(dragSort, teacher.js): 같은 쪽 활동끼리만 자리를 바꾸고, 왼쪽 작은 슬라이드 위에 놓으면 그 쪽으로 옮긴다
 const pageGroup = (a) => (a.page ?? "") + "|" + (a.page_to > a.page ? a.page_to : "");
-function dragRow(row, a) {
-  const after = (ev) => {
-    const r = row.getBoundingClientRect();
-    const cols = getComputedStyle(row.parentNode).gridTemplateColumns.split(" ").length;
-    return cols > 1 || row.parentNode.classList.contains("by-slide") ? ev.clientX > r.left + r.width / 2 : ev.clientY > r.top + r.height / 2;
-  };
-  const clear = () => main.querySelectorAll(".act-row.drop-before, .act-row.drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
-  // 입력칸·버튼·시뮬레이션 칸에서 누르면 끌지 않는다(숫자를 고치거나 버튼을 누를 수 있게)
-  row.addEventListener("mousedown", (ev) => { row.draggable = !ev.target.closest("input, textarea, button, select, a, iframe"); });
-  row.addEventListener("dragstart", (ev) => { dragActId = a.id; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", a.id); row.classList.add("dragging"); });
-  row.addEventListener("dragend", () => { dragActId = null; row.classList.remove("dragging"); row.draggable = false; clear(); });
-  row.addEventListener("dragover", (ev) => {
-    if (!dragActId || dragActId === a.id) return;
-    ev.preventDefault();
-    clear();
-    row.classList.add(after(ev) ? "drop-after" : "drop-before");
-  });
-  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
-  row.addEventListener("drop", (ev) => {
-    ev.preventDefault();
-    const id = dragActId, last = after(ev);
-    clear();
-    dragActId = null;
-    if (id && id !== a.id) reorderActivity(id, a.id, last);
+function sortRows(grid) {
+  dragSort(grid, {
+    items: () => activities.map((a) => grid.querySelector(':scope > .act-row[data-id="' + a.id + '"]')).filter(Boolean),
+    group: (row) => pageGroup(row.act),
+    over(ev) {
+      const cell = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".act-slide[data-n]");
+      return cell && grid.contains(cell) && +cell.dataset.n <= Math.max(slideTotal(lesson), 1) ? cell : null;
+    },
+    dropOver(cell, row) { movePage(row.act, +cell.dataset.n); },
+    onDrop: (rows) => reorderActivities(rows.map((r) => r.act)),
+    scroller: () => main.querySelector(".act-scroll"),
   });
 }
 
-async function reorderActivity(id, targetId, after) {
-  const src = activities.find((x) => x.id === id), target = activities.find((x) => x.id === targetId);
-  if (!src || !target) return;
-  const group = activities.filter((x) => pageGroup(x) === pageGroup(src));
-  const rest = group.filter((x) => x !== src);
-  const at = pageGroup(target) === pageGroup(src) ? rest.indexOf(target) + (after ? 1 : 0)
-    : activities.indexOf(target) < activities.indexOf(group[0]) ? 0 : rest.length;
-  rest.splice(at, 0, src);
-  const changed = rest.map((x, i) => [x, i]).filter(([x, i]) => x.sort !== i);
+async function reorderActivities(group) {
+  const changed = group.map((x, i) => [x, i]).filter(([x, i]) => x.sort !== i);
   if (!changed.length) return;
   changed.forEach(([x, i]) => { x.sort = i; });
   drawBuild();
@@ -157,6 +136,7 @@ function drawBuild() {
   }
   const grid = h("div", { class: "act-grid" });
   syncRows(grid);
+  sortRows(grid);
   // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
   const keep = [".build > aside", ".act-scroll"].map((q) => main.querySelector(q)?.scrollTop || 0);
   main.classList.add("build-page");
@@ -235,7 +215,7 @@ function layoutBySlide(grid) {
   }
 }
 
-// 왼쪽 열의 작은 슬라이드. 활동을 여기로 끌어 놓으면 그 쪽으로 옮긴다
+// 왼쪽 열의 작은 슬라이드. 활동을 여기로 끌어 놓으면 그 쪽으로 옮긴다(sortRows 의 over)
 function slideCell(n, total) {
   const label = n > total ? "언제든" : n + "쪽";
   const steps = slideSteps(lesson);
@@ -244,17 +224,6 @@ function slideCell(n, total) {
   const pic = n > total || isPptx(lesson) ? h("div", { class: "act-slide-blank" }, label)
     : h("div", { class: "act-slide-pic" }, h("img", { src: slideSrc(lesson, last, true), alt: "슬라이드 " + n, loading: "lazy" }), h("div", { class: "sim-layer" }));
   const cell = h("div", { class: "act-slide", "data-n": n, style: "grid-row:" + n + ";grid-column:1" }, pic, h("span", {}, label));
-  if (n <= total) {
-    cell.addEventListener("dragover", (ev) => { if (!dragActId) return; ev.preventDefault(); cell.classList.add("drop"); });
-    cell.addEventListener("dragleave", () => cell.classList.remove("drop"));
-    cell.addEventListener("drop", (ev) => {
-      ev.preventDefault();
-      cell.classList.remove("drop");
-      const a = activities.find((x) => x.id === dragActId);
-      dragActId = null;
-      if (a) movePage(a, n);
-    });
-  }
   return cell;
 }
 
@@ -278,7 +247,6 @@ function activityRow(a) {
             main.querySelector(".editor")?.scrollIntoView({ block: "start" });
           } }))),
     h("div", { class: "act-body" }, activityPreview(a)));
-  dragRow(row, a);
   return row;
 }
 

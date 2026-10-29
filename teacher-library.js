@@ -127,6 +127,7 @@ async function drawManage() {
           h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가")),
           // 새 수업: 지금 수업을 비우고 「슬라이드 편집」의 만들기 칸으로 간다
           h("button", { class: "primary new-lesson", type: "button", async onclick() {
+            newFrom = { id: lesson && lesson.id, tab };   // 「취소」하면 이 수업·탭으로 돌아간다
             lesson = null; tab = "settings"; localStorage.setItem("cra-tab", tab);
             await loadLesson();
           } }, "+ 수업 추가"))),

@@ -663,6 +663,45 @@ grant execute on function promote_student(uuid, text) to authenticated;
 grant execute on function demote_student(uuid) to authenticated;
 grant execute on function promoted_students() to authenticated;
 
+-- 버그 제보(편집 모드 「버그 제보」 탭): 선생님 누구나 쓰고 모두 읽는다. 고치기·지우기는 쓴 사람과 개발자(is_admin)만.
+-- 한 사람당 5개까지(지우면 다시 쓸 수 있음). 쓴 사람·이메일·시각은 서버가 채운다.
+create table if not exists bug_reports (
+  id           uuid primary key default gen_random_uuid(),
+  author       uuid not null default auth.uid(),
+  author_email text not null default '',
+  body         text not null check (length(btrim(body)) between 1 and 4000),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+alter table bug_reports enable row level security;
+create or replace function bug_reports_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.author := auth.uid();
+    new.author_email := lower(coalesce(auth.jwt() ->> 'email', ''));
+    new.created_at := now();
+    if (select count(*) from bug_reports where author = new.author) >= 5 then
+      raise exception '버그 제보는 한 사람당 5개까지 쓸 수 있습니다. 예전 제보를 지우거나 고쳐 주세요.';
+    end if;
+  else
+    new.author := old.author; new.author_email := old.author_email; new.created_at := old.created_at;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists bug_reports_guard on bug_reports;
+create trigger bug_reports_guard before insert or update on bug_reports for each row execute function bug_reports_guard();
+drop policy if exists bug_read on bug_reports;
+drop policy if exists bug_write on bug_reports;
+drop policy if exists bug_edit on bug_reports;
+drop policy if exists bug_del on bug_reports;
+create policy bug_read  on bug_reports for select to authenticated using (is_teacher());
+create policy bug_write on bug_reports for insert to authenticated with check (is_teacher());
+create policy bug_edit  on bug_reports for update to authenticated using (is_teacher() and (author = auth.uid() or is_admin())) with check (is_teacher());
+create policy bug_del   on bug_reports for delete to authenticated using (is_teacher() and (author = auth.uid() or is_admin()));
+grant select, insert, update, delete on bug_reports to authenticated;
+
 -- ------------------------------------------------------------
 -- 교사 이메일: teacher@example.com 을 자기 이메일(소문자)로 바꾸세요. 여러 명이면 줄을 더하면 됩니다.
 -- ------------------------------------------------------------

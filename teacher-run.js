@@ -29,9 +29,6 @@ function drawRun() {
       // 접속 QR은 「접속 QR」 탭, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
       hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
-      hasSlides ? h("p", { class: "muted small" }, slideSteps(lesson)
-        ? "학생 화면은 여기서 띄운 쪽과 애니메이션 단계를 따라갑니다. 키보드 ← → 는 PowerPoint처럼 애니메이션을 하나씩 넘깁니다."
-        : "학생 화면은 여기서 띄운 쪽을 따라갑니다. 키보드 ← → 로도 넘길 수 있습니다.") : null,
       classBar()),
     h("aside", { class: "run-right stack" },
       h("section", { class: "card row between" }, openText, openBtn),
@@ -388,7 +385,7 @@ function paintClass(fresh) {
     ? h("span", { class: "row class-now" }, h("span", { class: "class-left" }, h("span", { class: "presence on" }), " " + classLeft()),
       h("button", { class: "ghost class-extend", type: "button", disabled: !ext, onclick: extendClass,
         title: ext ? "수업 시간을 50분 늘립니다" : "남은 시간이 30분 밑으로 내려가면 늘릴 수 있습니다" }, "시간 연장하기(+50분)"))
-    : h("span", { class: "muted small" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 수업을 시작해야 쓸 수 있습니다. 시작하면 50분 뒤 저절로 끝나고, 남은 시간이 30분 밑이면 50분씩 늘릴 수 있습니다."),
+    : h("span", { class: "muted small" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 수업을 시작해야 쓸 수 있습니다."),
   on ? h("button", { class: "ghost", type: "button", onclick() { if (confirm("수업을 끝낼까요? 학생 화면 보기가 닫힙니다.")) endClass(false); } }, "수업 끝내기")
     : h("button", { class: "primary class-start", type: "button", onclick: startClass }, "수업 시작하기"));
 }
