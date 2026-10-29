@@ -309,7 +309,7 @@ function simEditor() {
     if (!saved) return;
     const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
     activities = sortActivities(data || []);
-    editing = JSON.parse(JSON.stringify(saved));
+    editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
     drawBuild();
     flash("저장했습니다.");
   }
@@ -525,6 +525,7 @@ function composeEditor() {
     editBase.set(e, editSnap(e));
     const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
     activities = sortActivities(data || []);
+    editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
     drawBuild();
     flash(rows.length > 1 ? rows.length + "개를 저장했습니다." : "저장했습니다.");
   }
