@@ -127,12 +127,62 @@ function usageAmount(n, fmt) {
 }
 const shortTime = (t) => new Date(t).toLocaleString("ko-KR", { timeZone: TZ, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-// 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
-const USAGE_LEVEL = { ok: "여유", warn: "주의", bad: "위험" };
-function usageRing(it) {
+// 초기화(쿨타임) 창: 이 한도가 언제부터 쌓여 언제 다시 0이 되는지. 누적·실시간 값과 동기화 비용 추정은 창이 없다.
+function usageWindow(it, at) {
+  if (it.win) return it.win;
+  if (it.period === "이번 달") return { from: kstMonthStart(at - 1), to: kstMonthStart(at - 1, 1) };
+  if (it.period === "오전 9시부터") { const from = Math.floor(at / 86400000) * 86400000; return { from, to: from + 86400000 }; }   // 한국 오전 9시 = UTC 0시
+  return null;
+}
+// 지금 속도를 초기화 때까지 이어 간다고 보고 예상치를 낸다. 시작 직후의 튀는 값을 줄이려고 경과 시간은 최소 1시간(창의 1/24)으로 센다.
+// risk: 초기화 때 한도의 몇 배를 쓸지(창이 없으면 지금 비율). 0.8 이상이면 「소진 주의」로 표시하고 맨 위에 모은다.
+const USAGE_RISK = 0.8;
+function usageStat(it) {
   const known = !it.missing && it.used != null && it.limit > 0;
-  const p = known ? it.used / it.limit : 0;
-  const level = p >= 0.85 ? "bad" : p >= 0.6 ? "warn" : "ok";
+  const s = { known, p: known ? it.used / it.limit : 0 };
+  if (!known) return s;
+  const at = it.asOf || lastSync() || Date.now();
+  const w = usageWindow(it, at);
+  if (w) {
+    const span = w.to - w.from, el = Math.min(span, Math.max(at - w.from, Math.min(3600000, span / 24)));
+    s.win = w; s.at = at;
+    s.rate = it.used / el;                                             // 1ms당
+    s.proj = it.used + s.rate * Math.max(0, w.to - at);
+    s.avg = it.limit * Math.min(1, Math.max(0, (at - w.from) / span));  // 고르게 쓸 때 지금까지의 몫
+    s.over = it.used > 0 && it.used > s.avg;
+    s.runOut = s.proj > it.limit && s.rate > 0 ? at + Math.max(0, it.limit - it.used) / s.rate : null;
+    s.risk = s.proj / it.limit;
+  } else s.risk = s.p;
+  s.level = s.p >= 0.85 ? "bad" : s.p >= 0.6 ? "warn" : (w ? s.proj <= it.limit * 0.1 : s.p <= 0.1) ? "great" : "ok";
+  s.risky = !it.noRisk && s.risk >= USAGE_RISK;
+  return s;
+}
+
+// 날짜별 기록: 날마다의 값을 주는 곳이 없는 항목은 이 브라우저가 동기화할 때마다 그날 마지막 값을 남겨 둔다(cra-usage-hist, 40일).
+// 날짜는 그 항목의 하루가 바뀌는 때를 따른다(Cloudflare 하루 한도는 UTC 날짜 = 한국 오전 9시).
+let usageHist = {};
+try { usageHist = JSON.parse(localStorage.getItem("cra-usage-hist")) || {}; } catch {}
+const histDay = (it, t) => it.period === "오전 9시부터" ? new Date(t).toISOString().slice(0, 10) : kstIso(t).slice(0, 10);
+function histNote(it) {
+  const st = usageStat(it);
+  if (!st.known || it.days || !it.id || it.noRisk) return;
+  const t = it.asOf || lastSync();
+  if (!t) return;
+  const rec = usageHist[it.id] || (usageHist[it.id] = {});
+  rec[histDay(it, t)] = it.used;
+  for (const k of Object.keys(rec).sort().slice(0, -40)) delete rec[k];
+}
+const histSave = () => { try { localStorage.setItem("cra-usage-hist", JSON.stringify(usageHist)); } catch {} };
+
+// 원 띠 그래프 하나: 회색 띠 위에 쓴 만큼 색 띠(아주 여유 파랑 · 여유 초록 · 60% 넘으면 주황 · 85% 넘으면 빨강). 색과 함께 글자로도 상태를 적는다.
+// 누르면 그 항목이 골라지고(usageSel) 그 묶음 아래에 자세한 정보(usageDetail)가 열린다. where = 어느 묶음에 열지("top" = 맨 위 소진 주의).
+const USAGE_LEVEL = { great: "아주 여유", ok: "여유", warn: "주의", bad: "위험" };
+const USAGE_MARK = { great: "◆ ", ok: "● ", warn: "▲ ", bad: "■ " };
+let usageSel = null;   // { id, where }
+function usageRing(it, where = "sec") {
+  const st = usageStat(it), known = st.known, p = st.p, level = st.level;
+  const sel = !!(usageSel && usageSel.id === it.id && usageSel.where === where);
+  const pick = () => { usageSel = sel ? null : { id: it.id, where }; paintEtc(); };
   const c = 2 * Math.PI * 40;
   const pct = !known ? "—" : p > 0 && p < 0.01 ? "<1%" : Math.round(p * 100) + "%";
   const ring = h("span", { class: "ring", "aria-hidden": "true" });
@@ -141,16 +191,76 @@ function usageRing(it) {
     + '<text x="50" y="50">' + pct + "</text></svg>";
   const amount = known ? usageAmount(it.used, it.fmt) + " / " + usageAmount(it.limit, it.fmt) : it.missing || "알 수 없음";
   const left = known ? "남음 " + usageAmount(Math.max(it.limit - it.used, 0), it.fmt) : "";
-  return h("figure", { class: "usage-item" + (known ? "" : " unknown"), title: it.label + " · " + it.period + "\n" + amount + (left ? " · " + left : "") + (it.hint ? "\n" + it.hint : "") },
+  return h("figure", {
+    class: "usage-item" + (known ? "" : " unknown") + (st.risky ? " risky" : "") + (sel ? " selected" : ""),
+    role: "button", tabindex: "0", "aria-pressed": sel ? "true" : "false",
+    title: it.label + " · " + it.period + "\n" + amount + (left ? " · " + left : "") + (it.hint ? "\n" + it.hint : "") + "\n누르면 자세히 봅니다",
+    onclick: pick, onkeydown(e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } },
+  },
+    st.risky ? h("span", { class: "risk-mark", title: "초기화 전에 다 쓸 수 있음" }, "⚠ 소진 주의") : null,
     ring,
     h("figcaption", {},
+      where === "top" && it.sec ? h("span", { class: "muted small" }, it.sec) : null,
       h("strong", {}, it.label),
       h("span", { class: "small" }, amount),
       left ? h("span", { class: "muted small" }, left) : null,
+      st.win ? h("span", { class: "muted small" }, "평균 몫 " + usageAmount(Math.round(st.avg), it.fmt)) : null,
       h("span", { class: "usage-tags" },
         h("span", { class: "tag info" }, it.period),
-        known ? h("span", { class: "tag " + level }, (level === "ok" ? "● " : level === "warn" ? "▲ " : "■ ") + USAGE_LEVEL[level]) : null),
+        known ? h("span", { class: "tag " + level }, USAGE_MARK[level] + USAGE_LEVEL[level]) : null,
+        st.over ? h("span", { class: "tag warn", title: "초기화까지 고르게 쓸 때의 지금 몫보다 많이 씀" }, "▲ 평균 초과") : null),
       it.hint ? h("span", { class: "muted small" }, it.hint) : null));
+}
+const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), hh = Math.floor(m % 1440 / 60);
+  return d ? d + "일 " + hh + "시간" : hh ? hh + "시간 " + m % 60 + "분" : m % 60 + "분"; };
+// 고른 항목의 자세한 정보: 쓴 양·남은 양·초기화 시각·평균 몫·쓰는 속도·초기화 때 예상·다 쓰는 예상 시각 + 날짜별 사용량
+function usageDetail(it) {
+  const st = usageStat(it), f = (n) => usageAmount(n, it.fmt), pc = (x) => Math.round(x * 100) + "%";
+  const rows = [];
+  if (!st.known) rows.push(["상태", it.missing || "알 수 없음"]);
+  else {
+    rows.push(["쓴 양", f(it.used) + " / " + f(it.limit) + " (" + pc(st.p) + ")"], ["남은 양", f(Math.max(it.limit - it.used, 0))]);
+    if (st.win) {
+      const perDay = st.win.to - st.win.from > 86400000;
+      rows.push(
+        ["초기화", shortTime(st.win.to) + " · " + dur(st.win.to - st.at) + " 남음"],
+        ["평균 몫(지금까지)", f(Math.round(st.avg)) + " · " + (st.over ? "▲ " + pc(it.used / Math.max(st.avg, 1) - 1) + " 넘게 씀" : "그 안에서 쓰는 중")],
+        ["남은 기간 하루 몫", perDay ? f(Math.round(Math.max(it.limit - it.used, 0) / Math.max((st.win.to - st.at) / 86400000, 1 / 24))) + "까지 쓰면 한도 안" : "—"],
+        ["쓰는 속도", f(Math.round(st.rate * (perDay ? 86400000 : 3600000))) + (perDay ? " / 하루" : " / 시간")],
+        ["초기화 때 예상", f(Math.round(st.proj)) + " (" + pc(st.risk) + ") · " + (st.proj <= it.limit ? f(Math.round(it.limit - st.proj)) + " 남음" : "한도 넘음")]);
+      if (st.runOut) rows.push(["다 쓰는 예상 시각", st.runOut <= st.at ? "이미 다 씀" : shortTime(st.runOut) + " (초기화 " + dur(st.win.to - st.runOut) + " 전)"]);
+    } else rows.push(["초기화", it.period === "누적" ? "없음(쌓이는 양)" : it.period === "실시간" ? "없음(지금 값)" : "추정치(" + it.period + ")"]);
+    rows.push(["상태", USAGE_LEVEL[st.level] + (st.risky ? " · ⚠ 소진 주의" : "")]);
+  }
+  let days = null;
+  if (it.days) days = egressDayChart("날마다 " + it.label, it.days.m, it.days.field, it.days.at);
+  else if (!it.noRisk) {
+    const rec = usageHist[it.id] || {}, keys = Object.keys(rec).sort();
+    const diff = it.period === "이번 달" || it.period === "누적";
+    const list = keys.map((k, i) => {
+      const prev = i ? rec[keys[i - 1]] : null, sameMonth = i && keys[i - 1].slice(0, 7) === k.slice(0, 7);
+      const d = !diff ? rec[k] : prev == null || (it.period === "이번 달" && !sameMonth) ? null : rec[k] - prev;
+      return [k.slice(5).replace("-", "/"), f(rec[k]), d == null ? "—" : (d < 0 ? "−" + f(-d) : f(d))];
+    }).reverse().slice(0, 14);
+    days = list.length ? usageTable(["날짜", diff ? "그날 마지막 값" : "그날 쓴 양", diff ? "그날 늘어난 양" : "—"].slice(0, diff ? 3 : 2), list.map((r) => diff ? r : r.slice(0, 2)))
+      : h("p", { class: "muted small" }, "아직 날짜별 기록이 없습니다.");
+  }
+  return h("div", { class: "usage-detail" },
+    h("div", { class: "row between" }, h("h4", {}, it.label + " · " + it.period),
+      h("button", { type: "button", class: "ghost small", onclick() { usageSel = null; paintEtc(); } }, "닫기")),
+    h("dl", { class: "usage-facts" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+    it.hint ? h("p", { class: "muted small" }, it.hint) : null,
+    days,
+    it.days && egressHasDay9(it.days.m) ? h("p", { class: "muted small" }, "「" + DAY9 + "」이 붙은 날은 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다.") : null,
+    !it.days && !it.noRisk ? h("p", { class: "muted small" }, "날짜별 값은 이 서비스가 따로 주지 않아, 이 브라우저가 동기화할 때 남긴 그날 마지막 값입니다(최근 14일).") : null);
+}
+// 묶음 하나의 원 그래프들 + 고른 것의 자세한 정보. 소진 주의 항목은 맨 위 요약(usageRisky)에도 모은다.
+let usageRisky = [];
+function usageRings(sec, items, opt = {}) {
+  items = items.map((it) => ({ ...it, id: sec + ":" + it.label, sec, noRisk: opt.noRisk || it.noRisk }));
+  for (const it of items) { histNote(it); const st = usageStat(it); if (st.risky) usageRisky.push({ it, risk: st.risk }); }
+  const pick = usageSel && usageSel.where === "sec" && items.find((it) => it.id === usageSel.id);
+  return [h("div", { class: "usage-grid" }, items.map((it) => usageRing(it))), pick ? usageDetail(pick) : null];
 }
 const usageTable = (head, rows) => h("div", { class: "table-wrap usage-table" },
   h("table", {}, h("thead", {}, h("tr", {}, head.map((x) => h("th", {}, x)))), h("tbody", {}, rows.map((r) => h("tr", {}, r.map((x) => h("td", {}, x)))))));
@@ -250,9 +360,9 @@ function supabaseView() {
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적" },
     { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일 · 새 슬라이드는 Cloudflare R2에 저장(여기 남은 것은 예전 사본·PPTX)" },
-    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "bytes", at }, missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
       hint: (ep ? "월말 예상 " + usageAmount(ep.bytes, "bytes") + " · " : "") + (since || "CDN 캐시를 거치지 않은 응답") },
-    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "cached", at }, missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
       hint: (ep ? "월말 예상 " + usageAmount(ep.cached, "bytes") + " · " : "") + (since ? since + " · " : "") + "CDN 캐시에서 나간 슬라이드 그림 등" },
     { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
     { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
@@ -261,13 +371,9 @@ function supabaseView() {
   ];
   const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 3 * 3600000);
   return [
-    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    usageRings("Supabase", items),
     s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
       + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다.") : null,
-    m ? h("div", { class: "usage-blocks" }, h("div", { class: "usage-block wide" }, egressDayChart("날마다 캐시 전송량", m, "cached", at),
-      h("p", { class: "muted small" }, "하루 = 한국 시간 0시~24시 · 세로 축 0~500MB 고정 · 막대에 마우스를 올리면 그날 값이 나옵니다. 오늘 막대는 동기화한 시각("
-        + kstClock(at, { hour: "2-digit", minute: "2-digit" }) + ")까지 쓴 양이고, 점선은 한 달 5GB를 날마다 고르게 쓸 때의 하루 몫입니다."
-        + (egressHasDay9(m) ? " 「" + DAY9 + "」이 붙은 날은 그날 오전 9시부터 다음 날 오전 9시까지를 묶은 값입니다." : "")))) : null,
     noApi === "관리 토큰 필요" ? h("p", { class: "muted small" }, "전송량은 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행).") : null,
   ];
 }
@@ -295,7 +401,7 @@ function cloudflareView() {
   ];
   const hist = (d.turn.history || []).slice().reverse();
   return [
-    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    usageRings("Cloudflare", items),
     hist.length ? h("div", { class: "usage-blocks" }, usageBlock("달마다 중계 접속 발급",
       usageTable(["달", "발급", "한도 대비"], hist.map((x) => [x.month, x.issued.toLocaleString() + "장", Math.round(x.issued / d.turn.limit * 100) + "%"])))) : null,
     a ? null : h("p", { class: "muted small" }, "중계 전송량·Worker 요청·R2 요청·KV 사용량은 Cloudflare 읽기 전용 분석 토큰이 있어야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행)."
@@ -328,30 +434,11 @@ function syncCostView() {
     { label: "Supabase 전송량", used: day(dbBytes) * 30, limit: 5 * GB, fmt: "bytes", period: "한 달", hint: "DB 함수 응답 " + usageAmount(dbBytes, "bytes") + " × " + AUTO_PER_DAY * 30 + "번(압축 전)" },
     { label: "GitHub API", used: ghCounted, limit: 60, period: "1시간", hint: "자동은 1시간에 1번 · 버튼을 10분마다 눌러도 최대 " + ghCounted * 6 + "건" },
   ];
-  const n = (v) => (v == null ? "—" : Number(v).toLocaleString());
-  const times = (v, unit = "번") => (v == null ? "—" : n(v) + unit);
-  const rows = [
-    ["교사 브라우저 → Supabase DB 함수", "DB 크기·연결·학생 수 계산(Supabase 서버)", db ? times(db.requests, "건") + " · " + usageAmount(db.bytes, "bytes") : "—", db ? times(day(db.requests), "건") : "—"],
-    ["교사 브라우저 → Worker", "Cloudflare·Supabase 사용량 모으기", wk ? times(wk.requests, "건") + " · " + usageAmount(wk.bytes, "bytes") : "—", wk ? times(day(wk.requests), "건") : "—"],
-    ["└ Worker → KV 읽기 · 목록 · 쓰기", "TURN 장수·전송량 합계 읽기", c ? n(c.kvRead) + " · " + n(c.kvList) + " · " + n(c.kvWrite) : "—", c ? n(day(c.kvRead)) + " · " + n(day(c.kvList)) + " · " + n(day(c.kvWrite)) : "—"],
-    ["└ Worker → R2 목록", "슬라이드 저장량(분석에 아직 없을 때만)", c ? times(c.r2ClassA) : "—", c ? times(day(c.r2ClassA)) : "—"],
-    ["└ Worker → Supabase 교사 확인", "교사만 보게(데이터 API 1건)", c ? times(c.sbRest, "건") : "—", c ? times(day(c.sbRest), "건") : "—"],
-    ["└ Worker → Supabase 관리 API", "로그 집계·요청 수·서비스 상태(Supabase 서버 계산 · 프로젝트 전송량에 안 셈)", c ? times(c.sbApi, "건") : "—", c ? times(day(c.sbApi), "건") : "—"],
-    ["└ Worker → Cloudflare 분석", "Worker·KV·R2·TURN 사용량(Cloudflare 서버 계산)", c ? times(c.cfApi, "건") : "—", c ? times(day(c.cfApi), "건") : "—"],
-    ["교사 브라우저 → GitHub API", "저장소·자동 실행 정보(한도에 세는 것 " + ghCounted + "건)", gh ? times(gh.requests, "건") + " · " + usageAmount(gh.bytes, "bytes") : "—", gh ? times(day(gh.requests), "건") : "—"],
-  ];
   return [
     h("p", { class: "small" }, "자동 동기화는 1시간마다(이 탭이 열려 있고 화면에 보일 때만), 「동기화」 버튼은 마지막 동기화 뒤 10분이 지나야 다시 됩니다. "
       + "계산은 각 서비스 서버가 하고(Supabase DB 함수 · Supabase 로그 · Cloudflare 분석) 이 브라우저는 받은 숫자로 그림만 그립니다. 학생 기기는 쓰지 않습니다."),
-    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    usageRings("동기화 비용", items, { noRisk: true }),
     h("p", { class: "muted small" }, "원 그래프는 이 탭을 하루 종일 켜 둔 최악의 경우(자동 동기화 하루 " + AUTO_PER_DAY + "번 + 매시 집계 24번)가 무료 한도에서 차지하는 몫입니다."),
-    h("div", { class: "usage-blocks" },
-      h("div", { class: "usage-block wide" }, h("h4", {}, "동기화 1번에 드는 것(마지막 동기화에서 잼)"), usageTable(["어디로", "하는 일", "1번", "하루(자동 " + AUTO_PER_DAY + "번)"], rows)),
-      h("div", { class: "usage-block wide" }, h("h4", {}, "Worker 매시 집계(매시 5분 · 탭과 상관없음)"), usageTable(["무엇", "1번", "하루(24번)"], [
-        ["KV 읽기 · 쓰기", n(cron.kvRead) + " · " + n(cron.kvWrite), n(24 * cron.kvRead) + " · " + n(24 * cron.kvWrite)],
-        ["Supabase 관리 API(전송량 로그)", times(cron.sbApi, "건"), times(24 * cron.sbApi, "건")],
-        ["Worker 실행", "1번", "24번"],
-      ]), h("p", { class: "muted small" }, m && m.cron ? "마지막 집계 " + shortTime(m.cron.at) + "에 잰 값" : "아직 Worker가 재지 않아 코드대로 센 값입니다."))),
   ];
 }
 
@@ -366,10 +453,10 @@ function githubView() {
   const items = [
     { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
     { label: "keep-alive 멈춤까지", used: idleDays, limit: 60, fmt: "days", period: "실시간", hint: "마지막 변경 " + shortTime(repo.pushed_at) + " · 60일 지나면 멈춤" },
-    { label: "GitHub API(이 PC)", used: rate.used, limit: rate.limit, period: "1시간", hint: kstClock(rate.reset * 1000) + "에 초기화" },
+    { label: "GitHub API(이 PC)", used: rate.used, limit: rate.limit, period: "1시간", win: { from: rate.reset * 1000 - 3600000, to: rate.reset * 1000 }, hint: kstClock(rate.reset * 1000) + "에 초기화" },
   ];
   return [
-    h("div", { class: "usage-grid" }, items.map(usageRing)),
+    usageRings("GitHub", items),
     h("div", { class: "usage-blocks" }, usageBlock("최근 자동 실행(Actions)",
       usageTable(["작업", "시각", "결과"], recent.map((r) => [r.name, shortTime(r.created_at), RESULT[r.conclusion] || r.conclusion || (r.status === "in_progress" ? "실행 중" : r.status)])))),
     h("p", { class: "small" }, "이번 달 Actions 실행 " + runsThisMonth + "회(공개 저장소라 무료) · "
@@ -384,16 +471,103 @@ function paintEtc() {
   const last = lastSync();
   const section = (name, what, body) => h("section", { class: "card stack usage-card" },
     h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)), body);
+  usageRisky = [];
+  const secs = [
+    section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView()),
+    section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView()),
+    section("GitHub", "사이트 · 자동 실행", githubView()),
+    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView())];
+  histSave();
+  // 맨 위 요약: 초기화 전에 다 쓸 수 있는 자원(소진 주의)을 위험한 순서로 복제해 모아 본다
+  const risky = usageRisky.sort((a, b) => b.risk - a.risk).map((x) => x.it);
+  const topPick = usageSel && usageSel.where === "top" && risky.find((it) => it.id === usageSel.id);
+  const summary = risky.length ? h("section", { class: "card stack risk-card" },
+    h("div", {}, h("h3", {}, "⚠ 소진 주의 " + risky.length + "개"),
+      h("span", { class: "muted small" }, "지금 속도라면 초기화 전에 한도의 " + Math.round(USAGE_RISK * 100) + "% 넘게 쓸 것으로 보이는 자원(누적·실시간은 지금 비율) · 아래 묶음의 같은 원을 모아 둔 것")),
+    h("div", { class: "usage-grid" }, risky.map((it) => usageRing(it, "top"))), topPick ? usageDetail(topPick) : null)
+    : lastSync() ? h("p", { class: "risk-none small" }, "◆ 지금 속도로는 초기화 전에 다 쓸 것으로 보이는 자원이 없습니다.") : null;
   main.replaceChildren(h("div", { class: "stack" },
     h("div", { class: "row between" },
       h("div", {},
         h("h2", {}, "기타 관리"),
-        h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상)")),
+        h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 파랑 아주 여유(지금 속도로 초기화 때 90% 넘게 남음), 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상) · 원을 누르면 자세히")),
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView()),
-    section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView()),
-    section("GitHub", "사이트 · 자동 실행", githubView()),
-    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView())));
+    summary, ...secs));
+}
+
+// ---------- 버그 제보 ----------
+// 편집 모드의 「버그 제보」 탭. 선생님 누구나 쓰고 모두 읽는다. 고치기·지우기는 쓴 사람과 개발자(profile.admin)만, 한 사람당 5개까지
+// (Supabase bug_reports 표 · 보안 규칙과 5개 제한은 setup.sql 의 bug_reports_guard). 제보마다 오른쪽 위 「복사」로 글을 클립보드에.
+const BUG_MAX = 5;
+let bugs = null;       // 목록(새것부터) 또는 { error }
+let bugEdit = null;    // 고치는 중인 제보 id
+async function drawBugs() {
+  paintBugs();
+  const [{ data, error }] = await Promise.all([
+    sb.from("bug_reports").select("*").order("created_at", { ascending: false }),
+    profile && !profile.error ? null : loadProfile()]);
+  bugs = error ? { error: /bug_reports/.test(error.message) ? "Supabase에 bug_reports 표가 없습니다(setup.sql 적용 필요)." : error.message } : data;
+  paintBugs();
+}
+function paintBugs() {
+  if (tab !== "bugs" || !main) return;
+  const list = Array.isArray(bugs) ? bugs : [];
+  const admin = !!(profile && profile.admin);
+  const mine = list.filter((b) => b.author === me.id).length;
+  const msg = h("p", { class: "msg" });
+  const text = h("textarea", { class: "bug-text", rows: 4, maxlength: 4000, placeholder: "무엇을 하다가, 어떤 일이 생겼고, 원래는 어떻게 되어야 하는지 적어 주세요.", disabled: mine >= BUG_MAX });
+  const send = h("button", { class: "primary", type: "button", disabled: mine >= BUG_MAX, async onclick() {
+    const body = text.value.trim();
+    if (!body) { msg.textContent = "내용을 적어 주세요."; return; }
+    send.disabled = true;
+    msg.textContent = "올리는 중…";
+    const { error } = await sb.from("bug_reports").insert({ body });
+    if (error) { send.disabled = false; msg.textContent = "올리지 못했습니다: " + error.message; return; }
+    drawBugs();
+  } }, "제보하기");
+  const card = (b) => {
+    const can = b.author === me.id || admin, editing = can && bugEdit === b.id;
+    const copy = h("button", { class: "ghost bug-copy", type: "button", title: "제보 글을 클립보드에 복사", onclick() {
+      navigator.clipboard.writeText(b.body).then(() => { copy.textContent = "복사했습니다"; setTimeout(() => { copy.textContent = "복사"; }, 1500); }, () => alert("복사하지 못했습니다."));
+    } }, "복사");
+    const edited = Date.parse(b.updated_at) - Date.parse(b.created_at) > 2000;
+    const head = h("div", { class: "bug-head" },
+      h("span", { class: "muted small" }, (b.author === me.id ? "나 · " : "") + b.author_email + " · " + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
+      copy);
+    if (editing) {
+      const box = h("textarea", { class: "bug-text", rows: 5, maxlength: 4000, value: b.body });
+      const m = h("p", { class: "msg" });
+      return h("article", { class: "card stack bug-card" }, head, box, h("div", { class: "row" },
+        h("button", { class: "primary", type: "button", async onclick(e) {
+          const body = box.value.trim();
+          if (!body) { m.textContent = "내용을 적어 주세요."; return; }
+          e.currentTarget.disabled = true;
+          const { error } = await sb.from("bug_reports").update({ body }).eq("id", b.id);
+          if (error) { e.currentTarget.disabled = false; m.textContent = "저장하지 못했습니다: " + error.message; return; }
+          bugEdit = null; drawBugs();
+        } }, "저장"),
+        h("button", { class: "ghost", type: "button", onclick() { bugEdit = null; paintBugs(); } }, "취소")), m);
+    }
+    return h("article", { class: "card stack bug-card" }, head, h("p", { class: "bug-body" }, b.body),
+      can ? h("div", { class: "row" },
+        h("button", { class: "ghost", type: "button", onclick() { bugEdit = b.id; paintBugs(); } }, "고치기"),
+        h("button", { class: "ghost danger", type: "button", async onclick() {
+          if (!confirm("이 제보를 지울까요?")) return;
+          const { error } = await sb.from("bug_reports").delete().eq("id", b.id);
+          if (error) return alert("지우지 못했습니다: " + error.message);
+          drawBugs();
+        } }, "지우기"),
+        b.author !== me.id ? h("span", { class: "tag warn" }, "개발자 권한") : null) : null);
+  };
+  main.replaceChildren(h("div", { class: "stack bugs-page" },
+    h("div", {}, h("h2", {}, "버그 제보"),
+      h("p", { class: "muted small" }, "선생님 누구나 쓰고 모두 볼 수 있습니다. 고치기·지우기는 쓴 사람과 개발자만 할 수 있고, 한 사람당 " + BUG_MAX + "개까지 쓸 수 있습니다.")),
+    h("section", { class: "card stack" },
+      h("div", { class: "row between" }, h("h3", {}, "새 제보"), h("span", { class: "tag " + (mine >= BUG_MAX ? "bad" : "info") }, "내 제보 " + mine + " / " + BUG_MAX)),
+      text, h("div", { class: "row" }, send, mine >= BUG_MAX ? h("span", { class: "muted small" }, "5개를 다 썼습니다. 예전 제보를 고치거나 지우면 새로 쓸 수 있습니다.") : null), msg),
+    bugs && bugs.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + bugs.error)
+      : !bugs ? h("p", { class: "muted small" }, "불러오는 중…")
+      : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다.")));
 }

@@ -241,7 +241,8 @@ async function simRtc(watch, m) {
   }
 }
 
-// 영상의 실제 FPS와 지연(왕복 시간의 절반 + 재생 대기 시간)을 1초마다 WebRTC 통계에서 읽는다
+// 영상의 실제 FPS와 지연(왕복 시간의 절반 + 재생 대기 시간)을 1초마다 WebRTC 통계에서 읽는다(크게 보기 창 · 일괄 미리보기 칸 모두).
+// 연결된 영상이 없으면 글자를 지운다(화면 복사로 오는 시뮬레이션은 takeSimFrame이 따로 적음).
 async function readRtcStats(watch) {
   for (const r of [watch.desk, ...watch.rtc.values()]) {
     if (!r) continue;
@@ -263,6 +264,7 @@ async function readRtcStats(watch) {
     watch.simInfo.textContent = watch.videoText;
     return;
   }
+  if (watch.videoText) { watch.videoText = ""; watch.simInfo.textContent = ""; }
 }
 
 async function takeSimFrame(watch, m) {
@@ -298,7 +300,7 @@ async function showMirror(watch, m) {
   watch.status.replaceChildren(
     desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : null, desk ? " · " : null,
     h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱이나 탭으로 나가 있음" : "수업 화면을 보고 있음"),
-    m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신 · ", watch.simInfo);
+    m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신");
 }
 
 async function watchStudentScreen(s) {
@@ -311,13 +313,13 @@ async function watchStudentScreen(s) {
     const video = h("video", { class: "screen-preview", autoplay: true, playsinline: true, muted: true, controls: true, hidden: true });
     const status = h("p", { class: "muted small" }, "학생 화면에 요청을 보냈습니다. 수업 중 보기에 동의한 학생은 바로 보이고, 아니면 학생이 허용할 때까지 기다립니다.");
     const deskNote = h("p", { class: "desk-warn", hidden: true }, "이 학생은 전체 화면 공유를 켜지 않았거나 껐습니다. 지금은 수업 창 안만 보이고, 다른 창·앱에서 하는 일은 보이지 않습니다. 학생 화면에 「전체 화면 공유 시작」 단추가 떠 있습니다.");
-    const simInfo = h("span", {});
+    const simInfo = h("p", { class: "rtc-stats small" });   // FPS · 지연(상태 줄과 따로 두어 화면 복사가 없는 PC 전체 화면에서도 보임)
     // 학생이 보낸 화면은 스크립트를 쓸 수 없는 iframe 안에만 그린다(allow-scripts 없음)
     const frame = h("iframe", { class: "mirror-frame", sandbox: "allow-same-origin", title: nameOf(s) + " 수업 화면",
       srcdoc: '<!doctype html><meta charset="utf-8"><base href="' + location.href.replace(/"/g, "") + '"><link rel="stylesheet" href="app.css">'
         + "<style>body{margin:0;padding:8px;background:#f6f7fb}body *{pointer-events:none}</style><body></body>" });
     const ready = new Promise((ok) => frame.addEventListener("load", ok, { once: true }));
-    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, deskNote, video, frame,
+    const close = openModal(nameOf(s) + " · 실시간 화면", h("div", { class: "stack" }, status, simInfo, deskNote, video, frame,
       h("p", { class: "muted small" }, "PC에서는 학생이 공유한 화면 전체(다른 창·앱 포함)를 영상으로 봅니다. 학생이 공유를 끄면 위에 바로 표시됩니다. 휴대폰·태블릿처럼 화면 공유가 없는 기기는 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다.")), () => {
       const back = grid && grid.tiles.get(s.id);
       if (back) { tileReset(back, "작은 화면으로 돌아오는 중…"); askTile(back); }
@@ -353,6 +355,7 @@ function startGrid() {
     const ids = [...g.tiles.values()].filter((t) => t.asked).flatMap((t) => [t.s.id, screenKey(t.s)]);
     if (ids.length) sendTeacherScreenSignal({ type: "grid-keep", from: "teacher", to: "grid", ids }).catch(() => {});
   }, 15000);
+  g.stats = setInterval(() => { for (const t of g.tiles.values()) readRtcStats(t).catch(() => {}); }, 1000);
   ensureTeacherScreenChannel().then(() => {
     if (grid !== g) return;
     g.ready = true;
@@ -365,6 +368,7 @@ function stopGrid() {
   const g = grid;
   grid = null;
   clearInterval(g.keep);
+  clearInterval(g.stats);
   for (const t of g.tiles.values()) {
     tileReset(t);
     if (t.asked && !screenWatchers.has(t.s.id)) sendTeacherScreenSignal({ type: "stop", from: "teacher", to: t.s.id, key: screenKey(t.s) }).catch(() => {});
@@ -407,13 +411,13 @@ function gridTile(s) {
   const cap = h("span", { class: "tile-cap" }, "연결 중…");
   const video = h("video", { class: "tile-video", autoplay: true, playsinline: true, hidden: true });
   video.muted = true;
-  t = { s, frame, video, cap, html: "", desk: null, deskStream: null, deskState: "", drawn: null, scroll: 0, narrow: false, sims: new Map(), rtc: new Map(), seen: 0, asked: 0, videoText: "", simInfo: h("span") };
+  t = { s, frame, video, cap, html: "", desk: null, deskStream: null, deskState: "", drawn: null, scroll: 0, narrow: false, sims: new Map(), rtc: new Map(), seen: 0, asked: 0, videoText: "", simInfo: h("span", { class: "tile-stats" }) };
   t.paint = () => paintTile(t);
   frame.addEventListener("load", () => { t.loaded = true; t.drawn = null; paintTile(t); });
   t.el = h("div", { class: "live-tile" },
     h("div", { class: "tile-view" }, frame, video,
       h("button", { class: "tile-hit", type: "button", title: nameOf(s) + " 화면 크게 보기", "aria-label": nameOf(s) + " 화면 크게 보기", onclick() { watchStudentScreen(t.s); } },
-        h("span", {}, "⤢ 크게 보기"))),
+        h("span", {}, "⤢ 크게 보기")), t.simInfo),
     cap);
   grid.tiles.set(s.id, t);
   return t;

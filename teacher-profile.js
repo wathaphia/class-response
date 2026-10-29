@@ -61,8 +61,38 @@ function paintProfile() {
           },
         }, "비밀번호 재설정")),
       msg),
+    tabsCard(),
     p ? collaboratorCard(p) : null,
     p && p.admin ? teachersCard(p) : null);
+}
+
+// 탭 꾸미기: 「탭 꾸미기」를 누르면 펼쳐진다. 줄을 끌어 순서를 바꾸고(dragSort) 칸에 새 이름을 적는다(비우면 원래 이름).
+// 이 브라우저에만 남는다(tabCustom, cra-tabs). 평소 탭 줄·설정 메뉴·편집 모드가 모두 이 순서를 따른다.
+let tabsOpen = false;
+function tabsCard() {
+  const apply = (c) => { saveTabCustom(c); draw(); };
+  const head = h("div", { class: "row between" }, h("h3", {}, "탭 꾸미기"),
+    h("button", { class: "ghost", type: "button", "aria-expanded": tabsOpen ? "true" : "false", onclick() { tabsOpen = !tabsOpen; paintProfile(); } }, tabsOpen ? "닫기" : "탭 꾸미기"));
+  if (!tabsOpen) return h("section", { class: "card stack" }, head, h("p", { class: "muted small" }, "탭의 순서와 이름을 내 마음대로 바꿉니다."));
+  const list = h("ol", { class: "tab-edit-list" }, tabSort(TAB_DEFAULTS.map(([k]) => k)).map(([k, name]) => {
+    const def = TAB_DEFAULTS.find(([x]) => x === k)[1];
+    const input = h("input", { type: "text", maxlength: 12, value: name, placeholder: def, "aria-label": def + " 탭 이름",
+      onkeydown(e) { if (e.key === "Enter") input.blur(); },
+      onchange() {
+        const v = input.value.trim(), names = { ...(tabCustom.names || {}) };
+        if (!v || v === def) delete names[k]; else names[k] = v;
+        apply({ ...tabCustom, names });
+      } });
+    return h("li", { class: "tab-edit-row", "data-k": k }, h("span", { class: "tab-grip", "aria-hidden": "true" }, "⠿"), tabIcon(k), input);
+  }));
+  dragSort(list, {
+    items: () => [...list.children],
+    onDrop(order) { apply({ ...tabCustom, order: order.map((x) => x.dataset.k) }); },
+  });
+  return h("section", { class: "card stack" }, head,
+    h("p", { class: "muted small" }, "줄을 끌어 순서를 바꾸고, 칸에 새 이름을 적은 뒤 Enter. 이름을 비우면 원래 이름으로 돌아갑니다. 이 브라우저에만 남습니다."),
+    list,
+    h("div", { class: "row" }, h("button", { class: "ghost", type: "button", onclick() { if (confirm("탭 순서와 이름을 처음대로 되돌릴까요?")) apply({}); } }, "처음대로")));
 }
 
 // 공동 작업자 이름: 승격된 학생이면 학번·이름, 아니면 이메일(교사 ID)

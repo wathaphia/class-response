@@ -232,25 +232,26 @@ main.lesson .slide { cursor: zoom-in; }
 @media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
 .teacher .top-title .lesson-box { flex: 0 1 auto; width: 18rem; }
 .teacher .top-title .eyebrow { white-space: nowrap; }
-/* 편집 모드 단추(오른쪽 위, 프로필 바로 왼쪽): 올리면 탭처럼 색이 바뀌고 기호가 살짝 뜬다. 켜면 흰 바탕 그대로 테두리·글자만 파랗고 오른쪽 작은 스위치가 파랗게 옮겨 간다 */
-.edit-btn { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .4rem; padding-inline: .55rem .7rem; white-space: nowrap;
-  background: var(--card); color: var(--ink); border: 1px solid var(--line); transition: color .2s, background-color .2s, border-color .2s, box-shadow .2s; }
-.edit-btn:hover:not(.on) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
-.edit-btn:hover .tab-icon { transform: translateY(-1px) rotate(-8deg) scale(1.08); background: #fff; }
-.edit-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.edit-btn.on { background: var(--card); color: var(--accent); border-color: var(--accent); font-weight: 700; }
-.edit-btn.on:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .12); }
-.edit-btn.on .tab-icon { background: none; }
-.edit-switch { position: relative; width: 1.9rem; height: 1.05rem; border-radius: 1rem; background: var(--line); transition: background-color .2s; }
-.edit-switch::after { content: ""; position: absolute; top: .15rem; left: .15rem; width: .75rem; height: .75rem; border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
-.edit-btn:hover:not(.on) .edit-switch { background: var(--accent-soft); outline: 1px solid var(--accent); }
-.edit-btn.on .edit-switch { background: var(--accent); }
-.edit-btn.on .edit-switch::after { transform: translateX(.85rem); }
-@media (prefers-reduced-motion: reduce) { .edit-btn, .edit-switch, .edit-switch::after { transition: none; } }
+/* 수업 모드 | 편집 모드 (오른쪽 위, 프로필 바로 왼쪽): 두 칸짜리 바꾸기 단추. 고른 쪽 위로 파란 바탕이 미끄러져 간다 */
+.mode-swap { position: relative; flex: 0 0 auto; display: inline-grid; grid-template-columns: 1fr 1fr; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.mode-swap::before { content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px; background: var(--accent);
+  transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+.mode-swap.editing::before { transform: translateX(100%); }
+.mode-swap > button { position: relative; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: .25rem; min-height: 34px; padding: .25rem .55rem;
+  border: 0; border-radius: 9px; background: none; color: var(--muted); white-space: nowrap; transition: color .2s; }
+.mode-swap > button.on { color: #fff; }
+.mode-swap > button:not(.on):hover { color: var(--accent); }
+.mode-swap > button:not(.on):hover .tab-icon { transform: translateY(-1px) rotate(-8deg) scale(1.08); }
+.mode-swap > button .tab-icon { width: 1.2rem; background: none; color: inherit; }
+.mode-swap > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 700px) { .mode-swap > button > span:not(.tab-icon) { display: none; } }
+@media (prefers-reduced-motion: reduce) { .mode-swap::before { transition: none; } }
 /* 탭이 많아(평소 셋 + 수업용 화면 띄우기, 편집 모드 다섯) 한 줄에 들어가게 탭 사이·안쪽 여백만 조금 줄이고 글자는 줄바꿈하지 않는다 */
 .teacher .top > .tabs { gap: .1rem; }
 .teacher .top .tabs .tab { padding-inline: .6rem; }
+.teacher .top.editing .tabs .tab { padding-inline: .45rem; }
+/* 편집 모드 여섯 탭이 한 줄에 들어가도록, 넓지 않은 화면에선 「버그 제보」는 아이콘만(이름은 title) */
+@media (max-width: 1500px) { .teacher .top.editing .tabs .tab[data-k="bugs"] > span:not(.tab-icon) { display: none; } }
 .teacher .top .tab { white-space: nowrap; }
 /* 넓은 화면: 탭 셋을 머리말 한가운데에 둔다. 편집 모드에서는 제목 칸 바로 오른쪽부터 차례로 늘어놓는다 */
 @media (min-width: 1100px) {
@@ -312,9 +313,6 @@ input[type=text].act-num:focus { background: #fff; }
 .act-unit { display: flex; align-items: center; padding: 0 .4rem; border-left: 1px solid #e3e3e3; font-size: 1rem; font-weight: 700; }
 /* 끌어서 순서 바꾸기 */
 .act-row { cursor: grab; }
-.act-row.dragging { opacity: .45; }
-.act-row.drop-before { box-shadow: -5px 0 0 0 var(--accent); }
-.act-row.drop-after { box-shadow: 5px 0 0 0 var(--accent); }
 .act-name { min-width: 0; display: flex; flex-direction: column; }
 .act-name > p { margin: 0; padding: .3rem .6rem; border-bottom: 1px solid #e3e3e3; }
 .act-name > h3 { padding: .3rem .6rem; }
@@ -369,7 +367,7 @@ label.act-toggle { display: inline-flex; flex-direction: row; align-items: cente
 .act-slide > img, .act-slide-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .act-slide-blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
 .act-slide > span { font-weight: 700; }
-.act-slide.drop > img, .act-slide.drop > .act-slide-blank { outline: 3px dashed var(--accent); outline-offset: 2px; }
+.act-slide.drop > .act-slide-pic, .act-slide.drop > .act-slide-blank { outline: 3px dashed var(--accent); outline-offset: 2px; }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
 .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
@@ -603,6 +601,23 @@ body.desk-locked { overflow: hidden; }
 .ring-bar.ok { stroke: #0ca30c; }
 .ring-bar.warn { stroke: #fab219; }
 .ring-bar.bad { stroke: #d03b3b; }
+.ring-bar.great { stroke: #2f7de1; }
+.tag.great { color: #1d5fb8; background: #e6f0fd; }
+/* 원을 누르면 고름 → 아래에 자세한 정보. 소진 주의는 빨간 테두리 + 표식, 맨 위 요약(.risk-card)에 복제 */
+.usage-item { position: relative; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.usage-item:hover { border-color: var(--accent); }
+.usage-item:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 1px; }
+.usage-item.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.usage-item.risky { border-color: #f1b0aa; background: #fffafa; }
+.risk-mark { position: absolute; top: .4rem; right: .45rem; font-size: .72rem; font-weight: 700; color: var(--bad); }
+.risk-card { border: 2px solid #f1b0aa; background: #fff8f7; }
+.risk-none { margin: 0; color: #1d5fb8; }
+.usage-detail { display: grid; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--accent); border-radius: 12px; background: #fff; min-width: 0; }
+.usage-detail h4 { margin: 0; }
+.usage-detail button.small { min-height: 32px; padding: 0 .8rem; font-size: .85rem; }
+.usage-facts { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 0; font-size: .92rem; }
+.usage-facts dt { color: var(--muted); }
+.usage-facts dd { margin: 0; font-weight: 600; }
 .ring text { fill: var(--ink); font-size: 19px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
 .sync-btn { display: inline-flex; align-items: center; gap: .4rem; }
 .usage-item.unknown .ring text { fill: var(--muted); }
@@ -685,6 +700,11 @@ td.grid-cell > span { white-space: nowrap; }
 .tile-hit:hover, .tile-hit:focus-visible { background: rgba(36, 86, 214, .08); }
 .tile-hit:hover span, .tile-hit:focus-visible span { opacity: 1; }
 .tile-cap { font-size: .8rem; color: var(--muted); }
+/* 실시간 화면 FPS · 지연: 일괄 미리보기는 칸 왼쪽 위에 작게, 크게 보기는 상태 줄 아래 */
+.tile-stats { position: absolute; top: 6px; left: 6px; z-index: 2; padding: .1rem .45rem; border-radius: 6px; background: rgba(27, 34, 48, .72); color: #fff; font-size: .72rem; pointer-events: none; }
+.tile-stats:empty { display: none; }
+.rtc-stats { margin: 0; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.rtc-stats:empty { display: none; }
 .live-tile.stale .tile-view { opacity: .5; }
 .tile-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .live-tile.no-desk .tile-view { border: 2px solid var(--bad); }
@@ -728,3 +748,28 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .present-body .sim-stage > .sim-mirror { position: absolute; inset: 0; width: 100%; }
 .present-note { color: #cfd6e4; font-size: 1.2rem; }
 .present-shield { position: fixed; inset: 0; z-index: 99; cursor: none; }
+
+/* 프로필 · 탭 꾸미기: 줄을 끌어 순서, 칸에 이름 */
+.tab-edit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.tab-edit-row { display: flex; align-items: center; gap: .5rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: grab; touch-action: none; }
+.tab-edit-row input { flex: 1; min-width: 0; min-height: 36px; }
+.tab-grip { color: var(--muted); font-size: 1.1rem; line-height: 1; }
+/* 슬라이드 편집: 파일을 끌어다 놓는 칸, 썸네일 끌어 순서 바꾸기 */
+.slide-drop { transition: border-color .15s, background .15s; }
+.slide-drop.drop { border: 2px dashed var(--accent); background: var(--accent-soft); }
+.drop-hint { margin: 0; }
+.thumb { cursor: grab; }
+.sorting .thumb { cursor: grabbing; }
+/* 끌어서 순서 바꾸기(teacher.js dragSort): 끄는 칸은 마우스를 따라 들려 있고, 자리가 바뀔 칸은 그 자리로 미끄러져 가볍게 들썩인다 */
+.sorting { user-select: none; cursor: grabbing; }
+.sort-item { transition: translate .22s cubic-bezier(.2, .8, .2, 1); }
+.sort-item.sort-lift { transition: none; position: relative; z-index: 30; pointer-events: none; background: var(--card); box-shadow: 0 12px 28px rgba(0, 0, 0, .22); opacity: .92; scale: 1.03; }
+.sort-item.sort-shift { animation: sort-bob .45s ease-in-out infinite alternate; }
+@keyframes sort-bob { from { transform: translateY(-1.5px); } to { transform: translateY(1.5px); } }
+@media (prefers-reduced-motion: reduce) { .sort-item { transition: none; } .sort-item.sort-shift { animation: none; } }
+/* 버그 제보: 제보 카드 오른쪽 위 복사 단추 */
+.bug-card { gap: .5rem; }
+.bug-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.bug-copy { flex-shrink: 0; min-height: 32px; padding: 0 .8rem; font-size: .85rem; }
+.bug-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.bug-text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }

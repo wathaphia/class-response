@@ -1,6 +1,7 @@
 // 교사 화면 · 「슬라이드 편집」 탭: 새 수업 만들기·복제·지우기, 슬라이드 올리기(PPTX/PDF → 그림), 슬라이드 저장소(R2 / Supabase), CSV 내보내기.
 
 // ---------- 슬라이드 편집 ----------
+let newFrom = null;   // 「+ 수업 추가」를 누르기 전의 수업·탭(만들기 취소용)
 function drawSettings() {
   const title = h("input", { type: "text", maxlength: 100, value: lesson ? lesson.title : "", placeholder: "예: 2학년 3반 · 열의 이동" });
   const msg = h("p", { class: "error" });
@@ -23,6 +24,7 @@ function drawSettings() {
     }
     const { data, error } = await sb.rpc("create_lesson", { p_title: t, p_kind: kind });
     if (error) { msg.textContent = "만들지 못했습니다: " + error.message; return; }
+    newFrom = null;
     tab = "settings";
     if (data.kind === "survey") tab = "build";
     await loadLessons(data.id);
@@ -65,7 +67,17 @@ function drawSettings() {
       h("p", { class: "muted small" }, "수업 코드는 겹치지 않게 자동으로 만들어집니다."),
       h("label", {}, "제목", title),
       msg,
-      h("button", { class: "primary big", type: "submit" }, "수업 만들기")),
+      h("div", { class: "row" },
+        h("button", { class: "primary big", type: "submit" }, "수업 만들기"),
+        // 만들기 취소: 「+ 수업 추가」 전의 수업(없으면 처음 수업)과 탭으로 돌아간다
+        lessons.length ? h("button", { class: "ghost big", type: "button", async onclick() {
+          const back = newFrom || {};
+          newFrom = null;
+          lesson = lessons.find((l) => l.id === back.id) || lessons[0];
+          tab = back.tab && back.tab !== "settings" ? back.tab : "profile";
+          localStorage.setItem("cra-tab", tab);
+          await loadLesson();
+        } }, "취소") : null)),
     slides ? slides.mainCard : null,
     lesson ? h("section", { class: "card stack" },
       h("h2", {}, "수업 관리"),
@@ -112,8 +124,9 @@ function slidesCard() {
   const bar = h("progress", { max: 1, value: 0, hidden: true });
   const status = h("p", { class: "msg" });
   const btn = h("button", { class: "primary", type: "button" }, lesson.slide_count ? "다시 올리기 (기존 슬라이드를 바꿈)" : "올리기");
-  btn.addEventListener("click", async () => {
+  const upload = async () => {
     if (!file.files.length) { status.textContent = "PPTX, PDF 또는 그림 파일을 먼저 고르세요."; return; }
+    if (btn.disabled) return;
     btn.disabled = true;
     bar.hidden = false;
     try {
@@ -128,7 +141,8 @@ function slidesCard() {
       status.textContent = "올리지 못했습니다: " + (e.message || e);
       btn.disabled = false;
     }
-  });
+  };
+  btn.addEventListener("click", upload);
   const thumbs = h("div", { class: "thumbs" });
   for (let i = 1; i <= lesson.slide_count; i++) {
     const preview = h("div", { class: "thumb-preview" });
@@ -150,7 +164,7 @@ function slidesCard() {
       type: "checkbox", checked: selectedSlides.has(i), "aria-label": i + "쪽 선택",
       onchange() { setSlideSelection(i, checkbox.checked, figure, checkbox, hitbox); },
     });
-    const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : "") },
+    const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : ""), "data-i": i },
       preview,
       h("label", { class: "thumb-check" }, checkbox, "선택"),
       h("figcaption", {}, h("span", {}, slideSteps(lesson) ? thumbLabel(i) : i + "쪽"),
@@ -186,7 +200,10 @@ function slidesCard() {
         const { error } = await sb.from("lessons").update({ slide_dir: withFx(lesson.slide_dir, fxPick.value) }).eq("id", lesson.id);
         if (error) return alert("바꾸지 못했습니다: " + error.message);
         flash("전환 효과: " + SLIDE_FX[fxPick.value]);
-        await loadLessons(lesson.id);
+        // 그림은 그대로이니 다시 그리지 않고(오른쪽 슬라이드 그림을 다시 받지 않게) 이 수업의 값만 바꾼다
+        lesson.slide_dir = withFx(lesson.slide_dir, fxPick.value);
+        const same = lessons.find((l) => l.id === lesson.id);
+        if (same && same !== lesson) same.slide_dir = lesson.slide_dir;
       }, 1400);
     },
   }, Object.entries(SLIDE_FX).map(([k, name]) => h("option", { value: k, selected: k === slideFx(lesson) }, name)));
@@ -205,13 +222,31 @@ function slidesCard() {
     h("h2", {}, "전체 슬라이드 " + lesson.slide_count + "장"),
     h("div", { class: "row slide-tools" },
       h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), status); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
-      h("span", { class: "muted small grow" }, "빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
+      h("span", { class: "muted small grow" }, "끌어서 순서를 바꿀 수 있습니다. 빈 칸이 있거나 쪽 수가 맞지 않으면 →"),
       h("button", { class: "ghost", type: "button", onclick() { deleteSlide(null, status); } }, "번호 다시 맞추기")),
     thumbs) : null;
-  const mainCard = h("section", { class: "card stack" },
+  // 끌어서 슬라이드 순서 바꾸기(dragSort): 애니메이션 단계 그림은 한 슬라이드의 단계를 묶어서 함께 옮긴다.
+  // 놓으면 칸을 바로 새 순서로 늘어놓고, 저장소의 그림 이름을 바꾼 뒤 다시 그린다
+  if (allCard) dragSort(thumbs, {
+    items: () => [...thumbs.children],
+    unit: anim ? (f) => slideNo(lesson, +f.dataset.i) : undefined,
+    onDrop(order) { thumbs.append(...order); reorderSlides(order.map((f) => +f.dataset.i), status); },
+    scroller: () => thumbs.closest(".settings-right"),
+  });
+  // 파일을 이 칸 위로 끌어다 놓아도 바로 올린다
+  const mainCard = h("section", { class: "card stack slide-drop",
+    ondragover(ev) { if ([...ev.dataTransfer.types].includes("Files")) { ev.preventDefault(); mainCard.classList.add("drop"); } },
+    ondragleave(ev) { if (!mainCard.contains(ev.relatedTarget)) mainCard.classList.remove("drop"); },
+    ondrop(ev) {
+      ev.preventDefault();
+      mainCard.classList.remove("drop");
+      if (!ev.dataTransfer.files.length) return;
+      file.files = ev.dataTransfer.files;
+      upload();
+    } },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
     h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
-    h("div", { class: "row" }, file, btn), bar, status,
+    h("div", { class: "row" }, file, btn), h("p", { class: "muted small drop-hint" }, "또는 파일을 이 칸에 끌어다 놓으세요."), bar, status,
     anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
     ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null);
   return { mainCard, allCard, fxCard: lesson.slide_count && !ppt ? fxBox : null };
@@ -485,6 +520,63 @@ async function deleteSlide(target, status) {
     if (u.error) throw u.error;
     selectedSlides.clear();
     flash(targets.length ? targets.length + "장의 슬라이드를 지웠습니다." : "슬라이드 번호를 맞췄습니다 (" + left + "장).");
+    slideBusy = false;
+    await loadLessons(lesson.id);
+  } catch (e) {
+    slideBusy = false;
+    document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = false; });
+    status.textContent = "멈췄습니다: " + (e.message || e) + " · 「번호 다시 맞추기」를 누르면 남은 그림으로 번호를 다시 맞춥니다.";
+    alert(status.textContent);
+  }
+}
+
+// 슬라이드 순서 바꾸기: order 는 새 순서의 예전 그림 번호들. 그림을 임시 이름(m번호)으로 옮긴 뒤 새 번호로 옮기고,
+// 질문의 쪽 번호·지금 쪽·애니메이션 단계 수(anim)도 새 순서에 맞춘다
+async function reorderSlides(order, status) {
+  if (slideBusy || order.every((n, k) => n === k + 1)) return;
+  const home = slideHome(lesson);
+  if (!home || isPptx(lesson) || home.folder !== slideFolder(lesson) || sharedSlides(lesson)) {
+    alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 순서를 바꿀 수 없습니다.\n이 수업에서 슬라이드 파일을 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
+    return drawSettings();
+  }
+  slideBusy = true;
+  document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
+  const { store: st, folder } = home;
+  try {
+    status.textContent = "슬라이드 목록을 확인하는 중…";
+    const names = new Set(await st.list(folder));
+    const moved = order.map((old, k) => [old, k + 1]).filter(([old, to]) => old !== to);
+    const files = (n) => [n + ".jpg", ...(names.has(n + "s.jpg") ? [n + "s.jpg"] : [])];
+    for (const [i, [old]] of moved.entries()) {
+      status.textContent = "슬라이드 순서를 바꾸는 중 " + (i + 1) + " / " + (moved.length * 2);
+      for (const f of files(old)) await st.move(folder + f, folder + "m" + f);
+    }
+    for (const [i, [old, to]] of moved.entries()) {
+      status.textContent = "슬라이드 순서를 바꾸는 중 " + (moved.length + i + 1) + " / " + (moved.length * 2);
+      for (const f of files(old)) await st.move(folder + "m" + f, folder + f.replace(/^\d+/, to));
+    }
+    // 슬라이드 번호(애니메이션 수업은 단계를 묶은 번호)로 바꿔 질문 쪽 번호를 옮긴다
+    const steps = slideSteps(lesson);
+    const slides = [...new Set(order.map((n) => slideNo(lesson, n)))];
+    const newSlide = (s) => (s == null ? s : slides.indexOf(s) + 1);
+    for (const a of activities) {
+      if (a.page == null) continue;
+      const page = newSlide(a.page);
+      let to = a.page_to > a.page ? newSlide(a.page_to) : a.page_to ?? null;
+      if (to != null && to <= page) to = null;
+      if (page === a.page && to === (a.page_to ?? null)) continue;
+      const change = { page };
+      if ("page_to" in a) change.page_to = to;
+      const u = await sb.from("activities").update(change).eq("id", a.id);
+      if (u.error) throw u.error;
+    }
+    const anim = steps ? slides.map((s) => Math.min(steps[s - 1] - 1, 35).toString(36)).join("") : "";
+    const small = /[?&]sm=1/.test(lesson.slide_dir);
+    const dir = withFx(lesson.slide_dir.split("?")[0] + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));
+    const u = await sb.from("lessons").update({ slide_dir: dir, page: order.indexOf(lesson.page) + 1 || 1 }).eq("id", lesson.id);
+    if (u.error) throw u.error;
+    selectedSlides.clear();
+    flash("슬라이드 순서를 바꿨습니다.");
     slideBusy = false;
     await loadLessons(lesson.id);
   } catch (e) {
