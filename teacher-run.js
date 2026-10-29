@@ -27,7 +27,7 @@ function drawRun() {
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
       // 접속 QR은 「접속 QR」 탭, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
-      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn,
+      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn, presentBtn(), presentSyncBtn(),
         h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
       classBar()),
     h("aside", { class: "run-right stack" },
@@ -153,6 +153,41 @@ function paintStage(s, editable) {
 }
 
 // ---------- 수업용 화면(TV·빔 프로젝터에 띄우는 창) ----------
+// 「수업 진행」 아래 줄, 「전체 화면」 왼쪽: 「수업용 화면 띄우기」와 「동기화」(창을 처음부터 다시 그린다)
+function presentBtn() {
+  return h("button", { class: "ghost present-btn", type: "button", title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)", onclick() { openPresent(); } },
+    tabIcon("present"), h("span", {}, "수업용 화면 띄우기"));
+}
+function presentSyncBtn() {
+  const icon = h("span", { class: "sync-icon", "aria-hidden": "true" });
+  icon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
+  const btn = h("button", { class: "ghost present-sync", type: "button", title: "수업용 화면을 지금 이 화면과 같게 다시 그립니다",
+    onclick() {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      icon.classList.add("spin");
+      presentResync();
+      setTimeout(() => { icon.classList.remove("spin"); btn.disabled = false; centerNote("동기화됐습니다"); }, 900);
+    } }, icon, h("span", {}, "동기화"));
+  return btn;
+}
+function presentResync() {
+  if (!present || present.w.closed) { openPresent(); return; }
+  const p = present;
+  presentMirrorStop();
+  p.simKey = ""; p.pptKey = ""; p.lastPage = null;
+  p.simStage.replaceChildren();
+  p.simLayer.replaceChildren();
+  p.stage.querySelector(".pptx-frame")?.remove();
+  paintPresent();
+}
+// 화면 가운데에 잠깐 나타났다가 서서히 사라지는 알림(app.css .center-note)
+function centerNote(text) {
+  document.querySelector(".center-note")?.remove();
+  const n = h("div", { class: "center-note", role: "status" }, text);
+  document.body.append(n);
+  n.addEventListener("animationend", () => n.remove());
+}
 // 따로 연 창에 지금 슬라이드(애니메이션 단계·시뮬레이션 포함)만 검은 바탕에 가득 그리고, 어느 탭에 있든 0.3초마다 따라간다.
 // 창 이름(cra-present)이 같아 늘 한 개만 생기고(교사 화면을 새로 고쳐도 같은 창을 다시 쓴다), 맨 위 가림막이 마우스를 모두 막는다.
 // 시뮬레이션은 교사 화면에서 조작한 모습을 그대로 비춘다(presentMirrorSync). 교사 화면에 같은 시뮬레이션이 안 보일 때만 이 창이 직접 돌린다.

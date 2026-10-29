@@ -316,7 +316,7 @@ end $$;
 -- 학생 입장(수업 코드 + 이름): 이 수업에 같은 이름이 있으면 그 학생으로, 없으면 새로 만든다.
 -- 새로 만들 때는 화면 보기 동의(p_consent)를 받아야 한다(비어 있으면 need_consent).
 create or replace function student_join(p_code text, p_name text, p_consent boolean default null)
-returns jsonb language plpgsql security definer set search_path = public, extensions as $
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare
   l lessons;
   s students;
@@ -342,9 +342,54 @@ begin
   update students set token = coalesce(token, encode(gen_random_bytes(24), 'hex'))
     where id = s.id returning * into s;
   return jsonb_build_object('token', s.token, 'class_no', s.class_no, 'name', s.name, 'code', l.code, 'new', made);
-end $;
+end $$;
 revoke all on function student_join(text, text, boolean) from public;
 grant execute on function student_join(text, text, boolean) to anon, authenticated;
+
+-- 학생 입장(수업 코드 + 학번(번호) + 이름): 같은 학번+이름이면 같은 학생(어느 수업이든), 이 수업에 이름만으로 들어왔던 학생이면 학번을 채운다.
+-- 새로 만들 때는 화면 보기 동의(p_consent)를 받아야 한다(비어 있으면 need_consent).
+create or replace function student_join_no(p_code text, p_class_no text, p_name text, p_consent boolean default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare
+  l lessons;
+  s students;
+  c text := tidy(p_class_no);
+  n text := tidy(p_name);
+  made boolean := false;
+begin
+  select * into l from lessons where code = upper(tidy(p_code));
+  if not found then return jsonb_build_object('error', 'no_lesson'); end if;
+  if n = '' or length(n) > 20 then return jsonb_build_object('error', 'bad_name'); end if;
+  if c = '' or length(c) > 20 then return jsonb_build_object('error', 'bad_no'); end if;
+
+  select * into s from students where class_no = c and name = n;
+  if not found then
+    select st.* into s from students st join lesson_students ls on ls.student_id = st.id
+      where ls.lesson_id = l.id and st.name = n and st.class_no = ''
+      order by ls.last_seen desc nulls last limit 1;
+    if found then
+      update students set class_no = c where id = s.id returning * into s;
+    else
+      if p_consent is null then return jsonb_build_object('error', 'need_consent'); end if;
+      if (select count(*) from students) >= 5000 then return jsonb_build_object('error', 'full'); end if;
+      insert into students (class_no, name, monitor_consent, monitor_consent_at)
+        values (c, n, p_consent, now()) returning * into s;
+      made := true;
+    end if;
+  end if;
+  if not exists (select 1 from lesson_students where lesson_id = l.id and student_id = s.id) then
+    if (select count(*) from lesson_students where lesson_id = l.id) >= 200 then
+      if made then delete from students where id = s.id; end if;
+      return jsonb_build_object('error', 'full');
+    end if;
+    insert into lesson_students (lesson_id, student_id) values (l.id, s.id) on conflict do nothing;
+  end if;
+  update students set token = coalesce(token, encode(gen_random_bytes(24), 'hex'))
+    where id = s.id returning * into s;
+  return jsonb_build_object('token', s.token, 'class_no', s.class_no, 'name', s.name, 'code', l.code, 'new', made);
+end $$;
+revoke all on function student_join_no(text, text, text, boolean) from public;
+grant execute on function student_join_no(text, text, text, boolean) to anon, authenticated;
 
 
 -- 학생 화면에 필요한 것 전부: 이 수업의 상태, 활동, 내 응답, 공개된 친구들 응답.

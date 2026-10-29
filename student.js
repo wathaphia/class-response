@@ -110,6 +110,7 @@ function showEntry(notice) {
   cards.clear();
   const fromLink = !!params.get("c");
   const codeIn = h("input", { type: "text", value: code, autocomplete: "off", maxlength: 20, placeholder: "예: K7P2Q", autocapitalize: "characters", required: true });
+  const noIn = h("input", { type: "text", autocomplete: "off", maxlength: 20, required: true, inputmode: "numeric", placeholder: "예: 10203 또는 3" });
   const nameIn = h("input", { type: "text", autocomplete: "off", maxlength: 20, required: true });
   // 이 수업에 처음 들어올 때만: 수업 중 화면 보기 동의(둘 중 하나를 직접 고른다. 동의하지 않아도 수업에 참여할 수 있다)
   const consentYes = h("input", { type: "radio", name: "monitor-consent", value: "yes" });
@@ -123,8 +124,8 @@ function showEntry(notice) {
   const msg = h("p", { class: "msg" }, notice || "");
   const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
 
-  // 코드나 이름을 바꾸면 동의 단계를 처음부터 다시
-  [codeIn, nameIn].forEach((el) => el.addEventListener("input", () => {
+  // 코드·학번·이름을 바꾸면 동의 단계를 처음부터 다시
+  [codeIn, noIn, nameIn].forEach((el) => el.addEventListener("input", () => {
     newAccount = false;
     consentRow.hidden = true;
   }));
@@ -136,14 +137,15 @@ function showEntry(notice) {
       if (newAccount && !consentYes.checked && !consentNo.checked) { msg.textContent = "「수업 중 화면 보기」에서 동의 여부를 골라 주세요."; return; }
       btn.disabled = true;
       msg.textContent = "확인 중…";
-      const { data, error } = await sb.rpc("student_join", {
-        p_code: codeIn.value, p_name: nameIn.value, p_consent: newAccount ? consentYes.checked : null,
+      const { data, error } = await sb.rpc("student_join_no", {
+        p_code: codeIn.value, p_class_no: noIn.value, p_name: nameIn.value, p_consent: newAccount ? consentYes.checked : null,
       });
       btn.disabled = false;
       if (error) { msg.textContent = "연결하지 못했습니다. 인터넷을 확인하고 다시 시도하세요. (" + error.message + ")"; return; }
       const err = data.error;
       if (err === "no_lesson") msg.textContent = "수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.";
       else if (err === "bad_name") msg.textContent = "이름을 확인하세요(20자까지).";
+      else if (err === "bad_no") msg.textContent = "학번(번호)을 확인하세요(20자까지).";
       else if (err === "full") msg.textContent = "이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.";
       else if (err === "need_consent") {
         newAccount = true;
@@ -161,6 +163,7 @@ function showEntry(notice) {
     },
   },
     fromLink ? null : h("label", {}, "수업 코드", codeIn),
+    h("label", {}, "학번(번호)", noIn),
     h("label", {}, "이름", nameIn),
     consentRow,
     btn, msg);
@@ -170,7 +173,7 @@ function showEntry(notice) {
       h("p", { class: "eyebrow" }, fromLink ? "수업 코드 " + code : "수업 응답"),
       h("h1", {}, "입장하기")),
     form));
-  (fromLink ? nameIn : codeIn).focus();
+  (fromLink ? noIn : codeIn).focus();
 }
 
 // 학번이 없는 학생(이름만으로 들어옴)은 이름만

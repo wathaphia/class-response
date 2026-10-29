@@ -204,7 +204,7 @@ function studentsCard() {
       h("button", { class: "ghost small", type: "button", disabled: !canPromote.length, onclick() { promoteMany(canPromote); } }, "승격" + (canPromote.length ? " (" + canPromote.length + ")" : "")),
       h("button", { class: "ghost small danger", type: "button", onclick() { deleteStudents(chosen); } }, "계정 삭제" + (chosen.length ? " (" + chosen.length + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "all-students-table" },
-      h("thead", {}, h("tr", {}, pickHead(set, ids, paintStudents), ["이름", "학번", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, pickHead(set, ids, paintStudents), ["이름", "학번(번호)", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((s) => h("tr", { class: set.has(s.id) ? "picked-row" : null },
         pickCell(set, s.id, nameOf(s), paintStudents),
         h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님") : null), h("td", {}, s.class_no || "—"),
