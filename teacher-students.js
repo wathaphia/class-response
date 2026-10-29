@@ -432,7 +432,7 @@ async function gridSignal(t, m) {
     t.narrow = !!m.narrow;
     t.deskState = m.desk || "";
     const desk = deskLabel(m.desk, true);
-    t.cap.replaceChildren(desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : null, desk ? " · " : null,
+    t.cap.replaceChildren(desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : "", desk ? " · " : "",
       h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱·탭" : "수업 화면"),
       m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString());
     paintTile(t);
@@ -548,12 +548,30 @@ function promotedCard() {
   const account = (p) => !p.account ? h("span", { class: "tag info" }, "계정 만들기 전")
     : !p.confirmed ? h("span", { class: "tag warn" }, "메일 확인 기다림")
     : h("span", { class: "tag ok" }, p.last_sign_in ? "마지막 로그인 " + dateText(p.last_sign_in) : "로그인 안 함");
+  // 개발자: 여러 명 골라 한꺼번에 자격 해제(teacher-profile.js bulkBar)
+  const set = peoplePick.promoted, ids = list.map((p) => p.student_id);
+  pickPrune(set, ids);
+  const repaint = () => { const old = main && main.querySelector(".promoted-card"); if (old) old.replaceWith(promotedCard()); };
+  const demoteMany = async () => {
+    const who = list.filter((p) => set.has(p.student_id));
+    if (!confirm(who.length + "명의 선생님 자격을 해제할까요?\n" + who.map((p) => p.name).join(", ") + "\n학생 계정·응답은 그대로이고, 공동 작업자로 함께 쓰던 수업에서 빠집니다.")) return;
+    const fails = [];
+    for (const p of who) {
+      const { error } = await sb.rpc("demote_student", { p_student: p.student_id });
+      if (error) fails.push(p.name + ": " + error.message); else set.delete(p.student_id);
+    }
+    if (fails.length) alert("해제하지 못한 학생:\n" + fails.join("\n")); else flash(who.length + "명의 선생님 자격을 해제했습니다.");
+    await loadProfile();
+    draw();
+  };
   return h("section", { class: "card stack promoted-card" },
     h("div", { class: "row between wrap" }, h("h2", {}, "선생님으로 승격된 학생 " + list.length + "명"),
       h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 개발자가 「전체 선생님 및 학생」에서 공동 작업자로 넣을 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
+    list.length && admin ? bulkBar(set, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: demoteMany }, "선생님 자격 해제" + (set.size ? " (" + set.size + ")" : ""))) : null,
     list.length ? h("div", { class: "table-wrap" }, h("table", { class: "promoted-table" },
-      h("thead", {}, h("tr", {}, ["학번", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id },
+      h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id, class: set.has(p.student_id) ? "picked-row" : null },
+        admin ? pickCell(set, p.student_id, p.name, repaint) : null,
         h("td", {}, p.class_no), h("td", {}, p.name), h("td", {}, p.email), h("td", {}, p.code), h("td", {}, dateText(p.since)),
         h("td", {}, account(p)), h("td", {}, p.own + "개"), h("td", {}, p.shared + "개"),
         h("td", { class: "actions" }, admin ? h("button", {

@@ -65,7 +65,7 @@ function paintProfile() {
       h("div", { class: "row between" }, h("h3", {}, "탭 꾸미기"),
         h("button", { class: "primary tabs-edit-btn", type: "button", onclick: startTabEdit }, "탭 꾸미기")),
       h("p", { class: "muted small" }, "탭 이름을 눌러 바로 고치고, 탭을 끌어 두 줄 사이에서 자리를 옮기며, 위 줄 탭마다 수업 모드·편집 모드 중 어디에 보일지 고릅니다. 내 계정에 저장되어 다른 기기에서도 같습니다.")),
-    p && (p.shared_with_me || []).length ? sharedCard(p) : null);
+    p && (p.shared_with_me || []).length ? sharedCard(p) : "");   // replaceChildren 은 null 을 「null」 글자로 넣는다
 }
 
 // 나에게 공유된 수업(공동 작업자는 개발자가 넣는다). 직접 빠질 수는 있다
@@ -86,16 +86,23 @@ async function removeCollaborator(lessonId, who, text) {
 
 // ---------- 전체 선생님 및 학생(개발자만) ----------
 let allStudents = null;   // 모든 학생(처음 열 때 한 번 받는다)
+let studentsBusy = false;  // 「새로 읽기」 중이면 화살표가 돈다
 function drawPeople() {
   main.replaceChildren(h("div", { class: "people-page stack" }));
   paintPeople();
   if (!allStudents) loadAllStudents();
 }
 
-async function loadAllStudents() {
-  const { data, error } = await sb.from("students").select("id, class_no, name, created_at, monitor_consent, lesson_students(lesson_id, last_seen)").order("created_at", { ascending: false }).limit(2000);
-  allStudents = error ? { error: error.message } : data;
+async function loadAllStudents(manual) {
+  studentsBusy = true;
   paintStudents();
+  const started = Date.now();
+  const { data, error } = await sb.from("students").select("id, class_no, name, created_at, monitor_consent, lesson_students(lesson_id, last_seen)").order("created_at", { ascending: false }).limit(2000);
+  await new Promise((r) => setTimeout(r, Math.max(0, 600 - (Date.now() - started))));   // 너무 빨리 끝나도 한 바퀴는 보이게
+  allStudents = error ? { error: error.message } : data;
+  studentsBusy = false;
+  paintStudents();
+  if (manual && !error) flash("모든 학생 " + data.length + "명을 새로 읽었습니다.");
 }
 
 // 모든 학생 표만 다시 그린다(위쪽 입력 칸에 쓰던 글자를 지우지 않게)
@@ -112,17 +119,94 @@ function paintPeople() {
   page.replaceChildren(teachersCard(p), collaboratorCard(p), promotedCard(), studentsCard());
 }
 
+// ---------- 표에서 여러 줄 고르기(전체 선생님 및 학생) ----------
+// 표마다 고른 줄의 id 모음. 다시 그려도 남고, 없어진 줄은 그릴 때 뺀다
+const peoplePick = { students: new Set(), teachers: new Set(), promoted: new Set() };
+function pickPrune(set, ids) { for (const id of [...set]) if (!ids.includes(id)) set.delete(id); }
+function pickCell(set, id, label, repaint) {
+  return h("td", { class: "pick" }, h("input", { type: "checkbox", checked: set.has(id), "aria-label": label + " 고르기",
+    onchange(e) { if (e.target.checked) set.add(id); else set.delete(id); repaint(); } }));
+}
+function pickHead(set, ids, repaint) {
+  const all = ids.length > 0 && ids.every((id) => set.has(id));
+  const box = h("input", { type: "checkbox", checked: all, disabled: !ids.length, "aria-label": "전체 선택",
+    onchange(e) { ids.forEach((id) => (e.target.checked ? set.add(id) : set.delete(id))); repaint(); } });
+  box.indeterminate = !all && ids.some((id) => set.has(id));
+  return h("th", { class: "pick" }, box);
+}
+// 표 위 막대: [전체 선택] n명 고름 · 고른 사람에게 할 일 단추들(고른 사람이 없으면 못 누른다)
+function bulkBar(set, ids, repaint, ...actions) {
+  const all = ids.length > 0 && ids.every((id) => set.has(id));
+  return h("div", { class: "row wrap bulk-bar" + (set.size ? " on" : "") },
+    h("button", { class: "ghost small", type: "button", disabled: !ids.length,
+      onclick() { ids.forEach((id) => (all ? set.delete(id) : set.add(id))); repaint(); } }, all ? "선택 해제" : "전체 선택"),
+    h("span", { class: "muted small" }, set.size ? set.size + "명 고름" : "고른 사람 없음"),
+    actions.map((a) => { if (!set.size) a.disabled = true; return a; }));
+}
+
+// 여러 학생 승격: 학생마다 로그인 이메일을 받는다
+function promoteMany(list) {
+  if (list.length === 1) return promoteStudent(list[0]);
+  const emails = list.map((s) => h("input", { type: "email", required: true, placeholder: "로그인 이메일", "aria-label": nameOf(s) + " 로그인 이메일" }));
+  const msg = h("p", { class: "msg" });
+  const close = openModal(list.length + "명을 선생님으로 승격", h("form", {
+    class: "stack promote-form",
+    async onsubmit(e) {
+      e.preventDefault();
+      const why = { bad_email: "이메일 모양이 아닙니다", no_student: "학생 계정이 없습니다", already: "이미 선생님입니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
+      const fails = [];
+      let ok = 0;
+      for (const [i, s] of list.entries()) {
+        msg.textContent = "승격하는 중… (" + (i + 1) + "/" + list.length + ")";
+        const { data, error } = await sb.rpc("promote_student", { p_student: s.id, p_email: emails[i].value.trim() });
+        if (error || data.error) fails.push(nameOf(s) + ": " + (error ? error.message : why[data.error] || data.error));
+        else { ok++; peoplePick.students.delete(s.id); }
+      }
+      if (fails.length) msg.textContent = ok + "명 승격, " + fails.length + "명 못 함 — " + fails.join(" · ");
+      else { close(); flash(ok + "명을 선생님으로 승격했습니다."); }
+      await loadProfile();
+      if (!fails.length) draw();
+    },
+  },
+    list.map((s, i) => h("label", {}, nameOf(s), emails[i])),
+    h("p", { class: "muted small" }, "학생은 교사 화면에서 이 이메일로 「가입하기」를 한 뒤 메일의 확인 링크를 누르면 로그인할 수 있습니다."),
+    h("button", { class: "primary", type: "submit" }, list.length + "명 승격"), msg));
+  emails[0].focus();
+}
+
+async function deleteStudents(list) {
+  const names = list.slice(0, 10).map(nameOf).join(", ") + (list.length > 10 ? " 외 " + (list.length - 10) + "명" : "");
+  if (!confirm(list.length + "명의 학생 계정을 완전히 지울까요?\n" + names + "\n모든 수업에서 빠지고, 모든 수업의 응답이 지워집니다.")) return;
+  const ids = list.map((s) => s.id);
+  const { error } = await sb.from("students").delete().in("id", ids);
+  if (error) return alert(error.message);
+  allStudents = allStudents.filter((x) => !ids.includes(x.id));
+  ids.forEach((id) => peoplePick.students.delete(id));
+  flash(list.length + "명의 학생 계정을 지웠습니다.");
+  paintStudents();
+}
+
 function studentsCard() {
   const list = Array.isArray(allStudents) ? allStudents : [];
   const title = (id) => { const l = lessons.find((x) => x.id === id); return l ? l.title : "?"; };
   const seen = (s) => (s.lesson_students || []).reduce((t, m) => (m.last_seen > t ? m.last_seen : t), "");
+  const set = peoplePick.students, ids = list.map((s) => s.id);
+  if (Array.isArray(allStudents)) pickPrune(set, ids);
+  const chosen = list.filter((s) => set.has(s.id));
+  const canPromote = chosen.filter((s) => !promotedOf(s));
+  const reloadIcon = h("span", { class: "sync-icon" + (studentsBusy ? " spin" : ""), "aria-hidden": "true" });
+  reloadIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
   return h("section", { class: "card stack all-students-card" },
     h("div", { class: "row between wrap" }, h("h3", {}, "모든 학생 " + list.length + "명"),
-      h("button", { class: "ghost", type: "button", onclick() { allStudents = null; loadAllStudents(); } }, "새로 읽기")),
+      h("button", { class: "ghost reload-btn", type: "button", disabled: studentsBusy, onclick() { loadAllStudents(true); } }, reloadIcon, studentsBusy ? "읽는 중…" : "새로 읽기")),
     allStudents && allStudents.error ? h("p", { class: "error small" }, allStudents.error) : null,
-    !allStudents ? h("p", { class: "muted small" }, "불러오는 중…") : h("div", { class: "table-wrap" }, h("table", { class: "all-students-table" },
-      h("thead", {}, h("tr", {}, ["이름", "학번", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, list.map((s) => h("tr", {},
+    !Array.isArray(allStudents) ? (allStudents ? null : h("p", { class: "muted small" }, "불러오는 중…")) : [bulkBar(set, ids, paintStudents,
+      h("button", { class: "ghost small", type: "button", disabled: !canPromote.length, onclick() { promoteMany(canPromote); } }, "승격" + (canPromote.length ? " (" + canPromote.length + ")" : "")),
+      h("button", { class: "ghost small danger", type: "button", onclick() { deleteStudents(chosen); } }, "계정 삭제" + (chosen.length ? " (" + chosen.length + ")" : ""))),
+    h("div", { class: "table-wrap" }, h("table", { class: "all-students-table" },
+      h("thead", {}, h("tr", {}, pickHead(set, ids, paintStudents), ["이름", "학번", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, list.map((s) => h("tr", { class: set.has(s.id) ? "picked-row" : null },
+        pickCell(set, s.id, nameOf(s), paintStudents),
         h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님") : null), h("td", {}, s.class_no || "—"),
         h("td", {}, (s.lesson_students || []).map((m) => title(m.lesson_id)).join(", ") || "—"),
         h("td", {}, seen(s) ? dateText(seen(s)) : "—"), h("td", {}, dateText(s.created_at)),
@@ -137,7 +221,7 @@ function studentsCard() {
               allStudents = allStudents.filter((x) => x.id !== s.id);
               paintStudents();
             },
-          }, "계정 삭제"))))))));
+          }, "계정 삭제")))))))]);
 }
 
 // 공동 작업자 이름: 승격된 학생이면 학번·이름, 아니면 이메일(교사 ID)
@@ -211,11 +295,28 @@ function teachersCard(p) {
     if (on) flash(who + " 선생님을 추가했습니다(ID " + data.code + ").");
     await loadProfile();
   };
-  return h("section", { class: "card stack" },
+  const picked = peoplePick.teachers;
+  const ids = (p.teachers || []).filter((t) => !t.admin).map((t) => t.email);   // 개발자는 뺄 수 없어 고르지 않는다
+  pickPrune(picked, ids);
+  const repaint = () => { const old = main && main.querySelector(".teachers-card"); if (old) old.replaceWith(teachersCard(p)); };
+  const removeMany = async () => {
+    const who = [...picked];
+    if (!confirm(who.length + "명의 선생님을 교사 목록에서 뺄까요?\n" + who.join(", ") + "\n그 선생님들의 수업은 지워지지 않고 개발자가 계속 볼 수 있습니다.")) return;
+    const fails = [];
+    for (const w of who) {
+      const { data, error } = await sb.rpc("admin_set_teacher", { p_email: w, p_on: false });
+      if (error || data.error) fails.push(w + ": " + (error ? error.message : data.error)); else picked.delete(w);
+    }
+    if (fails.length) alert("빼지 못한 선생님:\n" + fails.join("\n")); else flash(who.length + "명의 선생님을 뺐습니다.");
+    await loadProfile();
+  };
+  return h("section", { class: "card stack teachers-card" },
     h("h3", {}, "선생님 관리"),
+    bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: removeMany }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
-      h("thead", {}, h("tr", {}, ["ID", "이메일", "수업", "마지막 로그인", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, (p.teachers || []).map((t) => h("tr", {},
+      h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "수업", "마지막 로그인", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, (p.teachers || []).map((t) => h("tr", { class: picked.has(t.email) ? "picked-row" : null },
+        t.admin ? h("td", { class: "pick" }) : pickCell(picked, t.email, t.email, repaint),
         h("td", {}, t.code), h("td", {}, t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
         h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"),
         h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기"))))))),

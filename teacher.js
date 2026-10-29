@@ -524,7 +524,7 @@ function topBar() {
   const setBtn = h("button", {
     class: inSub ? "tab profile-btn on" : "tab profile-btn", type: "button", title: (me.email || "") + " · 설정",
     onclick() { const last = localStorage.getItem("cra-subtab"); goTab(subTabs.includes(last) ? last : "profile"); },
-  }, h("span", { class: "avatar", "aria-hidden": "true" }, ((me.email || "?")[0]).toUpperCase()), h("span", {}, "설정"));
+  }, gearIcon(), h("span", {}, "설정"));
   const subRow = tabEdit || inSub ? h("nav", { class: "tabs sub-tabs", "aria-label": "설정 탭" },
     tabEdit ? subTabs.map((k) => custTab(k, "sub")) : subTabs.map(tabBtn), tabEdit ? tabEditBar() : null) : null;
   return h("header", { class: "top" + (editMode ? " editing" : "") + (subRow ? " has-sub" : "") },
@@ -532,6 +532,13 @@ function topBar() {
     h("nav", { class: "tabs main-tabs" }, mainRow, present),
     h("div", { class: "top-actions" }, modeSwitch, setBtn),
     subRow);
+}
+
+// 「설정」 단추의 톱니바퀴: 올리면 살짝 돌고 멈춘다(app.css .gear)
+function gearIcon() {
+  const g = h("span", { class: "gear", "aria-hidden": "true" });
+  g.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  return g;
 }
 
 // ---------- 탭 꾸미기 ----------
