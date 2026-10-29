@@ -74,7 +74,7 @@ function drawSettings() {
           const back = newFrom || {};
           newFrom = null;
           lesson = lessons.find((l) => l.id === back.id) || lessons[0];
-          tab = back.tab && back.tab !== "settings" ? back.tab : "profile";
+          tab = back.tab && back.tab !== "settings" ? back.tab : "library";
           localStorage.setItem("cra-tab", tab);
           await loadLesson();
         } }, "취소") : null)),

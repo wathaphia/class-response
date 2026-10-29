@@ -115,7 +115,9 @@ begin
     drop table pg_temp.keep_students;
   end if;
 end $$;
-create unique index if not exists students_who on students (class_no, name);
+-- 이름만으로 들어온 학생은 학번이 '' 라 같은 이름이 여러 수업에 있을 수 있다
+drop index if exists students_who;
+create unique index if not exists students_who on students (class_no, name) where class_no <> '';
 
 -- ------------------------------------------------------------
 -- 보안(RLS): 표는 교사만 직접 읽고 쓴다. 학생은 아래 함수 세 개(입장, 상태, 저장)로만 들어온다.
@@ -310,6 +312,40 @@ begin
   end if;
   return jsonb_build_object('token', s.token, 'class_no', s.class_no, 'name', s.name, 'code', l.code);
 end $$;
+
+-- 학생 입장(수업 코드 + 이름): 이 수업에 같은 이름이 있으면 그 학생으로, 없으면 새로 만든다.
+-- 새로 만들 때는 화면 보기 동의(p_consent)를 받아야 한다(비어 있으면 need_consent).
+create or replace function student_join(p_code text, p_name text, p_consent boolean default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $
+declare
+  l lessons;
+  s students;
+  n text := tidy(p_name);
+  made boolean := false;
+begin
+  select * into l from lessons where code = upper(tidy(p_code));
+  if not found then return jsonb_build_object('error', 'no_lesson'); end if;
+  if n = '' or length(n) > 20 then return jsonb_build_object('error', 'bad_name'); end if;
+
+  select st.* into s from students st join lesson_students ls on ls.student_id = st.id
+    where ls.lesson_id = l.id and st.name = n
+    order by ls.last_seen desc nulls last limit 1;
+  if not found then
+    if p_consent is null then return jsonb_build_object('error', 'need_consent'); end if;
+    if (select count(*) from students) >= 5000 then return jsonb_build_object('error', 'full'); end if;
+    if (select count(*) from lesson_students where lesson_id = l.id) >= 200 then return jsonb_build_object('error', 'full'); end if;
+    insert into students (class_no, name, monitor_consent, monitor_consent_at)
+      values ('', n, p_consent, now()) returning * into s;
+    insert into lesson_students (lesson_id, student_id) values (l.id, s.id) on conflict do nothing;
+    made := true;
+  end if;
+  update students set token = coalesce(token, encode(gen_random_bytes(24), 'hex'))
+    where id = s.id returning * into s;
+  return jsonb_build_object('token', s.token, 'class_no', s.class_no, 'name', s.name, 'code', l.code, 'new', made);
+end $;
+revoke all on function student_join(text, text, boolean) from public;
+grant execute on function student_join(text, text, boolean) to anon, authenticated;
+
 
 -- 학생 화면에 필요한 것 전부: 이 수업의 상태, 활동, 내 응답, 공개된 친구들 응답.
 -- 이미 입장한 학생(열쇠가 있는 기기)이 새 수업 코드로 오면 비밀번호 없이 그 수업에 참여시킨다.
@@ -562,11 +598,10 @@ declare
   who text;
   n int;
 begin
-  if not is_teacher() then raise exception 'not a teacher'; end if;
+  if not is_admin() then raise exception 'admin only'; end if;   -- 공동 작업자는 개발자만 붙인다
   select email into who from teachers where code = trim(p_code);
   if who is null then return jsonb_build_object('error', 'no_teacher'); end if;
   if who = lower(auth.jwt() ->> 'email') then return jsonb_build_object('error', 'self'); end if;
-  if exists (select 1 from unnest(p_lessons) x where not owns_lesson(x)) then return jsonb_build_object('error', 'not_owner'); end if;
   -- 그 교사가 주인인 수업은 건너뛴다
   insert into lesson_collaborators (lesson_id, email)
     select x, who from unnest(p_lessons) x
@@ -615,7 +650,7 @@ grant execute on function owns_lesson(uuid) to authenticated;
 
 -- ------------------------------------------------------------
 -- 학생을 선생님으로 승격(개발자만, 「학생 관리」에서): 학생 계정에 로그인 이메일을 붙여 teachers 에 넣는다.
--- 승격된 학생은 그 이메일로 교사 화면의 「처음 계정 만들기」를 해 로그인하고,
+-- 승격된 학생은 그 이메일로 교사 화면의 「가입하기」를 해 로그인하고,
 -- 선생님들은 「공동 작업자 추가」에서 승격된 학생이나 「선생님 추가」로 넣은 선생님을 골라 수업을 함께 쓴다.
 -- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 남고 개발자가 볼 수 있다).
 -- ------------------------------------------------------------

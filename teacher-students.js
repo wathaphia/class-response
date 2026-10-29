@@ -532,11 +532,11 @@ function promoteStudent(s) {
       close();
       flash(nameOf(s) + " 학생을 선생님으로 승격했습니다(교사 ID " + data.code + ").");
       await loadProfile();
-      drawStudents();
+      draw();
     },
   },
     h("label", {}, "교사 화면에 로그인할 이메일", email),
-    h("p", { class: "muted small" }, "학생은 교사 화면(teacher.html)에서 이 이메일로 「처음 계정 만들기」를 한 뒤 메일의 확인 링크를 누르면 로그인할 수 있습니다. 학생 계정·응답은 그대로 남고, 선생님들은 「공동 작업자 추가」에서 이 학생을 골라 수업을 함께 쓸 수 있습니다."),
+    h("p", { class: "muted small" }, "학생은 교사 화면(teacher.html)에서 이 이메일로 「가입하기」를 한 뒤 메일의 확인 링크를 누르면 로그인할 수 있습니다. 학생 계정·응답은 그대로 남고, 개발자가 「전체 선생님 및 학생」에서 이 학생을 수업의 공동 작업자로 넣을 수 있습니다."),
     h("button", { class: "primary", type: "submit" }, "승격"), msg));
   email.focus();
 }
@@ -550,7 +550,7 @@ function promotedCard() {
     : h("span", { class: "tag ok" }, p.last_sign_in ? "마지막 로그인 " + dateText(p.last_sign_in) : "로그인 안 함");
   return h("section", { class: "card stack promoted-card" },
     h("div", { class: "row between wrap" }, h("h2", {}, "선생님으로 승격된 학생 " + list.length + "명"),
-      h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 「프로필」 → 「공동 작업자 추가」에서 고를 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
+      h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 개발자가 「전체 선생님 및 학생」에서 공동 작업자로 넣을 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
     list.length ? h("div", { class: "table-wrap" }, h("table", { class: "promoted-table" },
       h("thead", {}, h("tr", {}, ["학번", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id },
@@ -563,7 +563,7 @@ function promotedCard() {
             const { error } = await sb.rpc("demote_student", { p_student: p.student_id });
             if (error) return alert(error.message);
             await loadProfile();
-            drawStudents();
+            draw();
           },
         }, "선생님 자격 해제") : null))))))
       : h("p", { class: "muted small" }, "아직 승격된 학생이 없습니다."));
@@ -577,31 +577,16 @@ function drawStudents() {
   const rows = students.map((s) => {
     const mine = responses.filter((r) => r.student_id === s.id);
     const last = mine.reduce((t, r) => (r.updated_at > t ? r.updated_at : t), "");
-    const locked = s.locked_until && Date.parse(s.locked_until) > now;
-    const status = locked ? h("span", { class: "tag warn" }, "잠김 · " + Math.ceil((Date.parse(s.locked_until) - now) / 60000) + "분 남음")
-      : !s.pin_set ? h("span", { class: "tag info" }, "초기화됨 · 새 비밀번호 기다리는 중")
-      : h("span", { class: "tag ok" }, "정상");
-    return h("tr", { class: locked ? "locked" : "" },
+    return h("tr", {},
       h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님")   // 승격 단추는 이름 아래 작게(넓은 단추 칸을 더 넓히지 않게)
         : admin ? h("div", {}, h("button", { class: "link small promote-btn", type: "button", title: "이 학생을 선생님으로 승격", onclick() { promoteStudent(s); } }, "승격")) : null),
-      h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)), h("td", {}, status),
+      h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)),
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
         : h("span", { class: "tag info" }, "아직 안 정함"), deskTag(s)),
       h("td", { class: "grid-cell", "data-sid": s.id }),
       h("td", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !live, title: live ? "" : "수업을 시작해야 볼 수 있습니다", onclick() { watchStudentScreen(s); } }, "실시간 화면 보기"),
-        h("button", {
-          class: locked ? "primary" : "ghost", type: "button", disabled: !s.pin_set && !locked,
-          async onclick() {
-            if (!confirm(nameOf(s) + " 학생의 비밀번호를 초기화할까요?\n모든 수업에 함께 적용됩니다. 쓴 답은 그대로 남고, 다음에 들어올 때 새 비밀번호를 정합니다.")) return;
-            const { error } = await sb.from("students").update({ pin_hash: null, token: null, fails: 0, locked_until: null }).eq("id", s.id);
-            if (error) return alert(error.message);
-            await loadResponses();
-            drawStudents();
-            flash("초기화했습니다.");
-          },
-        }, "비밀번호 초기화"),
         h("button", {
           class: "link danger", type: "button",
           async onclick() {
@@ -659,10 +644,10 @@ function drawStudents() {
   main.replaceChildren(promotedCard(), h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", { class: "students-count" }, "학생 " + students.length + "명"),
-      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 어느 수업에서든 같은 학번·이름·비밀번호를 씁니다. 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 크게 보기는 한 번에 한 명, 「일괄 미리보기」는 동의한 학생 모두를 작게(240p 미만, 시뮬레이션 영상 10 FPS) 함께 봅니다. 칸을 누르면 크게 봅니다."),
+      h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 수업 코드와 이름만으로 들어옵니다(같은 수업에 같은 이름이면 같은 학생). 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 크게 보기는 한 번에 한 명, 「일괄 미리보기」는 동의한 학생 모두를 작게(240p 미만, 시뮬레이션 영상 10 FPS) 함께 봅니다. 칸을 누르면 크게 봅니다."),
       live ? null : h("p", { class: "banner class-off" }, "학생 화면 보기(크게 보기·일괄 미리보기)는 「수업 진행」에서 「수업 시작하기」를 누른 뒤 50분 동안(연장 가능) 쓸 수 있습니다."),
       h("p", { class: "muted small" }, h("span", { class: "presence on" }), " 수업 화면을 보고 있음 · ", h("span", { class: "presence away" }), " 다른 앱·탭에 있음 · ", h("span", { class: "presence off" }), " 접속 안 함 (바로 바뀝니다)")),
     students.length ? h("div", { class: "table-wrap" }, h("table", { class: "students-table", "data-ids": ids, "data-grid": grid ? "1" : "", "data-live": String(live) },
-      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "상태", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
+      h("thead", {}, h("tr", {}, ["학번", "이름", "저장한 활동", "마지막 저장", "화면 보기"].map((t) => h("th", {}, t)), gridHead, h("th", {}))),
       h("tbody", {}, rows))) : h("p", { class: "muted" }, "아직 입장한 학생이 없습니다.")));
 }
