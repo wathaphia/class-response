@@ -18,6 +18,13 @@ let liveOk = false;     // 수업 채널에 붙어 있는지
 let viewing = 1;        // 학생이 보고 있는 쪽
 let following = true;   // 교사가 띄운 쪽을 따라가는 중인지
 let timer = null;
+let pollSeq = 0;   // 늦게 온 예전 응답(다른 수업 코드·로그아웃 뒤)을 버리려고 부를 때마다 하나씩 올린다
+// 사생활 보호 모드·저장 공간 꽉 참이면 localStorage 가 예외를 던진다: 저장 못 해도 수업은 계속
+const ls = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
 let shell = null;
 const cards = new Map(); // 활동 id → 화면 카드
 let screenChannel = null;
@@ -61,10 +68,10 @@ if (!sb) notConfigured(app);
 else start();
 
 function start() {
-  code = (params.get("c") || localStorage.getItem("cra-last-code") || "").trim();
+  code = (params.get("c") || ls.get("cra-last-code") || "").trim();
   // 예전 판은 수업마다 열쇠를 따로 저장했다: 있으면 그대로 옮겨 쓴다
-  token = localStorage.getItem(TOKEN_KEY) || (code ? localStorage.getItem("cra-token:" + code.toLowerCase()) : null);
-  if (token) localStorage.setItem(TOKEN_KEY, token);
+  token = ls.get(TOKEN_KEY) || (code ? ls.get("cra-token:" + code.toLowerCase()) : null);
+  if (token) ls.set(TOKEN_KEY, token);
   if (token && code) poll();
   else if (token) showCodeOnly();
   else showEntry();
@@ -72,19 +79,25 @@ function start() {
 
 function enterLesson(newCode) {
   code = newCode.trim();
-  localStorage.setItem("cra-last-code", code);
+  ls.set("cra-last-code", code);
   state = null;
   following = true;
   poll();
 }
 
 // 이미 입장한 기기: 수업 코드만 넣으면 된다
+function closeZoom() {
+  document.querySelectorAll(".slide-zoom").forEach((x) => x.remove());
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
 function showCodeOnly(notice) {
   leaveScreenShare();
   stopPolling();
+  closeZoom();
   shell = null;
   cards.clear();
-  const me = localStorage.getItem(ME_KEY) || "";
+  const me = ls.get(ME_KEY) || "";
   const codeIn = h("input", { type: "text", value: params.get("c") ? "" : code, autocomplete: "off", maxlength: 20, placeholder: "예: K7P2Q", autocapitalize: "characters", required: true });
   const msg = h("p", { class: "msg" }, notice || "");
   app.replaceChildren(h("main", { class: "narrow" },
@@ -106,6 +119,7 @@ function showCodeOnly(notice) {
 function showEntry(notice) {
   leaveScreenShare();
   stopPolling();
+  closeZoom();
   shell = null;
   cards.clear();
   const fromLink = !!params.get("c");
@@ -120,6 +134,7 @@ function showEntry(notice) {
     h("p", { class: "muted small" }, "수업하는 동안 선생님이 이 기기 화면을 볼 수 있게 할까요? PC에서는 공유한 화면 전체(다른 창·앱 포함)가, 휴대폰·태블릿에서는 이 수업 화면만 보입니다. 선생님이 보고 있을 때는 화면에 표시되고, 나중에 언제든 바꿀 수 있습니다. 동의하지 않아도 수업에 참여할 수 있습니다."),
     h("label", { class: "option" }, consentYes, h("span", {}, "동의합니다")),
     h("label", { class: "option" }, consentNo, h("span", {}, "동의하지 않습니다")));
+  const codeLabel = h("label", {}, "수업 코드", codeIn);
   let newAccount = false;
   const msg = h("p", { class: "msg" }, notice || "");
   const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
@@ -135,6 +150,7 @@ function showEntry(notice) {
     async onsubmit(e) {
       e.preventDefault();
       if (newAccount && !consentYes.checked && !consentNo.checked) { msg.textContent = "「수업 중 화면 보기」에서 동의 여부를 골라 주세요."; return; }
+      if (btn.disabled) return;
       btn.disabled = true;
       msg.textContent = "확인 중…";
       const { data, error } = await sb.rpc("student_join_no", {
@@ -143,7 +159,10 @@ function showEntry(notice) {
       btn.disabled = false;
       if (error) { msg.textContent = "연결하지 못했습니다. 인터넷을 확인하고 다시 시도하세요. (" + error.message + ")"; return; }
       const err = data.error;
-      if (err === "no_lesson") msg.textContent = "수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.";
+      if (err === "no_lesson") {
+        msg.textContent = "수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.";
+        if (!codeLabel.isConnected) { form.prepend(codeLabel); codeIn.focus(); }
+      }
       else if (err === "bad_name") msg.textContent = "이름을 확인하세요(20자까지).";
       else if (err === "bad_no") msg.textContent = "학번(번호)을 확인하세요(20자까지).";
       else if (err === "full") msg.textContent = "이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.";
@@ -154,15 +173,15 @@ function showEntry(notice) {
       } else if (data.token) {
         token = data.token;
         code = data.code;
-        localStorage.setItem("cra-last-code", code);
-        localStorage.setItem(TOKEN_KEY, token);
-        localStorage.setItem(ME_KEY, whoName(data));
+        ls.set("cra-last-code", code);
+        ls.set(TOKEN_KEY, token);
+        ls.set(ME_KEY, whoName(data));
         following = true;
         poll();
       } else msg.textContent = "알 수 없는 오류입니다. 다시 시도하세요.";
     },
   },
-    fromLink ? null : h("label", {}, "수업 코드", codeIn),
+    fromLink ? null : codeLabel,
     h("label", {}, "학번(번호)", noIn),
     h("label", {}, "이름", nameIn),
     consentRow,
@@ -180,9 +199,10 @@ function showEntry(notice) {
 function whoName(s) { return ((s.class_no || "") + " " + s.name).trim(); }
 
 function logout(notice) {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(ME_KEY);
-  if (code) localStorage.removeItem("cra-token:" + code.toLowerCase());
+  stopPolling();
+  ls.del(TOKEN_KEY);
+  ls.del(ME_KEY);
+  if (code) ls.del("cra-token:" + code.toLowerCase());
   token = null;
   state = null;
   showEntry(notice);
@@ -202,19 +222,21 @@ function leaveScreenShare() {
 
 // ---------- 서버에서 상태 받기 ----------
 function stopPolling() {
+  pollSeq++;
   clearTimeout(timer);
   timer = null;
 }
 
 async function poll() {
   clearTimeout(timer);
-  const { data, error } = await sb.rpc("student_state", { p_token: token, p_code: code, p_have: shell ? stateV : null });
-  if (!token) return;
+  const seq = ++pollSeq, c = code, t = token;
+  const { data, error } = await sb.rpc("student_state", { p_token: t, p_code: c, p_have: shell ? stateV : null });
+  if (!token || seq !== pollSeq || code !== c || token !== t) return;   // 그사이 다시 불렀거나 코드·학생이 바뀌었다
   if (!error && data.error === "no_lesson") return showCodeOnly("수업 코드를 찾지 못했습니다. 선생님께 받은 코드를 확인하세요.");
   if (!error && data.error === "full") return showCodeOnly("이 수업은 인원이 가득 찼습니다. 선생님께 알려 주세요.");
   if (error) {
     if (shell) shell.conn.hidden = false;
-    else showEntry("연결하지 못했습니다. 인터넷을 확인하고 다시 입장하세요.");
+    else return showCodeOnly("연결하지 못했습니다. 인터넷을 확인하고 다시 입장하세요.");
   } else if (data.error === "logged_out") {
     return logout("다시 입장해 주세요. 선생님이 비밀번호를 초기화했거나 학생 정보가 지워졌습니다.");
   } else if (data.same) {
@@ -257,8 +279,8 @@ function clampPage(n) {
 // ---------- 화면 ----------
 function buildShell() {
   const img = h("img", { class: "slide", alt: "", title: "누르면 크게 보기", onclick: zoom });
-  const prev = h("button", { class: "ghost", type: "button", onclick() { go(viewing - 1); } }, "◀ 이전");
-  const next = h("button", { class: "ghost", type: "button", onclick() { go(viewing + 1); } }, "다음 ▶");
+  const prev = h("button", { class: "ghost", type: "button", "data-rapid": "", onclick() { go(viewing - 1); } }, "◀ 이전");
+  const next = h("button", { class: "ghost", type: "button", "data-rapid": "", onclick() { go(viewing + 1); } }, "다음 ▶");
   const where = h("span", { class: "where" });
   const back = h("button", { class: "primary", type: "button", onclick() { go(state.lesson.page); } }, "선생님과 같은 쪽으로");
   const closed = h("p", { class: "banner" }, "지금은 제출이 닫혀 있습니다. 쓴 내용은 이 기기에 남아 있으니, 선생님이 열면 저장하세요.");
@@ -329,7 +351,7 @@ const monitorKey = () => "cra-monitor:" + String(state?.lesson.code || code || "
 const monitorInAccount = () => !!(state?.me && "monitor" in state.me);
 function monitorChoice() {
   if (monitorInAccount()) return state.me.monitor === true ? "yes" : state.me.monitor === false ? "no" : null;
-  try { return localStorage.getItem(monitorKey()); } catch { return null; }
+  try { return ls.get(monitorKey()); } catch { return null; }
 }
 // 끄기: 무엇이 바뀌는지 한 번 더 보여 주고 고르게 한다(입장할 때 묻는 것과 같은 설명)
 function askMonitorOff() {
@@ -347,9 +369,10 @@ async function setMonitorChoice(v) {
   if (monitorInAccount()) {
     state.me.monitor = v === "yes";
     renderScreenNotice();
-    try { await sb.rpc("student_set_monitor", { p_token: token, p_consent: v === "yes" }); } catch {}
+    const { error } = await sb.rpc("student_set_monitor", { p_token: token, p_consent: v === "yes" }).catch((e) => ({ error: e }));
+    if (error) { state.me.monitor = v !== "yes"; renderScreenNotice(); alert("바꾸지 못했습니다. 인터넷을 확인하고 다시 해 주세요."); return; }
   } else {
-    try { localStorage.setItem(monitorKey(), v); } catch {}
+    try { ls.set(monitorKey(), v); } catch {}
   }
   renderScreenNotice();
 }
@@ -518,7 +541,9 @@ function closeDeskPc() {
 }
 
 // 교사가 볼 때마다(크게 보기 ↔ 일괄 미리보기) 새 연결로 보낸다. 화질은 그때 방식에 맞춘다.
-async function offerDesk() {
+// 연결 실패는 화면 복사로 계속 보이므로 조용히 넘긴다(처리 안 된 Promise 오류를 남기지 않게)
+function offerDesk() { return offerDeskNow().catch((e) => console.warn("offerDesk", e)); }
+async function offerDeskNow() {
   closeDeskPc();
   if (!deskStream || !mirrorOn || !state || typeof RTCPeerConnection !== "function") return;
   const id = deskId;
@@ -688,7 +713,7 @@ async function sendScreenData(payload) {
 
 async function sendScreenSignal(payload) {
   if (!state) return;
-  await sendScreenData(payload);
+  try { await sendScreenData(payload); } catch (e) { console.warn("sendScreenSignal", e); }
 }
 
 async function handleScreenSignal(message) {
@@ -731,14 +756,19 @@ async function handleScreenSignal(message) {
   }
   // 전체 화면 영상 연결 신호(예전 연결 번호는 버린다)
   if (!deskPc || message.pid !== deskId) return;
-  if (message.type === "answer" && message.sdp) {
-    await deskPc.setRemoteDescription(message.sdp);
-    for (const c of deskQueued) await deskPc.addIceCandidate(c).catch(() => {});
-    deskQueued = [];
-  } else if (message.type === "candidate" && message.candidate) {
-    if (deskPc.remoteDescription) await deskPc.addIceCandidate(message.candidate).catch(() => {});
-    else deskQueued.push(message.candidate);
-  }
+  const pc = deskPc;   // 기다리는 사이 새 연결로 바뀌어도 이 연결에만 적용
+  try {
+    if (message.type === "answer" && message.sdp) {
+      if (pc.signalingState !== "have-local-offer") return;   // 같은 답이 두 번 왔다
+      await pc.setRemoteDescription(message.sdp);
+      if (pc !== deskPc) return;
+      const queued = deskQueued; deskQueued = [];
+      for (const c of queued) await pc.addIceCandidate(c).catch(() => {});
+    } else if (message.type === "candidate" && message.candidate) {
+      if (pc.remoteDescription) await pc.addIceCandidate(message.candidate).catch(() => {});
+      else deskQueued.push(message.candidate);
+    }
+  } catch (e) { console.warn("desk signal", e); }
 }
 
 // 슬라이드를 화면 가득 띄운다. 누르거나 Esc로 닫는다. 선생님이 쪽을 넘기면 띄운 그림도 바뀐다.
@@ -746,7 +776,7 @@ function zoom() {
   if (isPptx(state.lesson)) return openPptxFull(state.lesson, viewing);
   if (shell.stageSim) {
     const a = shell.stageSim;
-    return loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html)));
+    return loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html)), (e) => alert("시뮬레이션을 불러오지 못했습니다. " + (e.message || "")));
   }
   if (shell.zoom) return;
   const big = h("img", { src: slideSrc(state.lesson, viewing), alt: shell.img.alt });   // 크게 볼 때만 큰 그림(1280px)을 받는다
@@ -756,7 +786,7 @@ function zoom() {
     box.remove();
     document.removeEventListener("keydown", esc);
     document.removeEventListener("fullscreenchange", left);
-    shell.zoom = null;
+    if (shell) shell.zoom = null;
   }
   const esc = (e) => { if (e.key === "Escape") close(); };
   const left = () => { if (!document.fullscreenElement) close(); };
@@ -845,14 +875,14 @@ const simCache = new Map();   // 활동 id → { ver, html }
 // 시뮬레이션 HTML은 이 기기에도 저장해 두어, 새로고침하거나 다음 시간에 다시 들어와도 바뀌지 않았으면 다시 받지 않는다
 async function loadSim(a) {
   let hit = simCache.get(a.id);
-  if (!hit) try { hit = JSON.parse(localStorage.getItem("cra-sim:" + a.id)); } catch {}
+  if (!hit) try { hit = JSON.parse(ls.get("cra-sim:" + a.id)); } catch {}
   if (hit && hit.ver === a.html_ver) { simCache.set(a.id, hit); return hit.html; }
   const { data, error } = await sb.rpc("student_sim", { p_token: token, p_activity: a.id });
   if (error) throw error;
   const html = typeof data === "string" ? data : "";
   hit = { ver: a.html_ver, html };
   simCache.set(a.id, hit);
-  if (html.length < 500000) try { localStorage.setItem("cra-sim:" + a.id, JSON.stringify(hit)); } catch {}
+  if (html.length < 500000) try { ls.set("cra-sim:" + a.id, JSON.stringify(hit)); } catch {}
   return html;
 }
 
@@ -941,7 +971,7 @@ function buildForm(c) {
   const quizDone = a.kind === "quiz" && !!a.mine;
   // 고치는 중인 내용(이 기기에 저장). 서버에 더 나중에 저장된 것이 있으면 그것을 쓴다.
   let draft = null;
-  try { draft = JSON.parse(localStorage.getItem(draftKey(a)) || "null"); } catch (e) { draft = null; }
+  try { draft = JSON.parse(ls.get(draftKey(a)) || "null"); } catch (e) { draft = null; }
   if (draft && a.saved_at && draft.at < Date.parse(a.saved_at)) draft = null;
   const values = Object.assign({}, a.mine || {}, draft ? draft.values : {});
   const err = h("p", { class: "error" });
@@ -951,7 +981,7 @@ function buildForm(c) {
   let unlocked = false;
   const editBtn = h("button", { class: "ghost big", type: "button", hidden: true, onclick() {
     if (unlocked) {   // 취소: 고치던 내용을 버리고 저장한 답으로
-      localStorage.removeItem(draftKey(a));
+      ls.del(draftKey(a));
       c.formSig = null;
       cardFor(a);
       return;
@@ -963,7 +993,7 @@ function buildForm(c) {
   let sending = false;
 
   const saveDraft = () => {
-    localStorage.setItem(draftKey(a), JSON.stringify({ at: Date.now(), values }));
+    ls.set(draftKey(a), JSON.stringify({ at: Date.now(), values }));
     err.textContent = "";
     c.refresh();
   };
@@ -1018,7 +1048,7 @@ function buildForm(c) {
     else if (data.error === "logged_out") return logout("다시 입장해 주세요.");
     else if (data.error) err.textContent = "저장하지 못했습니다. (" + data.error + ")";
     else {
-      localStorage.removeItem(draftKey(a));
+      ls.del(draftKey(a));
       c.formSig = null;   // 저장한 내용으로 다시 그린다
       // 공개 응답이면 친구들 화면도 새로 받게 알린다(내용 없이 신호만)
       if (a.shared && liveOk) screenChannel.send({ type: "broadcast", event: "nudge", payload: {} }).catch(() => {});

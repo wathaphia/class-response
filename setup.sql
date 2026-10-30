@@ -205,7 +205,7 @@ create policy teacher_update on lessons for update to authenticated using (can_l
 create policy teacher_delete on lessons for delete to authenticated using (owns_lesson(id));
 create policy teacher_all on activities for all to authenticated using (can_lesson(lesson_id)) with check (can_lesson(lesson_id));
 -- 학생 계정은 웹앱 전체에 하나라 모든 교사가 함께 쓴다(비밀번호 초기화 등)
-create policy teacher_all on students   for all to authenticated using (is_teacher()) with check (is_teacher());
+-- students 정책은 맨 아래 「보안 손질」(열 단위 권한과 함께)
 create policy teacher_all on responses  for all to authenticated
   using (exists (select 1 from activities a where a.id = activity_id and can_lesson(a.lesson_id)))
   with check (exists (select 1 from activities a where a.id = activity_id and can_lesson(a.lesson_id)));
@@ -495,6 +495,13 @@ begin
       from jsonb_array_elements(a.questions) q;
   end if;
 
+  if a.kind = 'quiz' then
+    insert into responses (student_id, activity_id, answers, score, total, updated_at)
+      values (s.id, a.id, p_answers, sc, tot, now())
+      on conflict (student_id, activity_id) do nothing;
+    if not found then return jsonb_build_object('error', 'already'); end if;
+    return jsonb_build_object('ok', true);
+  end if;
   insert into responses (student_id, activity_id, answers, score, total, updated_at)
     values (s.id, a.id, p_answers, sc, tot, now())
     on conflict (student_id, activity_id)
@@ -570,9 +577,7 @@ drop policy if exists slides_teacher_insert on storage.objects;
 drop policy if exists slides_teacher_update on storage.objects;
 drop policy if exists slides_teacher_delete on storage.objects;
 create policy slides_teacher_read on storage.objects for select to authenticated using (bucket_id = 'slides' and is_teacher());
-create policy slides_teacher_insert on storage.objects for insert to authenticated with check (bucket_id = 'slides' and is_teacher());
-create policy slides_teacher_update on storage.objects for update to authenticated using (bucket_id = 'slides' and is_teacher()) with check (bucket_id = 'slides' and is_teacher());
-create policy slides_teacher_delete on storage.objects for delete to authenticated using (bucket_id = 'slides' and is_teacher());
+-- 올리기·고치기·지우기 정책은 맨 아래 「보안 손질」
 
 -- ------------------------------------------------------------
 -- 인증 메일 기록: 함수 send-email(class-tools\mail-hook)이 Gmail(Apps Script, 하루 100통)로 보낼 때마다 한 줄. 화면에선 못 읽음(서비스 키만)
@@ -611,6 +616,7 @@ begin
     'lessons', (select count(*) from lessons),
     'responses', (select count(*) from responses),
     'mail_day', (select count(*) from mail_log where at > now() - interval '24 hours'),
+    'mail_month', (select count(*) from mail_log where at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'),
     'tables', (select jsonb_agg(jsonb_build_object('name', relname, 'rows', n_live_tup, 'bytes', pg_total_relation_size(relid))
                                 order by pg_total_relation_size(relid) desc)
                from pg_stat_user_tables where schemaname = 'public'));
@@ -795,8 +801,9 @@ begin
     where tidy(s.class_no) = tidy(p_class_no) and tidy(s.name) = tidy(p_name) limit 1;
   if sid is null then return jsonb_build_object('error', 'no_match'); end if;
   if exists (select 1 from teachers where email = e and student_id is distinct from sid) then return jsonb_build_object('error', 'email_taken'); end if;
+  if exists (select 1 from teacher_requests where student_id = sid and email <> e) then return jsonb_build_object('error', 'pending'); end if;
   insert into teacher_requests (student_id, email) values (sid, e)
-    on conflict (student_id) do update set email = excluded.email, created_at = now();
+    on conflict (student_id) do update set created_at = now();
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -870,3 +877,46 @@ grant select, insert, update, delete on bug_reports to authenticated;
 insert into teachers (email) values ('wathaphia@gmail.com') on conflict do nothing;
 -- 이 웹앱의 개발자: 모든 교사의 수업·공동 작업자·교사 목록을 관리한다
 update teachers set is_admin = true where email = 'wathaphia@gmail.com';
+
+-- ---------- 보안 손질(2026-10-30) ----------
+-- 보안 손질(2026-10-30)
+-- 1) 학생 표: 교사도 학생 열쇠(token)·PIN 해시는 못 읽게 열 단위 권한. 고치기는 RPC로만. 지우기는 자기 수업 학생(또는 어느 수업에도 없는 학생)·개발자만.
+revoke all on students from anon;
+revoke select, insert, update, references, trigger, truncate on students from authenticated;
+grant select (id, class_no, name, created_at, last_seen, monitor_consent, monitor_consent_at, pin_set) on students to authenticated;
+grant insert (class_no, name) on students to authenticated;
+grant delete on students to authenticated;
+drop policy if exists teacher_all on students;
+drop policy if exists teacher_read on students;
+drop policy if exists teacher_insert on students;
+drop policy if exists teacher_delete on students;
+create policy teacher_read on students for select to authenticated using (is_teacher());
+create policy teacher_insert on students for insert to authenticated with check (is_teacher());
+create policy teacher_delete on students for delete to authenticated using (is_teacher() and (is_admin()
+  or exists (select 1 from lesson_students ls where ls.student_id = students.id and can_lesson(ls.lesson_id))
+  or not exists (select 1 from lesson_students ls where ls.student_id = students.id)));
+
+-- 2) 수업 주인은 개발자만 바꾼다(공동 작업자가 주인을 자기로 바꿔 수업을 가져가지 못하게)
+create or replace function lessons_owner_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.owner is distinct from old.owner and not is_admin() and auth.uid() is not null then
+    raise exception '수업 주인은 바꿀 수 없습니다';
+  end if;
+  return new;
+end $$;
+drop trigger if exists lessons_owner_guard on lessons;
+create trigger lessons_owner_guard before update of owner on lessons for each row execute function lessons_owner_guard();
+
+-- 3) Supabase 슬라이드 저장소: 올리기·고치기는 자기 폴더(교사 id/수업 id/)만, 지우기는 자기 폴더 또는 손댈 수 있는 수업 폴더
+drop policy if exists slides_teacher_insert on storage.objects;
+drop policy if exists slides_teacher_update on storage.objects;
+drop policy if exists slides_teacher_delete on storage.objects;
+create policy slides_teacher_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()));
+create policy slides_teacher_update on storage.objects for update to authenticated
+  using (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()))
+  with check (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()));
+create policy slides_teacher_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()
+    or exists (select 1 from lessons l where l.id::text = (storage.foldername(name))[2] and can_lesson(l.id))));

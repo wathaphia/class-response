@@ -24,8 +24,15 @@ function ensureTeacherScreenChannel() {
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { clearTimeout(timeout); reject(new Error("화면 공유 채널에 연결하지 못했습니다.")); }
     });
   });
-  screenChannelReady = Promise.all([join(screenChannel), join(screenDataCh)]).then(() => screenChannel);
-  return screenChannelReady;
+  const ready = Promise.all([join(screenChannel), join(screenDataCh)]).then(() => screenChannel);
+  // 실패한 연결을 붙잡아 두지 않는다: 다음에 부르면 처음부터 다시 붙는다
+  ready.catch(() => {
+    if (screenChannelReady !== ready) return;
+    sb.removeChannel(screenChannel); sb.removeChannel(screenDataCh);
+    screenChannel = null; screenDataCh = null; screenChannelKey = "";
+  });
+  screenChannelReady = ready;
+  return ready;
 }
 
 async function sendTeacherScreenSignal(payload) {
@@ -215,7 +222,9 @@ async function simRtc(watch, m) {
     watch.rtc.get(m.k)?.pc?.close();
     const r = { pc: null, queued: [] };
     watch.rtc.set(m.k, r);   // 접속 정보를 받는 동안 온 연결 후보도 모아 둔다
-    const pc = new RTCPeerConnection({ iceServers: await teacherIce(), iceTransportPolicy: forceRelay() ? "relay" : "all" });
+    const ice = await teacherIce();
+    if (watch.rtc.get(m.k) !== r) return;   // 기다리는 사이 새 제안이 왔거나 창을 닫았다
+    const pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: forceRelay() ? "relay" : "all" });
     r.pc = pc;
     pc.ontrack = (e) => {
       const s = watch.sims.get(m.k) || { canvases: {}, ver: 0, times: [] };

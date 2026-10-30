@@ -15,6 +15,29 @@ if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(
     location.reload();
   }).catch(() => {});
 })();
+// 요청 단추 불응기: 같은 단추(다시 그려진 같은 이름 단추 포함)나 같은 폼은 0.5초 안에 다시 눌러도 무시한다(가입·로그인·저장 등 겹친 요청 막기).
+// 빨리 연달아 눌러야 하는 단추(쪽·애니메이션 넘김 .arrow, data-rapid)는 뺀다. 캡처 단계라 각 단추의 onclick 보다 먼저 막는다.
+const REQ_COOLDOWN_MS = 500;
+const reqLast = new Map();
+let reqBoxes = 0;
+function reqCooling(key) {
+  const t = performance.now(), last = reqLast.get(key);
+  if (last != null && t - last < REQ_COOLDOWN_MS) return true;
+  reqLast.set(key, t);
+  if (reqLast.size > 50) for (const [k, v] of reqLast) if (t - v >= REQ_COOLDOWN_MS) reqLast.delete(k);
+  return false;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element && e.target.closest("button, input[type=submit], input[type=button]");
+  // 탭·메뉴처럼 화면만 바꾸는 단추(nav 안, 모드 스위치, 프로필)는 요청이 아니라 뺀다
+  if (!b || b.disabled || b.matches(".arrow, [data-rapid], nav button, .mode-switch, .profile-btn")) return;
+  // 다시 그려져 새로 생긴 같은 단추도 막되, 다른 폼·창의 같은 글자 단추(줄의 「승격」 → 창의 「승격」)는 막지 않는다
+  const box = b.closest("form, dialog, .modal, tr");
+  const key = (box ? (box.reqBox ||= ++reqBoxes) : 0) + ":" + (b.textContent || b.value || "").trim();
+  if (reqCooling(b) | reqCooling(key)) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+document.addEventListener("submit", (e) => { if (reqCooling(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+
 
 // 주소 끝에 /rest/v1/ 같은 꼬리나 빈칸이 붙어 있어도 프로젝트 주소만 쓴다
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");

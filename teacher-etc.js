@@ -1,5 +1,5 @@
 // 교사 화면 · 「기타 관리」 탭: Supabase·Cloudflare·GitHub 무료 한도 대비 사용량 원 그래프·표, 동기화 규칙·비용.
-// 받는 곳: Supabase resource_usage(), Worker /usage(class-toolscf-worker), GitHub API. 시각은 모두 한국 시간.
+// 받는 곳: Supabase resource_usage(), Worker /usage(class-tools/cf-worker), GitHub API. 시각은 모두 한국 시간.
 
 // ---------- 기타 관리 ----------
 // 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프와 표로 보여 준다.
@@ -56,18 +56,21 @@ async function usageGithub(net) {
     return JSON.parse(text);
   };
   const monthStart = kstIso().slice(0, 8) + "01T00:00:00%2B09:00";
-  const [repo, rate, month, recent, alive] = await Promise.all([
+  const hourAgo = encodeURIComponent(new Date(Date.now() - 3600000).toISOString().slice(0, 19) + "Z");
+  const [repo, rate, month, recent, alive, hour] = await Promise.all([
     gh("/repos/" + GITHUB_REPO),
     gh("/rate_limit"),   // 이 요청은 한도에 세지 않는다
     gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=1&created=%3E%3D" + monthStart),
     gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=6"),
     gh("/repos/" + GITHUB_REPO + "/actions/workflows/keep-alive.yml/runs?per_page=1"),
+    gh("/repos/" + GITHUB_REPO + "/actions/runs?per_page=1&created=%3E%3D" + hourAgo),   // 최근 1시간 실행 수(Pages 배포)
   ]);
   // 브라우저에 남겨 둘 것만 추린다(실행 기록 하나가 수 KB라)
   const run = (r) => r && { name: r.name, created_at: r.created_at, conclusion: r.conclusion, status: r.status };
   return {
     repo: { size: repo.size, pushed_at: repo.pushed_at, default_branch: repo.default_branch, open_issues_count: repo.open_issues_count },
     rate: rate.resources.core, runsThisMonth: month.total_count, recent: recent.workflow_runs.map(run), alive: run(alive.workflow_runs[0]),
+    runsHour: hour.total_count,
   };
 }
 const USAGE_SOURCES = { db: usageDb, worker: usageWorker, github: usageGithub };
@@ -313,7 +316,7 @@ function egressDayChart(title, m, field, at = lastSync() || Date.now()) {
     let bar = "";
     if (v > 0) {
       total += v;
-      const top = yOf(v), r = Math.min(4, bw / 2, base - top);
+      const top = Math.min(yOf(v), base - 2), r = Math.min(4, bw / 2, base - top);   // 아주 작은 날도 막대가 보이게 2px 이상
       bar = '<path class="eg-bar" d="M' + x + "," + base + "V" + (top + r) + "Q" + x + "," + top + " " + (x + r) + "," + top
         + "H" + (x + bw - r) + "Q" + (x + bw) + "," + top + " " + (x + bw) + "," + (top + r) + "V" + base + 'Z"/>';
       if (v > EGRESS_DAY_MAX) bar += '<text class="eg-over" x="' + (x + bw / 2) + '" y="' + (T - 4) + '">' + esc(usageAmount(v, "bytes")) + "</text>";
@@ -351,6 +354,29 @@ function egressWithTail(m, tail) {
   return { ...m, days, bytes: m.bytes + tail.bytes, cached: m.cached + tail.cached, until: tail.until,
     hours: m.hours + Math.max(0, (Date.parse(tail.until) - Date.parse(tail.from || m.until)) / 3600000) };
 }
+const SB_KIND = { rest: "데이터", storage: "파일", auth: "로그인", realtime: "실시간", other: "기타" };
+const SB_HEALTH = { db: "데이터베이스", auth: "로그인", rest: "데이터 API", realtime: "실시간", storage: "파일 저장소" };
+const EGRESS_FROM = { site: "학생·교사 사이트", test: "시험(로컬)", tool: "올리기 도구", other: "그 밖" };
+// 전송량 표: 한눈에 · 날마다 · 누가 받았나 · 종류별(m 은 오늘 몫을 더한 값, raw 는 매시 집계 그대로)
+function egressView(m, ep, raw) {
+  const amt = (n) => usageAmount(n || 0, "bytes");
+  const days = m && m.days ? Object.entries(m.days).sort((a, b) => b[0].localeCompare(a[0])) : [];
+  const srcs = raw && raw.srcs ? Object.entries(raw.srcs).sort((a, b) => (b[1].bytes + b[1].cached) - (a[1].bytes + a[1].cached)) : [];
+  const kinds = raw && raw.kinds ? Object.entries(raw.kinds).sort((a, b) => (b[1].bytes || 0) - (a[1].bytes || 0)) : [];
+  return h("div", { class: "usage-blocks" },
+    usageBlock("전송량 한눈에(무료 각 5GB)",
+      usageTable(["", "전송량", "캐시 전송량"], [
+        ["이번 달 지금까지", m ? amt(m.bytes) : "—", m ? amt(m.cached) : "—"],
+        ["월말 예상", ep ? amt(ep.bytes) : "—", ep ? amt(ep.cached) : "—"],
+        ["한도까지 남음", m ? amt(Math.max(0, 5 * GB - m.bytes)) : "—", m ? amt(Math.max(0, 5 * GB - m.cached)) : "—"],
+      ])),
+    days.length ? usageBlock("날마다 전송량(하루 = 한국 시간 0시~24시)",
+      usageTable(["날짜", "전송량", "캐시 전송량"], days.map(([k, v]) => [k.slice(5).replace("-", "/") + egressDayNote(m, k), amt(v.bytes), amt(v.cached)]))) : null,
+    srcs.length ? usageBlock("누가 받았나(이번 달)",
+      usageTable(["어디서", "전송량", "캐시 전송량"], srcs.map(([k, v]) => [EGRESS_FROM[k] || k, amt(v.bytes), amt(v.cached)]))) : null,
+    kinds.length ? usageBlock("종류별 요청·전송량(이번 달)",
+      usageTable(["종류", "요청", "전송량"], kinds.map(([k, v]) => [SB_KIND[k] || k, (v.requests || 0).toLocaleString() + "건", amt(v.bytes)]))) : null);
+}
 // Supabase: DB 안 숫자(db) + Worker가 관리 API로 모은 전송량·요청 수·서비스 상태(worker.supabase)
 function supabaseView() {
   const d = usage.db && usage.db.data, w = usage.worker && usage.worker.data, s = w && w.supabase;
@@ -375,6 +401,8 @@ function supabaseView() {
     { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
     { label: "Gmail 인증 메일", used: d.mail_day, limit: 100, period: "최근 24시간", missing: d.mail_day == null ? "setup.sql 적용 필요" : null,
       hint: "비밀번호 재설정·가입 확인 메일을 개발자 Gmail(Apps Script)로 보냄 · 하루 100통" },
+    { label: "Edge Function 호출", used: d.mail_month, limit: 500000, period: "이번 달", missing: d.mail_month == null ? "setup.sql 적용 필요" : null,
+      hint: "지금 쓰는 함수는 인증 메일(send-email) 하나 · 보낸 메일 수로 셈" },
     { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
   ];
   const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 3 * 3600000);
@@ -382,7 +410,20 @@ function supabaseView() {
     usageRings("Supabase", items),
     s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
       + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다.") : null,
-    noApi === "관리 토큰 필요" ? h("p", { class: "muted small" }, "전송량은 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행).") : null,
+    s ? egressView(m, ep, s.egressMonth) : null,
+    s && s.health ? h("div", { class: "usage-tags start" }, h("span", { class: "small" }, "서비스 상태"),
+      s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (SB_HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
+    h("div", { class: "usage-blocks" },
+      s && s.apiCounts ? usageBlock("최근 7일 요청 수(하루 = 한국 시간 " + DAY9 + ")",
+        usageTable(["날짜", "데이터", "파일", "로그인", "실시간"], [...s.apiCounts].reverse().map((x) => [
+          new Date(x.timestamp + "Z").toLocaleDateString("ko-KR", { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }),
+          x.total_rest_requests.toLocaleString(), x.total_storage_requests.toLocaleString(), x.total_auth_requests.toLocaleString(), x.total_realtime_requests.toLocaleString()]))) : null,
+      d.tables ? usageBlock("표별 크기",
+        usageTable(["표", "줄 수", "크기"], d.tables.map((t) => [t.name, Number(t.rows).toLocaleString(), usageAmount(t.bytes, "bytes")]))) : null),
+    h("p", { class: "small" }, "학생 " + d.students + "명 · 수업 " + d.lessons + "개 · 응답 " + d.responses + "개"),
+    h("p", { class: "muted small" }, (noApi === "관리 토큰 필요" ? "전송량·요청 수·서비스 상태는 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행). " : "")
+      + "전송량은 응답 크기가 적힌 것만 더합니다. 데이터 API의 압축 응답과 실시간 연결은 크기가 기록되지 않아 빠지므로 「전송량」은 실제보다 적게 나옵니다(슬라이드 그림인 「캐시 전송량」은 정확함). 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
+      + (s && s.errors && s.errors.length ? " (일부 못 받음: " + s.errors.join(", ") + ")" : "")),
   ];
 }
 
@@ -455,7 +496,7 @@ function githubView() {
   const u = usage.github;
   if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
   if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
-  const { repo, rate, runsThisMonth, recent, alive } = u.data;
+  const { repo, rate, runsThisMonth, recent, alive, runsHour } = u.data;
   // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
   const idleDays = Math.floor((u.at - Date.parse(repo.pushed_at)) / 86400000);
   const RESULT = { success: "성공", failure: "실패", cancelled: "취소", skipped: "건너뜀" };
@@ -463,6 +504,7 @@ function githubView() {
     { label: "저장소(사이트) 크기", used: repo.size * 1024, limit: GB, fmt: "bytes", period: "누적", hint: "GitHub Pages 사이트 한도 1GB" },
     { label: "keep-alive 멈춤까지", used: idleDays, limit: 60, fmt: "days", period: "실시간", hint: "마지막 변경 " + shortTime(repo.pushed_at) + " · 60일 지나면 멈춤" },
     { label: "GitHub API(이 PC)", used: rate.used, limit: rate.limit, period: "1시간", win: { from: rate.reset * 1000 - 3600000, to: rate.reset * 1000 }, hint: kstClock(rate.reset * 1000) + "에 초기화" },
+    { label: "Pages 배포", used: runsHour, limit: 10, period: "1시간", missing: runsHour == null ? "다음 동기화 때" : null, hint: "최근 1시간 Actions 실행 수(대부분 사이트 배포) · GitHub Pages 권장 한도 시간당 10번" },
   ];
   return [
     usageRings("GitHub", items),
@@ -496,7 +538,7 @@ function paintEtc() {
     h("div", { class: "usage-grid" }, risky.map((it) => usageRing(it, "top"))), topPick ? usageDetail(topPick) : null)
     : lastSync() ? h("p", { class: "risk-none small" }, "◆ 지금 속도로는 초기화 전에 다 쓸 것으로 보이는 자원이 없습니다.") : null;
   // 자세히 보는 중에 원·자세히 칸·단추 밖의 빈 곳을 누르면 고른 것을 푼다
-  main.replaceChildren(h("div", { class: "etc-layout" }, h("div", { class: "stack", onclick(e) {
+  main.replaceChildren(h("div", { class: "stack", onclick(e) {
     if (usageSel && !e.target.closest(".usage-item, .usage-detail, button, a, input, select, textarea")) { usageSel = null; paintEtc(); }
   } },
     h("div", { class: "row between" },
@@ -506,95 +548,5 @@ function paintEtc() {
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    summary, ...secs), patchNotesView()));
-}
-
-// 오른쪽 「패치 노트」: 합친 PR을 날짜별로(patch-notes.js 의 PATCH_NOTES, 새것이 위). 화면에 붙어 있고 안에서만 스크롤
-function patchNotesView() {
-  const days = [];
-  for (const [no, day, text] of PATCH_NOTES) {
-    if (!days.length || days[days.length - 1].day !== day) days.push({ day, items: [] });
-    days[days.length - 1].items.push([no, text]);
-  }
-  const dayText = (d) => { const [y, m, dd] = d.split("-"); return y + "년 " + +m + "월 " + +dd + "일"; };
-  return h("aside", { class: "card stack patch-notes", "aria-label": "패치 노트" },
-    h("div", {}, h("h3", {}, "패치 노트"), h("span", { class: "muted small" }, "지금까지 " + PATCH_NOTES.length + "번 고침 · 날짜는 한국 시간")),
-    h("div", { class: "patch-list" }, days.map((g) => h("section", { class: "patch-day" },
-      h("h4", {}, dayText(g.day), h("span", { class: "muted small" }, " " + g.items.length + "건")),
-      h("ul", {}, g.items.map(([no, text]) => h("li", {}, h("span", { class: "patch-no" }, "#" + no), " " + text)))))));
-}
-
-// ---------- 버그 제보 ----------
-// 편집 모드의 「버그 제보」 탭. 선생님 누구나 쓰고 모두 읽는다. 고치기·지우기는 쓴 사람과 개발자(profile.admin)만, 한 사람당 5개까지
-// (Supabase bug_reports 표 · 보안 규칙과 5개 제한은 setup.sql 의 bug_reports_guard). 제보마다 오른쪽 위 「복사」로 글을 클립보드에.
-const BUG_MAX = 5;
-let bugs = null;       // 목록(새것부터) 또는 { error }
-let bugEdit = null;    // 고치는 중인 제보 id
-async function drawBugs() {
-  paintBugs();
-  const [{ data, error }] = await Promise.all([
-    sb.from("bug_reports").select("*").order("created_at", { ascending: false }),
-    profile && !profile.error ? null : loadProfile()]);
-  bugs = error ? { error: /bug_reports/.test(error.message) ? "Supabase에 bug_reports 표가 없습니다(setup.sql 적용 필요)." : error.message } : data;
-  paintBugs();
-}
-function paintBugs() {
-  if (tab !== "bugs" || !main) return;
-  const list = Array.isArray(bugs) ? bugs : [];
-  const admin = !!(profile && profile.admin);
-  const mine = list.filter((b) => b.author === me.id).length;
-  const msg = h("p", { class: "msg" });
-  const text = h("textarea", { class: "bug-text", rows: 4, maxlength: 4000, placeholder: "무엇을 하다가, 어떤 일이 생겼고, 원래는 어떻게 되어야 하는지 적어 주세요.", disabled: mine >= BUG_MAX });
-  const send = h("button", { class: "primary", type: "button", disabled: mine >= BUG_MAX, async onclick() {
-    const body = text.value.trim();
-    if (!body) { msg.textContent = "내용을 적어 주세요."; return; }
-    send.disabled = true;
-    msg.textContent = "올리는 중…";
-    const { error } = await sb.from("bug_reports").insert({ body });
-    if (error) { send.disabled = false; msg.textContent = "올리지 못했습니다: " + error.message; return; }
-    drawBugs();
-  } }, "제보하기");
-  const card = (b) => {
-    const can = b.author === me.id || admin, editing = can && bugEdit === b.id;
-    const copy = h("button", { class: "ghost bug-copy", type: "button", title: "제보 글을 클립보드에 복사", onclick() {
-      navigator.clipboard.writeText(b.body).then(() => { copy.textContent = "복사했습니다"; setTimeout(() => { copy.textContent = "복사"; }, 1500); }, () => alert("복사하지 못했습니다."));
-    } }, "복사");
-    const edited = Date.parse(b.updated_at) - Date.parse(b.created_at) > 2000;
-    const head = h("div", { class: "bug-head" },
-      h("span", { class: "muted small" }, (b.author === me.id ? "나 · " : "") + b.author_email + " · " + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
-      copy);
-    if (editing) {
-      const box = h("textarea", { class: "bug-text", rows: 5, maxlength: 4000, value: b.body });
-      const m = h("p", { class: "msg" });
-      return h("article", { class: "card stack bug-card" }, head, box, h("div", { class: "row" },
-        h("button", { class: "primary", type: "button", async onclick(e) {
-          const body = box.value.trim();
-          if (!body) { m.textContent = "내용을 적어 주세요."; return; }
-          e.currentTarget.disabled = true;
-          const { error } = await sb.from("bug_reports").update({ body }).eq("id", b.id);
-          if (error) { e.currentTarget.disabled = false; m.textContent = "저장하지 못했습니다: " + error.message; return; }
-          bugEdit = null; drawBugs();
-        } }, "저장"),
-        h("button", { class: "ghost", type: "button", onclick() { bugEdit = null; paintBugs(); } }, "취소")), m);
-    }
-    return h("article", { class: "card stack bug-card" }, head, h("p", { class: "bug-body" }, b.body),
-      can ? h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick() { bugEdit = b.id; paintBugs(); } }, "고치기"),
-        h("button", { class: "ghost danger", type: "button", async onclick() {
-          if (!confirm("이 제보를 지울까요?")) return;
-          const { error } = await sb.from("bug_reports").delete().eq("id", b.id);
-          if (error) return alert("지우지 못했습니다: " + error.message);
-          drawBugs();
-        } }, "지우기"),
-        b.author !== me.id ? h("span", { class: "tag warn" }, "개발자 권한") : null) : null);
-  };
-  main.replaceChildren(h("div", { class: "stack bugs-page" },
-    h("div", {}, h("h2", {}, "버그 제보"),
-      h("p", { class: "muted small" }, "선생님 누구나 쓰고 모두 볼 수 있습니다. 고치기·지우기는 쓴 사람과 개발자만 할 수 있고, 한 사람당 " + BUG_MAX + "개까지 쓸 수 있습니다.")),
-    h("section", { class: "card stack" },
-      h("div", { class: "row between" }, h("h3", {}, "새 제보"), h("span", { class: "tag " + (mine >= BUG_MAX ? "bad" : "info") }, "내 제보 " + mine + " / " + BUG_MAX)),
-      text, h("div", { class: "row" }, send, mine >= BUG_MAX ? h("span", { class: "muted small" }, "5개를 다 썼습니다. 예전 제보를 고치거나 지우면 새로 쓸 수 있습니다.") : null), msg),
-    bugs && bugs.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + bugs.error)
-      : !bugs ? h("p", { class: "muted small" }, "불러오는 중…")
-      : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다.")));
+    summary, ...secs));
 }
