@@ -721,7 +721,10 @@ td.grid-cell > span { white-space: nowrap; }
 .teachers-table button { min-height: 0; padding-block: 0; line-height: inherit; }
 .teachers-table td.row { display: table-cell; }
 .teachers-table td.row button + button { margin-left: .6rem; }
-.teachers-table .add-email { width: min(16rem, 60vw); min-height: 0; padding: .15rem .45rem; background: #fff; }
+.teachers-table .add-cell { position: relative; }
+.teachers-table .add-spacer { visibility: hidden; }
+.teachers-table .add-line { position: absolute; inset: 0 .8rem; display: flex; align-items: center; gap: .6rem; }
+.teachers-table .add-email { flex: 0 1 16rem; min-width: 6rem; min-height: 0; padding: .1rem .45rem; background: #fff; }
 .collab-lesson { display: flex; align-items: center; gap: .45rem; }
 .lesson-thumb.mini { flex: none; width: 3.6rem; margin-top: 0; border-radius: 4px; }
 /* 가입하기: 질문 왼쪽, 작은 예/아니오 오른쪽 한 줄 */
