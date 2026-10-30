@@ -376,7 +376,9 @@ function teachersCard(p) {
     if (fails.length) alert("빼지 못한 선생님:\n" + fails.join("\n")); else flash(who.length + "명의 선생님을 뺐습니다.");
     await loadProfile();
   };
-  const addRow = h("tr", { class: "add-row" }, h("td", { class: "pick" }), h("td", {}, addBtn), h("td", {}, newEmail), h("td", {}, cancelBtn), h("td"), h("td"));
+  // 입력란·단추는 칸 위에 띄워(.add-line) 열 너비·줄 높이·다른 요소 위치가 바뀌지 않게 한다. 숨은 「추가」 글자가 줄 높이를 잡는다
+  const addRow = h("tr", { class: "add-row" }, h("td", { class: "pick" }),
+    h("td", { class: "add-cell", colspan: 5 }, h("span", { class: "add-spacer", "aria-hidden": "true" }, "추가"), h("div", { class: "add-line" }, addBtn, newEmail, cancelBtn)));
   return h("section", { class: "card stack teachers-card" },
     h("h3", {}, "선생님 관리"),
     bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: removeMany }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
