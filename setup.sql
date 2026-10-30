@@ -643,6 +643,28 @@ $$;
 revoke all on function my_reset_quota() from public;
 grant execute on function my_reset_quota() to authenticated;
 
+-- 재설정 메일 보낸 표시: 함수 send-email(Send Email Hook)이 보내기 직전에 화면이 받아 간 한 번(2분 안, 아직 안 보냄)을 쓴다. 없으면 메일을 보내지 않는다(/recover 직접 호출 차단)
+alter table reset_log add column if not exists sent_at timestamptz;
+
+create or replace function consume_password_reset(p_email text)
+returns boolean language sql volatile security definer set search_path = public as $$
+  with c as (
+    select id from reset_log where email = lower(trim(p_email)) and sent_at is null and at > now() - interval '2 minutes'
+     order by at desc limit 1 for update)
+  update reset_log r set sent_at = now() from c where r.id = c.id returning true;
+$$;
+revoke all on function consume_password_reset(text) from public, anon, authenticated;
+grant execute on function consume_password_reset(text) to service_role;
+
+-- 메일이 안 나갔을 때(Supabase 거절 등) 화면이 받아 간 한 번을 돌려준다. 보내지 않은 것만 지운다
+create or replace function release_password_reset(p_email text)
+returns boolean language sql volatile security definer set search_path = public as $$
+  with d as (delete from reset_log where email = lower(trim(p_email)) and sent_at is null and at > now() - interval '2 minutes' returning 1)
+  select count(*) > 0 from d;
+$$;
+revoke all on function release_password_reset(text) from public;
+grant execute on function release_password_reset(text) to anon, authenticated;
+
 -- ------------------------------------------------------------
 -- 기타 관리(교사 화면): 무료 한도에 견줄 사용량. 교사만 부를 수 있다.
 -- 접속 중 = 최근 20초 안에 수업 화면을 연 학생(교사 화면의 「접속 중」과 같은 기준)

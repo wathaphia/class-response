@@ -132,7 +132,10 @@ async function sendResetMail(address, btn, msgEl) {
     if (q.reason === "cooldown") { msgEl.textContent = "3초 뒤에 다시 눌러 주세요(" + count + ")."; return; }
     msgEl.textContent = "재설정 메일을 보내는 중…";
     const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: new URL(location.pathname, location.origin).href });
-    msgEl.textContent = (error ? "재설정 메일을 보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다).") + " · " + count;
+    if (!error) { msgEl.textContent = "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다). · " + count; return; }
+    // 메일이 안 나갔으면 받아 간 한 번을 돌려준다(안 보낸 것만 지워짐)
+    const { data: back } = await sb.rpc("release_password_reset", { p_email: address });
+    msgEl.textContent = "재설정 메일을 보내지 못했습니다: " + error.message + " · 오늘 3번 중 " + (back ? q.used - 1 : q.used) + "번 사용";
   } finally {
     for (let s = RESET_COOLDOWN; s > 0; s--) { btn.textContent = label + " (" + s + "초)"; await new Promise((r) => setTimeout(r, 1000)); }
     btn.textContent = label;
