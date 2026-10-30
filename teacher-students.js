@@ -520,7 +520,7 @@ function needProfile() {
 const promotedOf = (s) => ((profile && profile.promoted) || []).find((p) => p.student_id === s.id);
 
 function promoteStudent(s) {
-  const email = h("input", { type: "email", required: true, placeholder: "예: student@school.kr", "aria-label": "로그인 이메일" });
+  const email = h("input", { type: "email", placeholder: "비워도 됩니다","aria-label": "로그인 이메일" });
   const msg = h("p", { class: "msg" });
   const close = openModal(nameOf(s) + " 학생을 선생님으로 승격", h("form", {
     class: "stack promote-form",
@@ -536,8 +536,8 @@ function promoteStudent(s) {
       draw();
     },
   },
-    h("label", {}, "교사 화면에 로그인할 이메일", email),
-    h("p", { class: "muted small" }, "학생은 교사 화면(teacher.html)에서 이 이메일로 「가입하기」를 한 뒤 메일의 확인 링크를 누르면 로그인할 수 있습니다. 학생 계정·응답은 그대로 남고, 개발자가 「전체 선생님 및 학생」에서 이 학생을 수업의 공동 작업자로 넣을 수 있습니다."),
+    h("label", {}, "교사 화면에 로그인할 이메일 (선택)", email),
+    h("p", { class: "muted small" }, "이메일을 적으면 학생은 교사 화면(teacher.html)에서 그 이메일로 「가입하기」를 하면 됩니다. 비워 두면 학생이 「가입하기」에서 「학생에서 승격되었습니까? 예」를 골라 학번·이름·이메일을 적어 가입 요청을 보내고, 개발자가 「전체 선생님 및 학생」에서 승인합니다. 학생 계정·응답은 그대로 남고, 개발자가 「전체 선생님 및 학생」에서 이 학생을 수업의 공동 작업자로 넣을 수 있습니다."),
     h("button", { class: "primary", type: "submit" }, "승격"), msg));
   email.focus();
 }
@@ -573,7 +573,7 @@ function promotedCard() {
       h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번(번호)", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id, class: set.has(p.student_id) ? "picked-row" : null },
         admin ? pickCell(set, p.student_id, p.name, repaint) : null,
-        h("td", {}, p.class_no), h("td", {}, p.name), h("td", {}, p.email), h("td", {}, p.code), h("td", {}, dateText(p.since)),
+        h("td", {}, p.class_no), h("td", {}, p.name), h("td", {}, isPendingEmail(p.email) ? h("span", { class: "muted" }, "가입 전") : p.email), h("td", {}, p.code), h("td", {}, dateText(p.since)),
         h("td", {}, account(p)), h("td", {}, p.own + "개"), h("td", {}, p.shared + "개"),
         h("td", { class: "actions" }, admin ? h("button", {
           class: "link danger", type: "button",

@@ -67,7 +67,9 @@ let timer = null;
 let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
 let me = null;            // 로그인한 교사(auth user)
-let passwordRecovery = false;
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+let passwordRecovery = false;   // 비밀번호 재설정 메일의 링크로 들어옴: 로그인된 채로 「프로필」의 새 비밀번호 칸을 연다
+let booted = false;              // init 을 끝까지 마쳤는지(탭을 그릴 수 있는지)
 let screenChannel = null;
 let screenChannelKey = "";
 let screenChannelReady = null;
@@ -79,7 +81,7 @@ addEventListener("DOMContentLoaded", () => {
   sb.auth.onAuthStateChange((event) => {
     if (event === "PASSWORD_RECOVERY") {
       passwordRecovery = true;
-      showPasswordRecovery();
+      if (booted) goTab("profile");   // 아직 시작 중이면 init 끝에서 연다
     }
   });
   init();
@@ -88,20 +90,22 @@ addEventListener("DOMContentLoaded", () => {
 // ---------- 로그인 ----------
 async function init() {
   const { data } = await sb.auth.getSession();
-  if (passwordRecovery) return showPasswordRecovery();
   if (!data.session) return showLogin();
   me = data.session.user;
   const { data: ok, error } = await sb.rpc("is_teacher");
   if (error || !ok) {
+    if (passwordRecovery) return showPasswordRecovery();   // 교사 화면을 못 쓰는 계정: 비밀번호만 바꾼다
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
       h("h1", {}, "교사로 등록되지 않은 계정입니다"),
-      h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. setup.sql 맨 아래에 이 이메일을 넣고 다시 실행하세요."),
+      h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
       error ? h("p", { class: "error" }, error.message) : null,
       h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))));
   }
   await loadProfile();   // 개발자인지 알아야 탭 줄을 그린다
   loadTabCustom();
   await loadLessons(localStorage.getItem("cra-lesson"));
+  booted = true;
+  if (passwordRecovery) goTab("profile");   // 재설정 메일의 링크로 들어옴: 「프로필」의 새 비밀번호 칸으로
   document.addEventListener("keydown", (e) => {
     if (tab !== "run" || !lesson || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if (e.key === "ArrowRight") setPage(lesson.page + 1);
@@ -117,18 +121,48 @@ function showLogin(signup) {
   const pw = h("input", { type: "password", autocomplete: signup ? "new-password" : "current-password", minlength: signup ? 6 : null, required: true });
   const msg = h("p", { class: "msg" });
   const join = h("button", { class: "primary big", type: "submit", disabled: !!signup }, signup ? "가입하기" : "로그인");
+  // 가입하기: 「학생에서 승격되었습니까?」 예 → 학번·이름을 더 받아 승격된 학생과 맞는지 보고 가입 요청을 남긴다(개발자가 승인)
+  let promoted = false;
+  const classNo = h("input", { type: "text", autocomplete: "off", placeholder: "예: 10203" });
+  const name = h("input", { type: "text", autocomplete: "off", placeholder: "이름" });
+  const studentBox = h("div", { class: "stack", hidden: true }, h("label", {}, "학번", classNo), h("label", {}, "이름", name));
+  const pick = (yes) => {
+    promoted = yes;
+    studentBox.hidden = !yes;
+    for (const b of askBtns) { const on = (b.dataset.v === "yes") === yes; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); }
+    (yes ? classNo : email).focus();
+  };
+  const askBtns = [["yes", "예"], ["no", "아니오"]].map(([v, t]) => h("button", { type: "button", role: "radio", "data-v": v, class: v === "no" ? "on" : "", "aria-checked": String(v === "no"), onclick() { pick(v === "yes"); } }, t));
+  const ask = signup ? h("div", { class: "stack promoted-ask" }, h("span", {}, "학생에서 승격되었습니까?"),
+    h("div", { class: "seg", role: "radiogroup", "aria-label": "학생에서 승격되었습니까?" }, askBtns)) : null;
   const verify = signup ? h("button", {
     class: "ghost", type: "button",
     async onclick() {
       const address = email.value.trim();
+      if (promoted && (!classNo.value.trim() || !name.value.trim())) { msg.textContent = "학번과 이름을 넣어 주세요."; (classNo.value.trim() ? name : classNo).focus(); return; }
       if (!address || pw.value.length < 6) { msg.textContent = "이메일과 비밀번호(6자 이상)를 넣고 다시 눌러 주세요."; (address ? pw : email).focus(); return; }
+      if (!EMAIL_RE.test(address)) { centerNote("이메일 형식이 올바르지 않습니다"); email.focus(); return; }
       verify.disabled = true;
+      if (promoted) {
+        msg.textContent = "승격된 학생인지 확인하는 중…";
+        const { data: r, error: rpcError } = await sb.rpc("request_teacher_signup", { p_class_no: classNo.value, p_name: name.value, p_email: address });
+        if (rpcError || r.error) {
+          verify.disabled = false;
+          const why = { no_match: "학번 또는 이름을 다시 확인해 주세요", bad_email: "이메일 형식이 올바르지 않습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
+          const text = rpcError ? "가입 요청을 보내지 못했습니다" : why[r.error] || r.error;
+          centerNote(text);
+          msg.textContent = rpcError ? text + ": " + rpcError.message : "";
+          return;
+        }
+      }
       msg.textContent = "인증 메일을 보내는 중…";
       const { error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: here } });
       verify.disabled = false;
       if (error) { msg.textContent = "인증 메일을 보내지 못했습니다: " + error.message; return; }
       join.disabled = false;
-      msg.textContent = "메일함에서 인증 링크를 누른 뒤 「가입하기」를 눌러 주세요.";
+      if (promoted) centerNote("가입 요청을 보냈습니다");
+      msg.textContent = promoted ? "메일함에서 인증 링크를 누르고, 개발자가 가입 요청을 승인하면 「가입하기」로 들어올 수 있습니다."
+        : "메일함에서 인증 링크를 누른 뒤 「가입하기」를 눌러 주세요.";
     },
   }, "이메일 인증") : null;
   const resetIn = h("input", { type: "email", autocomplete: "username", placeholder: "가입한 이메일" });
@@ -160,7 +194,7 @@ function showLogin(signup) {
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
           : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
-    }, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, msg),
+    }, ask, studentBox, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, msg),
     signup ? null : h("p", { class: "center" }, h("button", {
       class: "link", type: "button",
       onclick() { resetBox.hidden = !resetBox.hidden; if (!resetBox.hidden) { resetIn.value = email.value.trim(); resetIn.focus(); } },
@@ -302,6 +336,8 @@ async function save(table, row, id) {
 }
 
 const nameOf = (s) => ((s.class_no || "") + " " + s.name).trim();   // 이름만으로 들어온 학생은 학번이 비어 있다
+// 승격할 때 이메일을 비워 두면 들어가는 자리표시 이메일(가입 요청을 승인하면 진짜 이메일로 바뀐다)
+const isPendingEmail = (e) => /@promoted\.invalid$/.test(e || "");
 const studentById = (id) => students.find((s) => s.id === id);
 const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentById(r.student_id))
   .map((r) => ({ name: nameOf(studentById(r.student_id)), answers: r.answers, r }));
