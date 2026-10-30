@@ -39,11 +39,54 @@ document.addEventListener("click", (e) => {
 document.addEventListener("submit", (e) => { if (reqCooling(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 
 
+// ---------- 자동 로그인 ----------
+// 로그인 정보(교사: Supabase 세션, 학생: 입장 열쇠)는 「자동 로그인」을 고른 기기에서만 localStorage 에 남기고,
+// 아니면 sessionStorage(이 탭을 닫으면 사라짐, 새로 고침은 그대로)에 둔다. kind 마다 따로 기억한다("teacher" | "student").
+const rememberKey = (kind) => "cra-remember:" + kind;
+function rememberLogin(kind) { try { return localStorage.getItem(rememberKey(kind)) === "1"; } catch { return false; } }
+// 로그인 직전에 부른다: 끄면 예전에 localStorage 에 남은 로그인 정보도 지운다
+function setRememberLogin(kind, on) {
+  try {
+    if (on) return localStorage.setItem(rememberKey(kind), "1");
+    localStorage.removeItem(rememberKey(kind));
+    for (const k of Object.keys(localStorage)) if (loginKeyOf(kind, k)) localStorage.removeItem(k);
+  } catch {}
+}
+function loginKeyOf(kind, k) { return kind === "teacher" ? /^sb-.+-auth-token/.test(k) : /^cra-(token|me)(:|$)/.test(k); }
+// localStorage 와 같은 꼴(getItem/setItem/removeItem). 읽기는 이 탭 것이 먼저, 쓰기는 고른 곳 하나에만.
+function loginStore(kind) {
+  const both = () => { try { return [sessionStorage, localStorage]; } catch { return []; } };
+  return {
+    getItem(k) {
+      for (const s of both()) try { if (s === localStorage && !rememberLogin(kind)) continue; const v = s.getItem(k); if (v != null) return v; } catch {}
+      return null;
+    },
+    setItem(k, v) {
+      const keep = rememberLogin(kind);
+      for (const s of both()) try { if ((s === localStorage) === keep) s.setItem(k, v); else s.removeItem(k); } catch {}
+    },
+    removeItem(k) { for (const s of both()) try { s.removeItem(k); } catch {} },
+  };
+}
+// 자동 로그인을 안 고른 기기에 예전 판이 남긴 로그인 정보는 지운다(다음에 자동으로 들어가지 않게)
+for (const kind of ["teacher", "student"]) if (!rememberLogin(kind)) setRememberLogin(kind, false);
+// 로그인 칸 아래 「자동 로그인」 체크 상자
+function rememberBox(kind) {
+  return h("label", { class: "option remember" }, h("input", { type: "checkbox", name: "remember", checked: rememberLogin(kind) }), h("span", {}, "자동 로그인"));
+}
+// 가운데 알림(잠깐 떴다 서서히 사라짐). then 은 다 사라진 뒤에 부른다.
+function centerNote(text, then) {
+  document.querySelector(".center-note")?.remove();
+  const n = h("div", { class: "center-note" + (then ? " long" : ""), role: "status" }, text);
+  document.body.append(n);
+  n.addEventListener("animationend", () => { n.remove(); then?.(); });
+}
+
 // 주소 끝에 /rest/v1/ 같은 꼬리나 빈칸이 붙어 있어도 프로젝트 주소만 쓴다
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");
 const configured = (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(SB_URL))
   && !/여기에/.test(SUPABASE_KEY) && String(SUPABASE_KEY).trim() !== "";
-const sb = configured ? supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { global: { fetch: watchedFetch } }) : null;
+const sb = configured ? supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { global: { fetch: watchedFetch }, auth: { storage: loginStore("teacher") } }) : null;
 // 수업 내용(lessons·activities·responses)을 바꾸는 요청이 성공하면 onDataWrite 를 부른다.
 // 교사 화면은 이때 학생들에게 「nudge」 신호를 보내, 학생 화면이 자주 묻지 않고도 바로 새 내용을 받게 한다.
 var onDataWrite = null;

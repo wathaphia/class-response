@@ -90,13 +90,17 @@ addEventListener("DOMContentLoaded", () => {
 });
 
 // ---------- 로그인 ----------
-async function init() {
+// fresh: 방금 로그인 칸에서 들어옴. 아니면 저장된 로그인(자동 로그인·새로 고침)으로 들어온 것.
+async function init(fresh) {
   const { data } = await sb.auth.getSession();
   if (!data.session) return showLogin();
   me = data.session.user;
-  const { data: ok, error } = await sb.rpc("is_teacher");
+  // 저장된 로그인은 서버에 계정이 아직 있는지 확인한다(지워진 계정이면 getUser 가 실패)
+  const gone = fresh || passwordRecovery ? null : (await sb.auth.getUser()).error;
+  const { data: ok, error } = gone ? { data: false, error: gone } : await sb.rpc("is_teacher");
   if (error || !ok) {
     if (passwordRecovery) return showPasswordRecovery();   // 교사 화면을 못 쓰는 계정: 비밀번호만 바꾼다
+    if (!fresh) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다");
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
       h("h1", {}, "교사로 등록되지 않은 계정입니다"),
       h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
@@ -113,6 +117,14 @@ async function init() {
     if (e.key === "ArrowRight") setPage(lesson.page + 1);
     if (e.key === "ArrowLeft") setPage(lesson.page - 1);
   });
+}
+
+// 자동 로그인할 수 없는 계정(지워짐·교사 목록에서 빠짐): 알림을 띄웠다가 사라지면 로그인 칸으로
+async function autoLoginFailed(text) {
+  me = null;
+  app.replaceChildren();
+  await sb.auth.signOut({ scope: "local" }).catch(() => {});
+  centerNote(text, () => showLogin());
 }
 
 // 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호 → 「이메일 인증」(확인 메일) → 메일의 링크를 누른 뒤 「가입하기」로 들어온다.
@@ -149,6 +161,7 @@ function showLogin(signup) {
   const pw = h("input", { type: "password", autocomplete: signup ? "new-password" : "current-password", minlength: signup ? 6 : null, required: true });
   const msg = h("p", { class: "msg" });
   const join = h("button", { class: "primary big", type: "submit", disabled: !!signup }, signup ? "가입하기" : "로그인");
+  const remember = rememberBox("teacher");
   // 가입하기: 「학생에서 승격되었습니까?」 예 → 학번·이름을 더 받아 승격된 학생과 맞는지 보고 가입 요청을 남긴다(개발자가 승인)
   let promoted = false;
   const classNo = h("input", { type: "text", autocomplete: "off", placeholder: "예: 10203" });
@@ -216,13 +229,14 @@ function showLogin(signup) {
       async onsubmit(e) {
         e.preventDefault();
         msg.textContent = "로그인 중…";
+        setRememberLogin("teacher", remember.querySelector("input").checked);   // 세션을 어디에 둘지 로그인 전에 정한다
         const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
-        if (!error) return init();
+        if (!error) return init(true);
         msg.textContent = signup && /confirm/i.test(error.message)
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
           : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
-    }, ask, studentBox, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, msg),
+    }, ask, studentBox, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, remember, msg),
     signup ? null : h("p", { class: "center" }, h("button", {
       class: "link", type: "button",
       onclick() { resetBox.hidden = !resetBox.hidden; if (!resetBox.hidden) { resetIn.value = email.value.trim(); resetIn.focus(); } },

@@ -32,6 +32,7 @@
 저장소 밖: Worker `class-tools\cf-worker\src\index.js`(TURN·/usage·/s/ R2), 시험 `class-tools\e2e\`(지도 `class-tools\CLAUDE.md`), 슬라이드 올리기 `class-tools\class-publish.ps1`, 기능 내력 `class-tools\docs\product-history.md`.
 
 ## 규칙
+- 매 요청마다 나중에 최적화·코드 분리·보안 강화가 쉽게 짠다: 한 가지 일은 한 함수로(화면 그리기와 서버 요청을 섞지 않기), 둘 이상이 쓰는 것은 `common.js` 도우미로, 저장소 키·RPC 이름은 한 곳에 상수로, 로그인 정보는 `loginStore` 로만 다룬다.
 - JS/CSS를 바꾸면 `node C:\Users\neptu\class-tools\bump-version.js <이름> [작업트리]` (모든 `?v=` 변경).
 - 학생 표는 열 단위 권한: 교사도 `token`·`pin_hash` 를 못 읽는다(`select` 에 넣지 말 것). 수업 주인(`owner`)은 개발자만 바꾼다.
 - 새 교사 탭 파일은 `teacher.html` 불러오기 순서·이 표·`teacher.js` 머리 주석에 함께 적는다.

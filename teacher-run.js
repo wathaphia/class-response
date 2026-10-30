@@ -181,13 +181,6 @@ function presentResync() {
   p.stage.querySelector(".pptx-frame")?.remove();
   paintPresent();
 }
-// 화면 가운데에 잠깐 나타났다가 서서히 사라지는 알림(app.css .center-note)
-function centerNote(text) {
-  document.querySelector(".center-note")?.remove();
-  const n = h("div", { class: "center-note", role: "status" }, text);
-  document.body.append(n);
-  n.addEventListener("animationend", () => n.remove());
-}
 // 따로 연 창에 지금 슬라이드(애니메이션 단계·시뮬레이션 포함)만 검은 바탕에 가득 그리고, 어느 탭에 있든 0.3초마다 따라간다.
 // 창 이름(cra-present)이 같아 늘 한 개만 생기고(교사 화면을 새로 고쳐도 같은 창을 다시 쓴다), 맨 위 가림막이 마우스를 모두 막는다.
 // 시뮬레이션은 교사 화면에서 조작한 모습을 그대로 비춘다(presentMirrorSync). 교사 화면에 같은 시뮬레이션이 안 보일 때만 이 창이 직접 돌린다.
