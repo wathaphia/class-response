@@ -553,7 +553,7 @@ function promoteStudent(s) {
 
 function promotedCard() {
   const list = (profile && profile.promoted) || [];
-  const admin = !!(profile && profile.admin);
+  const admin = seesAdminTabs();   // 관찰자는 보이기만 하고 단추는 devOnly 가 막는다
   if (!list.length && !admin) return h("section", { class: "promoted-card", hidden: true });
   const account = (p) => !p.account ? h("span", { class: "tag info" }, "계정 만들기 전")
     : !p.confirmed ? h("span", { class: "tag warn" }, "메일 확인 기다림")
@@ -577,7 +577,7 @@ function promotedCard() {
   return h("section", { class: "card stack promoted-card" },
     h("div", { class: "row between wrap" }, h("h2", {}, "선생님으로 승격된 학생 " + list.length + "명"),
       h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 개발자가 「전체 선생님 및 학생」에서 공동 작업자로 넣을 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
-    list.length && admin ? bulkBar(set, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: demoteMany }, "선생님 자격 해제" + (set.size ? " (" + set.size + ")" : ""))) : null,
+    list.length && admin ? bulkBar(set, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: devOnly(demoteMany) }, "선생님 자격 해제" + (set.size ? " (" + set.size + ")" : ""))) : null,
     list.length ? h("div", { class: "table-wrap" }, h("table", { class: "promoted-table" },
       h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번(번호)", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id, class: set.has(p.student_id) ? "picked-row" : null },
@@ -586,13 +586,13 @@ function promotedCard() {
         h("td", {}, account(p)), h("td", {}, p.own + "개"), h("td", {}, p.shared + "개"),
         h("td", { class: "actions" }, admin ? h("button", {
           class: "link danger", type: "button",
-          async onclick() {
-            if (!confirm(p.name + " 학생의 선생님 자격을 해제할까요?\n학생 계정·응답은 그대로이고, 공동 작업자로 함께 쓰던 수업에서 빠집니다.")) return;
+          onclick: devOnly(async () => {
+            if (!confirm(p.name + " 학생의 선생님 자격을 해제할까요?\n학생 계정·응답은 그대로이고, 공동 작업자로 함께 쓰던 수업에서 빠집니다. 만든 수업은 개발자 수업으로 넘어갑니다.")) return;
             const { error } = await sb.rpc("demote_student", { p_student: p.student_id });
             if (error) return alert(error.message);
             await loadProfile();
             draw();
-          },
+          }),
         }, "선생님 자격 해제") : null))))))
       : h("p", { class: "muted small" }, "아직 승격된 학생이 없습니다."));
 }
@@ -600,14 +600,14 @@ function promotedCard() {
 function drawStudents() {
   const now = Date.now();
   needProfile();
-  const admin = !!(profile && profile.admin);
+  const admin = seesAdminTabs();
   const live = classOn();   // 「수업 진행」에서 수업을 시작했을 때만 학생 화면을 본다
   const rows = students.map((s) => {
     const mine = responses.filter((r) => r.student_id === s.id);
     const last = mine.reduce((t, r) => (r.updated_at > t ? r.updated_at : t), "");
     return h("tr", {},
       h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님")   // 승격 단추는 이름 아래 작게(넓은 단추 칸을 더 넓히지 않게)
-        : admin ? h("div", {}, h("button", { class: "link small promote-btn", type: "button", title: "이 학생을 선생님으로 승격", onclick() { promoteStudent(s); } }, "승격")) : null),
+        : admin ? h("div", {}, h("button", { class: "link small promote-btn", type: "button", title: "이 학생을 선생님으로 승격", onclick: devOnly(() => promoteStudent(s)) }, "승격")) : null),
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)),
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")

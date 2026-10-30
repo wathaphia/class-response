@@ -156,6 +156,8 @@ function usageAmount(n, fmt) {
   if (n < GB) return (n / MB).toFixed(1) + "MB";
   return (n / GB).toFixed(2) + "GB";
 }
+// 평균 몫 표기: 수 값은 100 밑이면 소수 한 자리까지(바이트는 usageAmount가 단위를 고른다)
+const shareAmount = (n, fmt) => usageAmount(fmt || n >= 100 ? Math.round(n) : Number(n.toFixed(1)), fmt);
 const shortTime = (t) => new Date(t).toLocaleString("ko-KR", { timeZone: TZ, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // 초기화(쿨타임) 창: 이 한도가 언제부터 쌓여 언제 다시 0이 되는지. 누적·실시간 값과 동기화 비용 추정은 창이 없다.
@@ -179,8 +181,10 @@ function usageStat(it) {
     s.win = w; s.at = at;
     s.rate = it.used / el;                                             // 1ms당
     s.proj = it.used + s.rate * Math.max(0, w.to - at);
-    s.avg = it.limit * Math.min(1, Math.max(0, (at - w.from) / span));  // 고르게 쓸 때 지금까지의 몫
-    s.over = it.used > 0 && it.used > s.avg;
+    // 평균 몫: 남은 양 ÷ 초기화까지 남은 시간. 시간은 올림(10/30 → 11/1 0시 = 2일). 한 달 창은 1일당, 하루 이하 창은 1시간당
+    const unit = span > 86400000 ? 86400000 : 3600000;
+    s.share = Math.max(it.limit - it.used, 0) / Math.max(1, Math.ceil((w.to - at) / unit));
+    s.shareUnit = unit === 86400000 ? "1일당" : "1시간당";
     s.runOut = s.proj > it.limit && s.rate > 0 ? at + Math.max(0, it.limit - it.used) / s.rate : null;
     s.risk = s.proj / it.limit;
   } else s.risk = s.p;
@@ -239,11 +243,10 @@ function usageRing(it, where = "sec") {
       h("strong", {}, it.label),
       h("span", { class: "small" }, amount),
       left ? h("span", { class: "muted small" }, left) : null,
-      st.win ? h("span", { class: "muted small" }, "평균 몫 " + usageAmount(Math.round(st.avg), it.fmt)) : null,
+      st.win ? h("span", { class: "muted small" }, "평균 몫 " + st.shareUnit + " " + shareAmount(st.share, it.fmt) + u) : null,
       h("span", { class: "usage-tags" },
         h("span", { class: "tag period-" + periodGroup(it.period) }, it.period),
-        known ? h("span", { class: "tag " + level }, USAGE_MARK[level] + USAGE_LEVEL[level]) : null,
-        st.over ? h("span", { class: "tag warn", title: "초기화까지 고르게 쓸 때의 지금 몫보다 많이 씀" }, "▲ 평균 초과") : null),
+        known ? h("span", { class: "tag " + level }, USAGE_MARK[level] + USAGE_LEVEL[level]) : null),
       it.hint ? h("span", { class: "muted small" }, it.hint) : null));
 }
 const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), hh = Math.floor(m % 1440 / 60);
@@ -259,8 +262,7 @@ function usageDetail(it) {
       const perDay = st.win.to - st.win.from > 86400000;
       rows.push(
         ["초기화", shortTime(st.win.to) + " · " + dur(st.win.to - st.at) + " 남음"],
-        ["평균 몫(지금까지)", f(Math.round(st.avg)) + " · " + (st.over ? "▲ " + pc(it.used / Math.max(st.avg, 1) - 1) + " 넘게 씀" : "그 안에서 쓰는 중")],
-        ["남은 기간 하루 몫", perDay ? f(Math.round(Math.max(it.limit - it.used, 0) / Math.max((st.win.to - st.at) / 86400000, 1 / 24))) + "까지 쓰면 한도 안" : "—"],
+        ["평균 몫", st.shareUnit + " " + shareAmount(st.share, it.fmt) + (it.unit || "")],
         ["쓰는 속도", f(Math.round(st.rate * (perDay ? 86400000 : 3600000))) + (perDay ? " / 하루" : " / 시간")],
         ["초기화 때 예상", f(Math.round(st.proj)) + " (" + pc(st.risk) + ") · " + (st.proj <= it.limit ? f(Math.round(it.limit - st.proj)) + " 남음" : "한도 넘음")]);
       if (st.runOut) rows.push(["다 쓰는 예상 시각", st.runOut <= st.at ? "이미 다 씀" : shortTime(st.runOut) + " (초기화 " + dur(st.win.to - st.runOut) + " 전)"]);

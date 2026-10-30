@@ -4,6 +4,7 @@
 //   「전체 선생님 및 학생」(개발자만) 선생님 관리 · 공동 작업자 · 승격된 학생 · 모든 학생(drawPeople)
 // 받는 곳: Supabase my_profile() · add_collaborator()(개발자만) · remove_collaborator() · admin_set_teacher()(setup.sql).
 
+let resetQuotaText;   // 「오늘 3번 중 n번 사용」: 화면을 다시 그려도 깜빡이지 않게 처음 한 번만 읽는다
 let profile = null;   // my_profile() 결과 또는 { error }
 
 function drawProfile() {
@@ -29,42 +30,54 @@ function paintProfile() {
   const side = main && main.querySelector(".profile-side");
   if (tab !== "profile" || !side) return;
   const p = profile && !profile.error ? profile : null;
-  const msg = h("p", { class: "msg" });
   const email = (p && p.email) || me.email || "";
   const info = (label, value) => h("div", { class: "profile-row" }, h("dt", {}, label), h("dd", {}, value));
   const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code),
     h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(p.code).then(() => { e.target.textContent = "복사했습니다"; }, () => prompt("복사해 쓰세요.", p.code)); } }, "복사")) : "—";
-  // 재설정 메일의 링크로 들어옴(로그인된 채): 여기서 새 비밀번호를 정한다
+  // 재설정 메일의 링크로 들어옴(로그인된 채) 또는 프로필의 「비밀번호 재설정」: 여기서 새 비밀번호를 정한다. 프로필에서 열면 현재 비밀번호도 확인한다
+  const pw0 = passwordChange && !passwordRecovery ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
   const pw1 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
   const pw2 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
   const pwMsg = h("p", { class: "msg" });
-  const recovery = passwordRecovery ? h("form", {
+  const recovery = passwordRecovery || passwordChange ? h("form", {
     class: "card stack recovery-card",
     async onsubmit(e) {
       e.preventDefault();
       if (pw1.value.length < 6) { pwMsg.textContent = "6자 이상으로 정해 주세요."; return pw1.focus(); }
       if (pw1.value !== pw2.value) { pwMsg.textContent = "두 비밀번호가 다릅니다."; return pw2.focus(); }
       pwMsg.textContent = "바꾸는 중…";
+      if (pw0) {
+        const why = await checkPassword(me.email, pw0.value);
+        if (why) { pwMsg.textContent = why; return pw0.focus(); }
+      }
       const { error } = await sb.auth.updateUser({ password: pw1.value });
       if (error) { pwMsg.textContent = "바꾸지 못했습니다: " + error.message; return; }
-      passwordRecovery = false;
+      passwordRecovery = passwordChange = false;
       centerNote("새 비밀번호로 바꿨습니다");
       paintProfile();
     },
   }, h("h3", {}, "새 비밀번호 설정"),
-    h("label", {}, "새 비밀번호 (6자 이상)", pw1), h("label", {}, "한 번 더", pw2),
-    h("button", { class: "primary", type: "submit" }, "비밀번호 바꾸기"), pwMsg) : "";
-  if (recovery) requestAnimationFrame(() => { recovery.scrollIntoView({ block: "center" }); pw1.focus(); });
+    pw0 ? h("label", {}, "현재 비밀번호", pw0) : null, h("label", {}, "새 비밀번호 (6자 이상)", pw1), h("label", {}, "한 번 더", pw2),
+    h("div", { class: "row" },
+      h("button", { class: "primary", type: "submit" }, "비밀번호 바꾸기"),
+      h("button", { class: "ghost", type: "button", onclick() { passwordRecovery = passwordChange = false; paintProfile(); } }, "취소")), pwMsg) : "";
+  if (recovery) requestAnimationFrame(() => { recovery.scrollIntoView({ block: "center" }); (pw0 || pw1).focus(); });
   // 오늘 재설정 메일을 몇 번 썼는지(하루 3번)
-  const resetUsed = h("span", { class: "muted small" });
-  sb.rpc("my_reset_quota").then(({ data }) => { if (data) resetUsed.textContent = "오늘 3번 중 " + data.used + "번 사용"; });
+  const resetUsed = h("span", { class: "muted small" }, resetQuotaText || "");
+  if (resetQuotaText === undefined) {
+    resetQuotaText = "";
+    sb.rpc("my_reset_quota").then(({ data }) => {
+      if (!data) return;
+      resetQuotaText = "오늘 3번 중 " + data.used + "번 사용";
+      resetUsed.textContent = resetQuotaText;
+    });
+  }
   side.replaceChildren(
-    recovery,
     h("section", { class: "card stack profile-card" },
       h("div", { class: "profile-head" },
         h("span", { class: "avatar big", "aria-hidden": "true" }, (email[0] || "?").toUpperCase()),
         h("div", {}, h("strong", { class: "profile-email" }, email),
-          h("div", {}, p && p.admin ? h("span", { class: "tag warn" }, "개발자 · 모든 선생님 관리") : h("span", { class: "tag info" }, "선생님")))),
+          h("div", {}, p && p.admin ? h("span", { class: "tag warn" }, "개발자 · 모든 선생님 관리") : p && p.observer ? h("span", { class: "tag warn" }, "관찰자 · 개발자 탭 보기") : h("span", { class: "tag info" }, "선생님")))),
       profile && profile.error ? h("p", { class: "error small" }, "프로필을 불러오지 못했습니다: " + profile.error) : null,
       h("dl", { class: "profile-info" },
         info("교사 ID", idBox),
@@ -77,14 +90,9 @@ function paintProfile() {
         h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"),
         h("button", {
           class: "ghost", type: "button",
-          async onclick(e) {
-            const btn = e.currentTarget;
-            if (!confirm(email + " 로 비밀번호 재설정 메일을 보낼까요?")) return;
-            resetUsed.textContent = "";
-            await sendResetMail(email, btn, msg);
-          },
-        }, "비밀번호 재설정"), resetUsed),
-      msg),
+          onclick() { passwordChange = true; paintProfile(); },
+        }, "비밀번호 재설정"), resetUsed)),
+    recovery,
     h("section", { class: "card stack" },
       h("div", { class: "row between" }, h("h3", {}, "탭 꾸미기"),
         h("button", { class: "primary tabs-edit-btn", type: "button", onclick: startTabEdit }, "탭 꾸미기")),
@@ -139,7 +147,7 @@ function paintPeople() {
   const page = main && main.querySelector(".people-page");
   if (tab !== "people" || !page) return;
   const p = profile && !profile.error ? profile : null;
-  if (!p || !p.admin) return page.replaceChildren(h("p", { class: "muted" }, "불러오는 중…"));
+  if (!p || !seesAdminTabs()) return page.replaceChildren(h("p", { class: "muted" }, "불러오는 중…"));
   page.replaceChildren(teachersCard(p), collaboratorCard(p), promotedCard(), studentsCard());
 }
 
@@ -225,8 +233,8 @@ function studentsCard() {
       h("button", { class: "ghost reload-btn", type: "button", disabled: studentsBusy, onclick() { loadAllStudents(true); } }, reloadIcon, studentsBusy ? "읽는 중…" : "새로 읽기")),
     allStudents && allStudents.error ? h("p", { class: "error small" }, allStudents.error) : null,
     !Array.isArray(allStudents) ? (allStudents ? null : h("p", { class: "muted small" }, "불러오는 중…")) : [bulkBar(set, ids, paintStudents,
-      h("button", { class: "ghost small", type: "button", disabled: !canPromote.length, onclick() { promoteMany(canPromote); } }, "승격" + (canPromote.length ? " (" + canPromote.length + ")" : "")),
-      h("button", { class: "ghost small danger", type: "button", onclick() { deleteStudents(chosen); } }, "계정 삭제" + (chosen.length ? " (" + chosen.length + ")" : ""))),
+      h("button", { class: "ghost small", type: "button", disabled: !canPromote.length, onclick: devOnly(() => promoteMany(canPromote)) }, "승격" + (canPromote.length ? " (" + canPromote.length + ")" : "")),
+      h("button", { class: "ghost small danger", type: "button", onclick: devOnly(() => deleteStudents(chosen)) }, "계정 삭제" + (chosen.length ? " (" + chosen.length + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "all-students-table" },
       h("thead", {}, h("tr", {}, pickHead(set, ids, paintStudents), ["이름", "학번(번호)", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((s) => h("tr", { class: set.has(s.id) ? "picked-row" : null },
@@ -235,16 +243,16 @@ function studentsCard() {
         h("td", {}, (s.lesson_students || []).map((m) => title(m.lesson_id)).join(", ") || "—"),
         h("td", {}, seen(s) ? dateText(seen(s)) : "—"), h("td", {}, dateText(s.created_at)),
         h("td", { class: "actions" },
-          promotedOf(s) ? null : h("button", { class: "link small", type: "button", onclick() { promoteStudent(s); } }, "승격"),
+          promotedOf(s) ? null : h("button", { class: "link small", type: "button", onclick: devOnly(() => promoteStudent(s)) }, "승격"),
           h("button", {
             class: "link danger", type: "button",
-            async onclick() {
+            onclick: devOnly(async () => {
               if (!confirm(nameOf(s) + " 학생 계정을 완전히 지울까요?\n모든 수업에서 빠지고, 모든 수업의 응답이 지워집니다.")) return;
               const { error } = await sb.from("students").delete().eq("id", s.id);
               if (error) return alert(error.message);
               allStudents = allStudents.filter((x) => x.id !== s.id);
               paintStudents();
-            },
+            }),
           }, "계정 삭제")))))))]);
 }
 
@@ -263,13 +271,13 @@ function collaboratorCard(p) {
   }
   return h("section", { class: "card stack" },
     h("div", { class: "row between" }, h("h3", {}, "공동 작업자"),
-      h("button", { class: "primary", type: "button", onclick: addCollaborator }, "+ 공동 작업자 추가하기")),
+      h("button", { class: "primary", type: "button", onclick: devOnly(addCollaborator) }, "+ 공동 작업자 추가하기")),
     h("p", { class: "muted small" }, "선생님들은 공동 작업자를 직접 넣지 못합니다. 개발자는 모든 수업에 함께하며, 여기서 수업에 다른 선생님을 넣습니다."),
     byLesson.size ? h("ul", { class: "collab-list" }, [...byLesson].map(([id, g]) => h("li", {},
       h("strong", {}, g.title), h("span", { class: "muted small" }, " · " + g.code),
       h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, whoText(c, p),
         h("button", { class: "link danger", type: "button", title: "공동 작업자에서 빼기", "aria-label": c.email + " 빼기",
-          onclick() { removeCollaborator(id, c.email, "「" + g.title + "」에서 " + c.email + " 선생님을 뺄까요?"); } }, "×")))))))
+          onclick: devOnly(() => removeCollaborator(id, c.email, "「" + g.title + "」에서 " + c.email + " 선생님을 뺄까요?")) }, "×")))))))
       : h("p", { class: "muted small" }, "아직 함께 쓰는 선생님이 없습니다."));
 }
 
@@ -311,10 +319,19 @@ function addCollaborator() {
     h("button", { class: "primary", type: "submit", disabled: !people.length }, "추가"), msg));
 }
 
+// 현재 비밀번호 확인: 지금 로그인을 건드리지 않게 저장 안 하는 임시 연결로 로그인해 본다. 틀리면 알릴 문구를 돌려준다
+async function checkPassword(email, password) {
+  const check = supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "cra-pw-check" } });
+  const { error } = await check.auth.signInWithPassword({ email, password });
+  if (error) return error.code === "invalid_credentials" ? "현재 비밀번호가 다릅니다." : "확인하지 못했습니다: " + error.message;
+  await check.auth.signOut({ scope: "local" });
+  return "";
+}
+
 // 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
   const set = async (who, on) => {
-    if (!on && !confirm(who + " 선생님을 교사 목록에서 뺄까요? 그 선생님의 수업은 지워지지 않고 개발자가 계속 볼 수 있습니다.")) return false;
+    if (!on && !confirm(who + " 선생님을 교사 목록에서 뺄까요? 그 선생님의 수업은 지워지지 않고 개발자 수업으로 넘어갑니다.")) return false;
     const { data, error } = await sb.rpc("admin_set_teacher", { p_email: who, p_on: on });
     const why = { bad_email: "이메일 형식이 올바르지 않습니다", self: "내 계정은 뺄 수 없습니다" };
     if (error || data.error) { centerNote((on ? "추가하지 못했습니다: " : "빼지 못했습니다: ") + (error ? error.message : why[data.error] || data.error)); return false; }
@@ -345,14 +362,35 @@ function teachersCard(p) {
   };
   const addBtn = h("button", {
     class: "link", type: "button",
-    async onclick() {
+    onclick: devOnly(async () => {
       if (newEmail.hidden) return openAdd();
       const who = newEmail.value.trim().toLowerCase();
       if (!EMAIL_RE.test(who)) { centerNote("이메일 형식이 올바르지 않습니다"); newEmail.focus(); return; }
       addBtn.disabled = true;
       if (!(await set(who, true))) { addBtn.disabled = false; newEmail.focus(); }
-    },
+    }),
   }, "추가");
+
+  // 직위 스위치: 선생님 ⇄ 관찰자. 직위만 바뀌고 수업·폴더는 그대로다
+  const roleSwitch = (t) => h("button", {
+    type: "button", role: "switch", "aria-checked": String(!!t.observer), class: "role-switch" + (t.observer ? " on" : ""),
+    title: t.observer ? "누르면 선생님으로 바꿉니다" : "누르면 관찰자로 바꿉니다", "aria-label": t.email + " 직위",
+    onclick: devOnly(async () => {
+      const { data, error } = await sb.rpc("admin_set_observer", { p_email: t.email, p_on: !t.observer });
+      if (error || data.error) return centerNote("직위를 바꾸지 못했습니다: " + (error ? error.message : data.error));
+      await loadProfile();
+    }),
+  }, h("span", { class: "knob", "aria-hidden": "true" }), h("span", {}, t.observer ? "관찰자" : "선생님"));
+  // 오늘 재설정 메일 횟수와 3번 한도 초기화(개발자만). 0번이면 단추는 자리만 남겨 칸 너비가 변하지 않게 한다
+  const resetCell = (t) => h("td", { class: "reset-cell" }, (t.reset_used || 0) + " / 3 ", h("button", {
+    class: "link", type: "button", style: t.reset_used ? null : "visibility:hidden", "aria-label": t.email + " 재설정 횟수 초기화",
+    onclick: devOnly(async () => {
+      const { error } = await sb.rpc("admin_reset_quota", { p_email: t.email });
+      if (error) return centerNote("초기화하지 못했습니다: " + error.message);
+      centerNote(t.email + " 재설정 횟수를 초기화했습니다");
+      await loadProfile();
+    }),
+  }, "초기화"));
   const decide = async (r, ok) => {
     if (!ok && !confirm(nameOf(r) + " 의 가입 요청(" + r.email + ")을 거절할까요?")) return;
     const { data, error } = await sb.rpc("decide_teacher_request", { p_student: r.student_id, p_ok: ok });
@@ -367,7 +405,7 @@ function teachersCard(p) {
   const repaint = () => { const old = main && main.querySelector(".teachers-card"); if (old) old.replaceWith(teachersCard(p)); };
   const removeMany = async () => {
     const who = [...picked];
-    if (!confirm(who.length + "명의 선생님을 교사 목록에서 뺄까요?\n" + who.join(", ") + "\n그 선생님들의 수업은 지워지지 않고 개발자가 계속 볼 수 있습니다.")) return;
+    if (!confirm(who.length + "명의 선생님을 교사 목록에서 뺄까요?\n" + who.join(", ") + "\n그 선생님들의 수업은 지워지지 않고 개발자 수업으로 넘어갑니다.")) return;
     const fails = [];
     for (const w of who) {
       const { data, error } = await sb.rpc("admin_set_teacher", { p_email: w, p_on: false });
@@ -378,17 +416,18 @@ function teachersCard(p) {
   };
   // 입력란·단추는 칸 위에 띄워(.add-line) 열 너비·줄 높이·다른 요소 위치가 바뀌지 않게 한다. 숨은 「추가」 글자가 줄 높이를 잡는다
   const addRow = h("tr", { class: "add-row" }, h("td", { class: "pick" }),
-    h("td", { class: "add-cell", colspan: 5 }, h("span", { class: "add-spacer", "aria-hidden": "true" }, "추가"), h("div", { class: "add-line" }, addBtn, newEmail, cancelBtn)));
+    h("td", { class: "add-cell", colspan: 7 }, h("span", { class: "add-spacer", "aria-hidden": "true" }, "추가"), h("div", { class: "add-line" }, addBtn, newEmail, cancelBtn)));
   return h("section", { class: "card stack teachers-card" },
     h("h3", {}, "선생님 관리"),
-    bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: removeMany }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
+    bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: devOnly(removeMany) }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
-      h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "수업", "마지막 로그인", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "직위", "수업", "마지막 로그인", "오늘 비밀번호 재설정", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, (p.teachers || []).map((t) => h("tr", { class: picked.has(t.email) ? "picked-row" : null },
         t.admin ? h("td", { class: "pick" }) : pickCell(picked, t.email, t.email, repaint),
-        h("td", {}, t.code), h("td", {}, isPendingEmail(t.email) ? h("span", { class: "muted" }, "가입 전") : t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
-        h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"),
-        h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기")))),
+        h("td", {}, t.code), h("td", {}, isPendingEmail(t.email) ? h("span", { class: "muted" }, "가입 전") : t.email),
+        h("td", {}, t.admin ? h("span", { class: "tag warn" }, "개발자") : roleSwitch(t)),
+        h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"), resetCell(t),
+        h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick: devOnly(() => set(t.email, false)) }, "빼기")))),
         addRow))),
     requests.length ? h("div", { class: "stack" }, h("h4", {}, "가입 요청 (" + requests.length + ")"),
       h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
@@ -397,7 +436,7 @@ function teachersCard(p) {
           h("td", {}, r.class_no || "—"), h("td", {}, r.name || "—"),
           h("td", {}, r.email, r.confirmed ? null : h("span", { class: "tag info" }, "메일 인증 전")), h("td", {}, dateText(r.at)),
           h("td", { class: "row" },
-            h("button", { class: "link", type: "button", onclick() { decide(r, true); } }, "승인"),
-            h("button", { class: "link danger", type: "button", onclick() { decide(r, false); } }, "거절")))))))) : "",
+            h("button", { class: "link", type: "button", onclick: devOnly(() => decide(r, true)) }, "승인"),
+            h("button", { class: "link danger", type: "button", onclick: devOnly(() => decide(r, false)) }, "거절")))))))) : "",
     h("p", { class: "muted small" }, "추가한 선생님은 교사 화면의 「가입하기」에서 같은 이메일로 가입하면 로그인할 수 있습니다. 승격된 학생은 「가입하기」에서 학번·이름을 적어 가입 요청을 보내고, 여기서 승인하면 그 이메일로 로그인합니다."));
 }

@@ -15,7 +15,9 @@ async function drawManage() {
   if (tab !== "library" || !pane) return;
   folders = error ? [] : data;
   const admin = !!(profile && profile.admin);
-  if (admin && defaultSaved === undefined) {
+  const observer = isObserver();   // 다른 선생님 수업은 보기만: 별·저장·불러오기·삭제는 알림만 띄운다
+  const viewAll = admin || observer;
+  if (viewAll && defaultSaved === undefined) {
     const d = await sb.from("student_default").select("lesson_id").maybeSingle();
     defaultSaved = defaultPick = (d.data && d.data.lesson_id) || null;
     if (tab !== "library" || !main.querySelector(".manage-pane")) return;
@@ -64,6 +66,7 @@ async function drawManage() {
   const loadPicked = async (btn) => {
     const l = picked();
     if (!l || l.id === lesson?.id) return;
+    if (!canOpenLesson(l)) return centerNote("개발자 고유의 권한입니다");
     if (btn) { btn.disabled = true; btn.textContent = "불러오는 중…"; }
     lesson = l;
     await loadLesson();   // 위쪽 수업 고르기 칸과 다른 탭이 이 수업으로 바뀐다
@@ -75,7 +78,7 @@ async function drawManage() {
     const b = h("button", {
       class: "star-btn" + (on ? " on" : ""), type: "button", draggable: "false", "aria-pressed": String(on),
       title: on ? "학생용 기본 수업에서 빼기" : "학생용 기본 수업으로 고르기", "aria-label": on ? "학생용 기본 수업에서 빼기" : "학생용 기본 수업으로 고르기",
-      onclick(e) { e.stopPropagation(); defaultPick = on ? null : l.id; drawManage(); },
+      onclick: devOnly((e) => { e.stopPropagation(); defaultPick = on ? null : l.id; drawManage(); }),
       ondblclick(e) { e.stopPropagation(); },
       onkeydown(e) { e.stopPropagation(); },
     });
@@ -94,13 +97,13 @@ async function drawManage() {
       h("strong", {}, (l.kind === "survey" ? "[설문] " : "") + l.title),
       h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString()),
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
-      mine(l) ? null : h("span", { class: "tag info" }, "공유받음"),
+      mine(l) ? null : h("span", { class: "tag info" }, canOpenLesson(l) ? "공유받음" : "다른 선생님"),
       // 첫 슬라이드(끌기를 방해하지 않게 그림 자체는 끌 수 없게)
       h("div", { class: "thumb-box" },
         l.slide_count && !isPptx(l)
           ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
           : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"),
-        admin ? star(l) : null));
+        viewAll ? star(l) : null));
     if (mine(l) && !top) dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
     return el;
   };
@@ -146,17 +149,17 @@ async function drawManage() {
     groups.map((g) => h("option", { value: g.id || "", selected: (folders.some((f) => f.id === p.folder_id) ? p.folder_id : null) === g.id }, g.name))) : null;
   // 맨 위 칸: 지금 고른 학생용 기본 수업(아래 카드와 같은 모양) + 저장/저장됨
   const pickNow = known(defaultPick), changed = pickNow !== known(defaultSaved);
-  const defaultBox = admin ? h("section", { class: "card stack student-default" },
+  const defaultBox = viewAll ? h("section", { class: "card stack student-default" },
     h("div", { class: "row between wrap" },
       h("div", {}, h("h2", {}, "학생용 기본 수업"),
         h("p", { class: "muted small" }, "학생용 페이지를 주소(?c=) 없이 열면 이 수업 코드가 미리 들어갑니다. 아래 카드 첫 슬라이드의 ☆를 눌러 하나만 고를 수 있습니다.")),
-      h("button", { class: "primary save-btn default-save", type: "button", disabled: !changed, async onclick(e) {
+      h("button", { class: "primary save-btn default-save", type: "button", disabled: !changed, onclick: devOnly(async (e) => {
         const btn = e.currentTarget; btn.disabled = true; btn.textContent = "저장 중…";
         const r = await sb.rpc("set_default_lesson", { p_lesson: pickNow });
         if (r.error) { btn.disabled = false; btn.textContent = "저장"; return alert("저장하지 못했습니다: " + r.error.message); }
         defaultSaved = pickNow;
         drawManage();
-      } }, changed ? "저장" : "저장됨")),
+      }) }, changed ? "저장" : "저장됨")),
     pickNow ? h("div", { class: "lesson-list" }, card(lessons.find((l) => l.id === pickNow), true))
       : h("p", { class: "muted small default-empty" }, "고른 수업이 없습니다.")) : null;
   pane.replaceChildren(h("div", { class: "stack manage" },
@@ -179,9 +182,10 @@ async function drawManage() {
         p.id === lesson?.id
           ? h("button", { class: "primary", type: "button", disabled: true }, "불러오기 완료")
           : h("button", { class: "primary", type: "button", onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
-        h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+        h("button", { class: "ghost", type: "button", onclick() { if (!canOpenLesson(p)) return centerNote("개발자 고유의 권한입니다"); exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
         // 수업 삭제: 주인 또는 개발자만(공동 작업자는 못 지운다)
-        mine(p) || (profile && profile.admin) ? h("button", { class: "ghost danger delete-lesson", type: "button", async onclick(ev) {
+        mine(p) || viewAll ? h("button", { class: "ghost danger delete-lesson", type: "button", async onclick(ev) {
+          if (!mine(p) && observer) return centerNote("개발자 고유의 권한입니다");
           const typed = prompt("「" + p.title + "」 수업을 지우면 활동, 학생, 응답, 슬라이드가 모두 지워집니다.\n지우려면 수업 코드 「" + p.code + "」를 입력하세요.");
           if ((typed || "").trim().toUpperCase() !== p.code) return;
           const btn = ev.currentTarget; btn.disabled = true;
@@ -196,7 +200,7 @@ async function drawManage() {
         : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
       msg),
     groups.map(folderBox),
-    others.length ? folderBox({ id: OTHERS, name: profile && profile.admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : "공유받은 수업" }) : null));
+    others.length ? folderBox({ id: OTHERS, name: admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : observer ? "다른 선생님 수업(관찰자 · 보기만)" : "공유받은 수업" }) : null));
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.

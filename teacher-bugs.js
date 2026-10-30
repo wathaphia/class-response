@@ -31,7 +31,8 @@ function paintBugs() {
     drawBugs();
   } }, "제보하기");
   const card = (b) => {
-    const can = b.author === me.id || admin, editing = can && bugEdit === b.id;
+    const own = b.author === me.id, can = own || admin, editing = can && bugEdit === b.id;
+    const guard = (fn) => (own ? fn : devOnly(fn));   // 관찰자에게도 단추는 보이지만 남의 제보는 알림만 띄운다
     const copy = h("button", { class: "ghost bug-copy", type: "button", title: "제보 글을 클립보드에 복사", onclick() {
       navigator.clipboard.writeText(b.body).then(() => { copy.textContent = "복사했습니다"; setTimeout(() => { copy.textContent = "복사"; }, 1500); }, () => alert("복사하지 못했습니다."));
     } }, "복사");
@@ -54,14 +55,14 @@ function paintBugs() {
         h("button", { class: "ghost", type: "button", onclick() { bugEdit = null; paintBugs(); } }, "취소")), m);
     }
     return h("article", { class: "card stack bug-card" }, head, h("p", { class: "bug-body" }, b.body),
-      can ? h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick() { bugEdit = b.id; paintBugs(); } }, "고치기"),
-        h("button", { class: "ghost danger", type: "button", async onclick() {
+      can || isObserver() ? h("div", { class: "row" },
+        h("button", { class: "ghost", type: "button", onclick: guard(() => { bugEdit = b.id; paintBugs(); }) }, "고치기"),
+        h("button", { class: "ghost danger", type: "button", onclick: guard(async () => {
           if (!confirm("이 제보를 지울까요?")) return;
           const { error } = await sb.from("bug_reports").delete().eq("id", b.id);
           if (error) return alert("지우지 못했습니다: " + error.message);
           drawBugs();
-        } }, "지우기"),
+        }) }, "지우기"),
         b.author !== me.id ? h("span", { class: "tag warn" }, "개발자 권한") : null) : null);
   };
   main.replaceChildren(h("div", { class: "stack bugs-page" },

@@ -177,6 +177,12 @@ create or replace function is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from teachers where email = verified_email() and is_admin)
 $$;
+-- 관찰자: 개발자가 고른 선생님. 전체 수업·전체 선생님 및 학생·기타 관리·패치 노트를 볼 수만 있고, 쓰기 권한은 선생님과 같다
+alter table teachers add column if not exists is_observer boolean not null default false;
+create or replace function is_observer() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from teachers where email = verified_email() and is_observer)
+$$;
 
 -- 공동 작업자: 수업 주인(또는 개발자)이 다른 교사(ID로 찾음)에게 수업 하나씩 권한을 나눈다.
 -- 공동 작업자는 그 수업을 보고 고치고 진행할 수 있지만, 지우거나 다른 사람에게 다시 나누지는 못한다.
@@ -611,6 +617,8 @@ create table if not exists reset_log (
   at timestamptz not null default now()
 );
 create index if not exists reset_log_email_at on reset_log (email, at);
+-- waived: 개발자가 초기화한 줄(admin_reset_quota). 기록은 남기고 3번 한도 셈에서만 뺀다
+alter table reset_log add column if not exists waived boolean not null default false;
 alter table reset_log enable row level security;
 
 create or replace function claim_password_reset(p_email text)
@@ -625,7 +633,7 @@ begin
   end if;
   perform pg_advisory_xact_lock(hashtext('reset:' || e));
   select count(*), max(at) into n, last_at from reset_log
-   where email = e and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
+   where email = e and not waived and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
   if n >= 3 then return jsonb_build_object('ok', false, 'reason', 'limit', 'used', n, 'limit', 3); end if;
   if last_at > now() - interval '3 seconds' then return jsonb_build_object('ok', false, 'reason', 'cooldown', 'used', n, 'limit', 3); end if;
   insert into reset_log (email) values (e);
@@ -638,10 +646,22 @@ grant execute on function claim_password_reset(text) to anon, authenticated;
 create or replace function my_reset_quota()
 returns jsonb language sql stable security definer set search_path = public as $$
   select jsonb_build_object('used', count(*), 'limit', 3) from reset_log
-   where email = lower(auth.email()) and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
+   where email = lower(auth.email()) and not waived and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
 $$;
 revoke all on function my_reset_quota() from public;
 grant execute on function my_reset_quota() to authenticated;
+
+-- 개발자 전용: 그 사람의 오늘 재설정 횟수를 0으로
+create or replace function admin_reset_quota(p_email text)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  update reset_log set waived = true
+   where email = lower(trim(p_email)) and not waived and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function admin_reset_quota(text) from public, anon;
+grant execute on function admin_reset_quota(text) to authenticated;
 
 -- 재설정 메일 보낸 표시: 함수 send-email(Send Email Hook)이 보내기 직전에 화면이 받아 간 한 번(2분 안, 아직 안 보냄)을 쓴다. 없으면 메일을 보내지 않는다(/recover 직접 호출 차단)
 alter table reset_log add column if not exists sent_at timestamptz;
@@ -707,7 +727,7 @@ begin
   if not found then raise exception 'not a teacher'; end if;
   if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
   return jsonb_build_object(
-    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'since', t.created_at, 'student', t.student_id is not null,
+    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at, 'student', t.student_id is not null,
     'promoted', promoted_students(),   -- 선생님으로 승격된 학생(아래)
     -- 공동 작업자로 고를 수 있는 다른 선생님(「선생님 추가」로 넣은 선생님 먼저, 그다음 승격된 학생)
     'colleagues', coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'account', u.id is not null,
@@ -720,16 +740,17 @@ begin
     'collaborators', coalesce((select jsonb_agg(jsonb_build_object('lesson_id', c.lesson_id, 'title', l.title, 'lesson_code', l.code,
         'email', c.email, 'code', x.code) order by l.title, c.email)
       from lesson_collaborators c join lessons l on l.id = c.lesson_id join teachers x on x.email = c.email
-      where l.owner = auth.uid() or t.is_admin), '[]'::jsonb),
+      where l.owner = auth.uid() or t.is_admin or t.is_observer), '[]'::jsonb),
     -- 다른 교사가 나에게 나눈 수업
     'shared_with_me', coalesce((select jsonb_agg(jsonb_build_object('lesson_id', l.id, 'title', l.title, 'owner', u.email) order by l.title)
       from lesson_collaborators c join lessons l on l.id = c.lesson_id left join auth.users u on u.id = l.owner
       where c.email = me), '[]'::jsonb),
-    'teachers', case when t.is_admin then coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'admin', x.is_admin,
-        'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id)) order by x.created_at)
+    'teachers', case when t.is_admin or t.is_observer then coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'admin', x.is_admin,
+        'observer', x.is_observer, 'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id),
+        'reset_used', (select count(*) from reset_log r where r.email = x.email and not r.waived and r.at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')) order by x.created_at)
       from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end,
     -- (개발자) 승격된 학생의 가입 요청(아래 teacher_requests)
-    'requests', case when t.is_admin then coalesce((select jsonb_agg(jsonb_build_object('student_id', r.student_id, 'class_no', s.class_no, 'name', s.name,
+    'requests', case when t.is_admin or t.is_observer then coalesce((select jsonb_agg(jsonb_build_object('student_id', r.student_id, 'class_no', s.class_no, 'name', s.name,
         'email', r.email, 'at', r.created_at, 'confirmed', u.email_confirmed_at is not null) order by r.created_at)
       from teacher_requests r join students s on s.id = r.student_id left join auth.users u on lower(u.email) = r.email), '[]'::jsonb) end);
 end $$;
@@ -763,7 +784,7 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- 개발자 전용: 선생님 추가·빼기(빼도 그 교사의 수업은 남고 개발자가 볼 수 있다)
+-- 개발자 전용: 선생님 추가·빼기(빼면 그 교사의 수업은 개발자 수업으로 넘어간다, teachers_hand_over)
 create or replace function admin_set_teacher(p_email text, p_on boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare e text := lower(trim(p_email));
@@ -788,6 +809,7 @@ grant execute on function add_collaborator(text, uuid[]) to authenticated;
 grant execute on function remove_collaborator(uuid, text) to authenticated;
 grant execute on function admin_set_teacher(text, boolean) to authenticated;
 grant execute on function is_admin() to authenticated;
+grant execute on function is_observer() to authenticated;
 grant execute on function can_lesson(uuid) to authenticated;
 grant execute on function owns_lesson(uuid) to authenticated;
 
@@ -795,7 +817,7 @@ grant execute on function owns_lesson(uuid) to authenticated;
 -- 학생을 선생님으로 승격(개발자만, 「학생 관리」에서): 학생 계정에 로그인 이메일을 붙여 teachers 에 넣는다.
 -- 승격된 학생은 그 이메일로 교사 화면의 「가입하기」를 해 로그인하고,
 -- 선생님들은 「공동 작업자 추가」에서 승격된 학생이나 「선생님 추가」로 넣은 선생님을 골라 수업을 함께 쓴다.
--- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 남고 개발자가 볼 수 있다).
+-- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 개발자 수업으로 넘어간다).
 -- ------------------------------------------------------------
 alter table teachers add column if not exists student_id uuid references students(id) on delete cascade;
 create unique index if not exists teachers_student_key on teachers (student_id);
@@ -970,7 +992,8 @@ create policy teacher_delete on students for delete to authenticated using (is_t
 create or replace function lessons_owner_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.owner is distinct from old.owner and not is_admin() and auth.uid() is not null then
+  -- pg_trigger_depth() > 1: 교사가 빠질 때 teachers_hand_over 가 넘기는 경우(학생 삭제로 빠지면 개발자 세션이 아닐 수 있다)
+  if new.owner is distinct from old.owner and not is_admin() and auth.uid() is not null and pg_trigger_depth() <= 1 then
     raise exception '수업 주인은 바꿀 수 없습니다';
   end if;
   return new;
@@ -1015,3 +1038,56 @@ begin
 end $$;
 revoke execute on function set_default_lesson(uuid) from public, anon;
 grant execute on function set_default_lesson(uuid) to authenticated;
+
+-- ---------- 관찰자(2026-10-30) ----------
+-- 보기: 다른 선생님의 수업(존재·제목·첫 슬라이드)·학생 명단·공동 작업자·기본 수업. 활동·응답은 못 본다. 쓰기 정책은 그대로라 자기 것만 고친다.
+drop policy if exists observer_read on lessons;
+drop policy if exists observer_read on activities;
+drop policy if exists observer_read on lesson_students;
+drop policy if exists observer_read on lesson_collaborators;
+drop policy if exists observer_read on student_default;
+create policy observer_read on lessons for select to authenticated using (is_observer());
+create policy observer_read on lesson_students for select to authenticated using (is_observer());
+create policy observer_read on lesson_collaborators for select to authenticated using (is_observer());
+create policy observer_read on student_default for select to authenticated using (is_observer());
+
+-- 새 수업은 개발자와 공동 작업으로 만들어진다(선생님·관찰자 모두). 예전 수업에는 소급하지 않는다
+create or replace function lessons_admin_collab() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into lesson_collaborators (lesson_id, email)
+    select new.id, t.email from teachers t
+     where t.is_admin and not exists (select 1 from auth.users u where u.id = new.owner and lower(u.email) = t.email)
+    on conflict do nothing;
+  return null;
+end $$;
+drop trigger if exists lessons_admin_collab on lessons;
+create trigger lessons_admin_collab after insert on lessons for each row execute function lessons_admin_collab();
+
+-- 교사가 빠지면(빼기·자격 해제·학생 삭제) 수업 전체를 그대로 두고 주인만 개발자로 넘긴다. 폴더는 없이 보인다
+create or replace function teachers_hand_over() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare gone uuid; dev uuid; dev_email text;
+begin
+  select id into gone from auth.users where lower(email) = old.email limit 1;
+  select u.id, t.email into dev, dev_email from teachers t join auth.users u on lower(u.email) = t.email
+   where t.is_admin and t.email <> old.email order by t.created_at limit 1;
+  if gone is null or dev is null then return old; end if;
+  delete from lesson_collaborators c using lessons l where c.lesson_id = l.id and l.owner = gone and c.email = dev_email;
+  update lessons set owner = dev, folder_id = null where owner = gone;
+  return old;
+end $$;
+drop trigger if exists teachers_hand_over on teachers;
+create trigger teachers_hand_over before delete on teachers for each row execute function teachers_hand_over();
+
+-- 선생님 ⇄ 관찰자: 직위만 바꾼다(수업·폴더는 그대로). 개발자만
+create or replace function admin_set_observer(p_email text, p_on boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  update teachers set is_observer = p_on where email = lower(trim(p_email)) and not is_admin;
+  if not found then return jsonb_build_object('error', 'no_teacher'); end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function admin_set_observer(text, boolean) from public;
+grant execute on function admin_set_observer(text, boolean) to authenticated;
