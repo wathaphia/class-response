@@ -102,7 +102,6 @@ function watchedFetch(input, init) {
 const CREDIT = { name: "이효송", year: 2026 };
 
 const KIND_NAME = { slide: "질문", survey: "질문", quiz: "퀴즈", sim: "시뮬레이션" };   // 슬라이드 질문·설문은 이제 「질문」 하나로 부른다
-const TYPE_NAME = { choice: "하나 고르기", multi: "여러 개 고르기", short: "짧은 글", long: "긴 글" };
 
 // 화면 요소 만들기. 학생이 쓴 글은 늘 글자(텍스트)로만 넣는다(innerHTML을 쓰지 않음).
 function h(tag, attrs, ...kids) {
