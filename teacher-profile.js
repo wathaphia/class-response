@@ -55,6 +55,9 @@ function paintProfile() {
     h("label", {}, "새 비밀번호 (6자 이상)", pw1), h("label", {}, "한 번 더", pw2),
     h("button", { class: "primary", type: "submit" }, "비밀번호 바꾸기"), pwMsg) : "";
   if (recovery) requestAnimationFrame(() => { recovery.scrollIntoView({ block: "center" }); pw1.focus(); });
+  // 오늘 재설정 메일을 몇 번 썼는지(하루 3번)
+  const resetUsed = h("span", { class: "muted small" });
+  sb.rpc("my_reset_quota").then(({ data }) => { if (data) resetUsed.textContent = "오늘 3번 중 " + data.used + "번 사용"; });
   side.replaceChildren(
     recovery,
     h("section", { class: "card stack profile-card" },
@@ -75,13 +78,12 @@ function paintProfile() {
         h("button", {
           class: "ghost", type: "button",
           async onclick(e) {
+            const btn = e.currentTarget;
             if (!confirm(email + " 로 비밀번호 재설정 메일을 보낼까요?")) return;
-            e.currentTarget.disabled = true;
-            msg.textContent = "재설정 메일을 보내는 중…";
-            const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: new URL(location.pathname, location.origin).href });
-            msg.textContent = error ? "보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다).";
+            resetUsed.textContent = "";
+            await sendResetMail(email, btn, msg);
           },
-        }, "비밀번호 재설정")),
+        }, "비밀번호 재설정"), resetUsed),
       msg),
     h("section", { class: "card stack" },
       h("div", { class: "row between" }, h("h3", {}, "탭 꾸미기"),

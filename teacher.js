@@ -117,6 +117,29 @@ async function init() {
 
 // 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호 → 「이메일 인증」(확인 메일) → 메일의 링크를 누른 뒤 「가입하기」로 들어온다.
 // 교사 화면은 teachers 표에 있는 이메일(선생님 추가·승격된 학생)만 쓸 수 있다.
+// 비밀번호 재설정 메일: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 서버(claim_password_reset)가 세고 쓴 횟수를 돌려준다.
+const RESET_COOLDOWN = 3;
+async function sendResetMail(address, btn, msgEl) {
+  const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+  btn.disabled = true;
+  try {
+    const { data: q, error: qErr } = await sb.rpc("claim_password_reset", { p_email: address });
+    if (qErr) { msgEl.textContent = "재설정 메일을 보내지 못했습니다: " + qErr.message; return; }
+    // 연결된 계정이 없으면 메일을 보내지 않고 가운데 알림만(메일 한도 보호)
+    if (q.reason === "no_account") { msgEl.textContent = ""; centerNote("연결된 계정이 없습니다."); return; }
+    const count = "오늘 3번 중 " + q.used + "번 사용";
+    if (q.reason === "limit") { msgEl.textContent = "오늘은 더 보낼 수 없습니다(" + count + "). 내일 다시 해 주세요."; return; }
+    if (q.reason === "cooldown") { msgEl.textContent = "3초 뒤에 다시 눌러 주세요(" + count + ")."; return; }
+    msgEl.textContent = "재설정 메일을 보내는 중…";
+    const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: new URL(location.pathname, location.origin).href });
+    msgEl.textContent = (error ? "재설정 메일을 보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다).") + " · " + count;
+  } finally {
+    for (let s = RESET_COOLDOWN; s > 0; s--) { btn.textContent = label + " (" + s + "초)"; await new Promise((r) => setTimeout(r, 1000)); }
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+}
+
 function showLogin(signup) {
   const here = new URL(location.pathname, location.origin).href;
   const email = h("input", { type: "email", autocomplete: "username", required: true });
@@ -169,6 +192,7 @@ function showLogin(signup) {
   }, "이메일 인증") : null;
   const resetIn = h("input", { type: "email", autocomplete: "username", placeholder: "가입한 이메일" });
   const resetMsg = h("p", { class: "msg" });
+  const resetBtn = h("button", { class: "ghost", type: "submit" }, "비밀번호 재설정 이메일 보내기");
   const resetBox = h("form", {
     class: "card stack", hidden: true,
     async onsubmit(e) {
@@ -176,14 +200,9 @@ function showLogin(signup) {
       const address = resetIn.value.trim();
       if (!address) { resetMsg.textContent = "이메일을 입력해 주세요."; resetIn.focus(); return; }
       resetMsg.textContent = "";
-      // 연결된 계정이 없으면 메일을 보내지 않고 가운데 알림만(메일 한도 보호)
-      const { data: has, error: hasErr } = await sb.rpc("email_has_account", { p_email: address });
-      if (!hasErr && !has) { centerNote("연결된 계정이 없습니다."); resetIn.focus(); return; }
-      resetMsg.textContent = "재설정 메일을 보내는 중…";
-      const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: here });
-      resetMsg.textContent = error ? "재설정 메일을 보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";
+      await sendResetMail(address, resetBtn, resetMsg);
     },
-  }, h("label", {}, "이메일", resetIn), h("button", { class: "ghost", type: "submit" }, "비밀번호 재설정 이메일 보내기"), resetMsg);
+  }, h("label", {}, "이메일", resetIn), resetBtn, h("p", { class: "muted small" }, "한 사람이 하루 3번까지 보낼 수 있습니다."), resetMsg);
   app.replaceChildren(h("main", { class: "narrow" },
     h("header", { class: "intro" }, h("p", { class: "eyebrow" }, "교사용"), h("h1", {}, signup ? "가입하기" : "로그인")),
     h("div", { class: "seg login-seg", role: "tablist" },
