@@ -579,6 +579,19 @@ body.desk-locked { overflow: hidden; }
 .lesson-card.picked { border-color: var(--accent, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 .lesson-card.dragging { opacity: .45; }
 .lesson-card .tag { justify-self: start; }
+/* 학생용 기본 수업 별(첫 슬라이드 오른쪽 위). 크기·위치는 그대로 두고 색만 바꿔 밀림이 없게 */
+.thumb-box { position: relative; }
+.star-btn { position: absolute; top: .65rem; right: .35rem; width: 32px; height: 32px; min-height: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .78); cursor: pointer; transition: background-color .15s, box-shadow .15s; }
+.star-btn svg { width: 22px; height: 22px; fill: none; stroke: #8a93a3; stroke-width: 1.8; stroke-linejoin: round; transition: fill .15s, stroke .15s; }
+.star-btn:hover { background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .22); }
+.star-btn:hover svg { stroke: #e0a100; fill: #fff3c4; }
+.star-btn.on svg { fill: #facc15; stroke: #e0a100; }
+.star-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.star-btn, .star-btn:active { transform: none; }
+.student-default .lesson-list { padding: 0; min-height: 0; }
+/* 저장/저장됨: 글자가 바뀌어도 너비가 같고, 마우스·누름에 위치가 움직이지 않게 */
+.default-save { min-width: 6.5rem; }
+.default-save:hover:not(:disabled), .default-save:active:not(:disabled) { transform: none; }
 .drop-on { outline: 2px dashed rgba(37, 99, 235, .7); outline-offset: 2px; background: #f2f6ff; }
 .picked-bar { padding: .6rem .8rem; border-radius: 10px; background: #f2f6ff; }
 .manage .folder-add { display: flex; flex-wrap: nowrap; align-items: center; gap: .5rem; }
@@ -641,6 +654,8 @@ body.desk-locked { overflow: hidden; }
   animation: center-note 1.8s ease forwards; }
 .center-note.long { max-width: min(30rem, calc(100vw - 32px)); text-align: center; animation-duration: 3.2s; }
 .option.remember { min-height: 0; border: 0; padding: 0; gap: .45rem; color: var(--muted, #5b6474); font-size: .95rem; }
+/* 체크해도 .option:has(input:checked) 의 2px 테두리가 붙어 글자가 밀리지 않게 */
+.option.remember:has(input:checked) { border: 0; background: none; }
 @keyframes center-note { 0% { opacity: 0; transform: translate(-50%, -40%); } 15%, 60% { opacity: 1; transform: translate(-50%, -50%); } 100% { opacity: 0; transform: translate(-50%, -50%); } }
 @media (prefers-reduced-motion: reduce) { .ring-bar, .sync-icon.spin svg { transition: none; animation: none; } }
 

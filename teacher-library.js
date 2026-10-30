@@ -5,12 +5,22 @@
 // 역대 모든 수업을 폴더로 정리한다. 수업 카드를 끌어 폴더에 넣거나 순서를 바꾸고, 골라서 불러오거나 슬라이드를 PDF로 받는다.
 let folders = [];
 let pickedId = null;
+// 학생용 기본 수업(개발자만): defaultSaved = 저장된 수업 id(undefined 면 아직 안 읽음), defaultPick = 별로 고른(저장 전) 수업 id
+let defaultSaved;
+let defaultPick = null;
 
 async function drawManage() {
   const { data, error } = await sb.from("lesson_folders").select("*").eq("owner", me.id).order("sort").order("created_at");
   const pane = main && main.querySelector(".manage-pane");
   if (tab !== "library" || !pane) return;
   folders = error ? [] : data;
+  const admin = !!(profile && profile.admin);
+  if (admin && defaultSaved === undefined) {
+    const d = await sb.from("student_default").select("lesson_id").maybeSingle();
+    defaultSaved = defaultPick = (d.data && d.data.lesson_id) || null;
+    if (tab !== "library" || !main.querySelector(".manage-pane")) return;
+  }
+  const known = (id) => (lessons.some((l) => l.id === id) ? id : null);   // 지워진 수업은 고른 것이 없는 것으로
   const msg = h("p", { class: "msg" });
   // 다른 선생님 수업(공유받은 것, 개발자는 모든 선생님 것)은 내 폴더에 넣지 않고 따로 묶는다(끌어 옮기기 없음)
   const mine = (l) => l.owner === me.id;
@@ -59,9 +69,22 @@ async function drawManage() {
     await loadLesson();   // 위쪽 수업 고르기 칸과 다른 탭이 이 수업으로 바뀐다
     flash("「" + l.title + "」 수업을 불러왔습니다.");
   };
-  const card = (l) => {
+  // 첫 슬라이드 오른쪽 위 별: 누르면 학생용 기본 수업으로 고른다(다시 누르면 해제). 저장은 맨 위 칸의 「저장」.
+  const star = (l) => {
+    const on = known(defaultPick) === l.id;
+    const b = h("button", {
+      class: "star-btn" + (on ? " on" : ""), type: "button", draggable: "false", "aria-pressed": String(on),
+      title: on ? "학생용 기본 수업에서 빼기" : "학생용 기본 수업으로 고르기", "aria-label": on ? "학생용 기본 수업에서 빼기" : "학생용 기본 수업으로 고르기",
+      onclick(e) { e.stopPropagation(); defaultPick = on ? null : l.id; drawManage(); },
+      ondblclick(e) { e.stopPropagation(); },
+      onkeydown(e) { e.stopPropagation(); },
+    });
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.83 5.73 6.32.92-4.57 4.46 1.08 6.3L12 17.24l-5.66 2.97 1.08-6.3L2.85 9.45l6.32-.92z"/></svg>';
+    return b;
+  };
+  const card = (l, top) => {
     const el = h("article", {
-      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: mine(l) ? "true" : "false", tabindex: "0",
+      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: mine(l) && !top ? "true" : "false", tabindex: "0",
       onclick() { pickedId = l.id; drawManage(); },
       ondblclick() { pickedId = l.id; loadPicked(); },
       onkeydown(e) { if (e.key === "Enter") { pickedId = l.id; drawManage(); } },
@@ -73,10 +96,12 @@ async function drawManage() {
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
       mine(l) ? null : h("span", { class: "tag info" }, "공유받음"),
       // 첫 슬라이드(끌기를 방해하지 않게 그림 자체는 끌 수 없게)
-      l.slide_count && !isPptx(l)
-        ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
-        : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"));
-    if (mine(l)) dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
+      h("div", { class: "thumb-box" },
+        l.slide_count && !isPptx(l)
+          ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
+          : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"),
+        admin ? star(l) : null));
+    if (mine(l) && !top) dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
     return el;
   };
 
@@ -119,7 +144,23 @@ async function drawManage() {
   const p = picked();
   const moveSel = p && mine(p) ? h("select", { "aria-label": "옮길 폴더", async onchange() { await moveLesson(p.id, moveSel.value || null, null); } },
     groups.map((g) => h("option", { value: g.id || "", selected: (folders.some((f) => f.id === p.folder_id) ? p.folder_id : null) === g.id }, g.name))) : null;
+  // 맨 위 칸: 지금 고른 학생용 기본 수업(아래 카드와 같은 모양) + 저장/저장됨
+  const pickNow = known(defaultPick), changed = pickNow !== known(defaultSaved);
+  const defaultBox = admin ? h("section", { class: "card stack student-default" },
+    h("div", { class: "row between wrap" },
+      h("div", {}, h("h2", {}, "학생용 기본 수업"),
+        h("p", { class: "muted small" }, "학생용 페이지를 주소(?c=) 없이 열면 이 수업 코드가 미리 들어갑니다. 아래 카드 첫 슬라이드의 ☆를 눌러 하나만 고를 수 있습니다.")),
+      h("button", { class: "primary save-btn default-save", type: "button", disabled: !changed, async onclick(e) {
+        const btn = e.currentTarget; btn.disabled = true; btn.textContent = "저장 중…";
+        const r = await sb.rpc("set_default_lesson", { p_lesson: pickNow });
+        if (r.error) { btn.disabled = false; btn.textContent = "저장"; return alert("저장하지 못했습니다: " + r.error.message); }
+        defaultSaved = pickNow;
+        drawManage();
+      } }, changed ? "저장" : "저장됨")),
+    pickNow ? h("div", { class: "lesson-list" }, card(lessons.find((l) => l.id === pickNow), true))
+      : h("p", { class: "muted small default-empty" }, "고른 수업이 없습니다.")) : null;
   pane.replaceChildren(h("div", { class: "stack manage" },
+    defaultBox,
     h("section", { class: "card stack" },
       h("div", { class: "row between wrap" },
         h("h2", {}, "전체 수업 " + lessons.length + "개"),
