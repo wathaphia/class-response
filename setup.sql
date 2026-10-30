@@ -129,9 +129,17 @@ alter table students   enable row level security;
 alter table responses  enable row level security;
 alter table lesson_students enable row level security;
 
+-- 메일 인증을 마친 계정의 이메일(인증 전이면 null → 교사·개발자 아님)
+create or replace function verified_email() returns text
+language sql stable security definer set search_path = public, auth as $$
+  select lower(email) from auth.users where id = auth.uid() and email_confirmed_at is not null
+$$;
+revoke all on function verified_email() from public;
+grant execute on function verified_email() to authenticated;
+
 create or replace function is_teacher() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from teachers where email = lower(auth.jwt() ->> 'email'))
+  select exists (select 1 from teachers where email = verified_email())
 $$;
 
 drop policy if exists teacher_all on lessons;
@@ -167,7 +175,7 @@ update teachers set code = new_teacher_code() where code is null;
 
 create or replace function is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from teachers where email = lower(auth.jwt() ->> 'email') and is_admin)
+  select exists (select 1 from teachers where email = verified_email() and is_admin)
 $$;
 
 -- 공동 작업자: 수업 주인(또는 개발자)이 다른 교사(ID로 찾음)에게 수업 하나씩 권한을 나눈다.
