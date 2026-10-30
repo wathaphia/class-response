@@ -173,6 +173,10 @@ function showLogin(signup) {
       e.preventDefault();
       const address = resetIn.value.trim();
       if (!address) { resetMsg.textContent = "이메일을 입력해 주세요."; resetIn.focus(); return; }
+      resetMsg.textContent = "";
+      // 연결된 계정이 없으면 메일을 보내지 않고 가운데 알림만(메일 한도 보호)
+      const { data: has, error: hasErr } = await sb.rpc("email_has_account", { p_email: address });
+      if (!hasErr && !has) { centerNote("연결된 계정이 없습니다."); resetIn.focus(); return; }
       resetMsg.textContent = "재설정 메일을 보내는 중…";
       const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: here });
       resetMsg.textContent = error ? "재설정 메일을 보내지 못했습니다: " + error.message : "메일함에서 비밀번호 재설정 링크를 확인해 주세요.";

@@ -373,6 +373,8 @@ function supabaseView() {
     { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
     { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
     { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
+    { label: "Gmail 인증 메일", used: d.mail_day, limit: 100, period: "최근 24시간", missing: d.mail_day == null ? "setup.sql 적용 필요" : null,
+      hint: "비밀번호 재설정·가입 확인 메일을 개발자 Gmail(Apps Script)로 보냄 · 하루 100통" },
     { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
   ];
   const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 3 * 3600000);
