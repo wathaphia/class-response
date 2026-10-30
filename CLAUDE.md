@@ -25,7 +25,9 @@
 | `teacher-build.js` | 「자료 추가」 활동 목록(옮기기·끌기, `syncRows`, 「슬라이드와 함께 보기」 `layoutBySlide` cra-build-slides: 카드 절반 크기, 얹은 시뮬레이션은 작은 슬라이드 위에, 카드의 재생 버튼을 따름 `paused`), 시뮬레이션 편집기, 작성기(`composeEditor`), 저장 상태(`editBase`) | `drawBuild` `editor` `toCompose` | sim-over |
 | `teacher-students.js` | 「학생 관리」 승격 표(`promotedCard`, `promote_student` `demote_student`, 개발자만), 학생 표, 화면 크게 보기(교사 전용 채널 `:t`; PC 화면 전체 WebRTC, 휴대폰은 화면 복사 + 시뮬레이션 WebRTC), 일괄 미리보기 | `drawStudents` `promoteStudent` `watchStudentScreen` `startGrid` `simRtc` `deskAnswer` | promote, live-* |
 | `teacher-settings.js` | 「슬라이드 편집」, 올리기(PPTX/PDF→JPG 1280/1024), 저장소(R2 `r2Call`/Supabase), CSV | `drawSettings` `uploadSlides` `slideHome` `downloadCSV` | manage |
-| `student.js` | 입장(수업 코드 + 학번(번호) + 이름, `student_join_no` RPC: 같은 학번+이름이면 같은 학생, 이 수업에 이름만으로 왔던 학생은 학번을 채움), `poll`(`student_state` RPC, `nudge`→`pollSoon`), 카드, 화면 보기 동의·전송(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk`→`offerDesk`, 공유 중엔 화면 복사 안 보냄), 공유 전 가림막 `renderDeskGate`, Presence `desk`·`multi` | `start` `render` `cardFor` `buildForm` | live-* |
+| `student.js` | 입장(수업 코드 + 학번(번호) + 이름, `student_join_no` RPC: 같은 학번+이름이면 같은 학생, 이 수업에 이름만으로 왔던 학생은 학번을 채움, 「자동 로그인」은 `loginStore`), `poll`(`student_state` RPC, `nudge`→`pollSoon`), 슬라이드·시뮬레이션·카드 | `start` `render` `cardFor` `buildForm` | login, live-* |
+| `student-screen.js` | 학생 화면 보기(student.js 보다 먼저 불러옴): 채널 `ensureScreenChannel`, 동의 `monitorChoice`, 화면 복사(`startMirror` `sendScreenData`), PC 전체 화면 공유(`startDesk`→`offerDesk`, 공유 중엔 화면 복사 안 보냄), 공유 전 가림막 `renderDeskGate`, Presence `desk`·`multi` | `renderScreenNotice` `handleScreenSignal` | live-* |
+| `patch-notes.js` | 패치 노트 목록(맨 위에 `[PR번호, "날짜", "내용"]` 한 줄씩 추가) | | |
 | `app.css` | 모든 모양 | | |
 | `setup.sql` | 표·보안 규칙(`can_lesson` `owns_lesson`: 주인·공동 작업자·개발자)·RPC(`student_join_no`(예전 `student_join` 은 옛 화면용으로 남김) `student_state` `resource_usage` `my_profile`, `add_collaborator` 개발자만), `bug_reports`, 인증 메일 기록 `mail_log`(→ resource_usage `mail_day`), 승격 학생 가입 요청 `teacher_requests`(승격 이메일 비우면 `pending-…@promoted.invalid`, `isPendingEmail`). `supabase-sql.ps1` 로 적용 | | |
 
