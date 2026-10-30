@@ -102,7 +102,7 @@ function showCodeOnly(notice) {
   const codeIn = h("input", { type: "text", value: params.get("c") ? "" : code, autocomplete: "off", maxlength: 20, placeholder: "예: K7P2Q", autocapitalize: "characters", required: true });
   const msg = h("p", { class: "msg" }, notice || "");
   app.replaceChildren(h("main", { class: "narrow" },
-    h("header", { class: "intro" }, h("p", { class: "eyebrow" }, me ? me + " 학생" : "수업 응답"), h("h1", {}, "수업 코드 입력")),
+    h("header", { class: "intro" }, h("p", { class: "eyebrow" }, me ? me + " 학생" : "학생용"), h("h1", {}, "수업 코드 입력")),
     h("form", {
       class: "card stack",
       onsubmit(e) {
@@ -111,7 +111,7 @@ function showCodeOnly(notice) {
         history.replaceState(null, "", "?c=" + encodeURIComponent(codeIn.value.trim()));
         enterLesson(codeIn.value);
       },
-    }, h("label", {}, "수업 코드", codeIn), h("button", { class: "primary big", type: "submit" }, "입장하기"), msg),
+    }, h("label", {}, "수업 코드", codeIn), h("button", { class: "primary big", type: "submit" }, "수업 입장하기"), msg),
     h("p", { class: "center" }, h("button", { class: "link", type: "button", onclick() { logout(""); } }, me ? me + " 학생이 아니면: 다른 학생으로 들어가기" : "다른 학생으로 들어가기"))));
   codeIn.focus();
 }
@@ -138,7 +138,7 @@ function showEntry(notice) {
   const codeLabel = h("label", {}, "수업 코드", codeIn);
   let newAccount = false;
   const msg = h("p", { class: "msg" }, notice || "");
-  const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
+  const btn = h("button", { class: "primary big", type: "submit" }, "수업 입장하기");
   const remember = rememberBox("student");
 
   // 코드·학번·이름을 바꾸면 동의 단계를 처음부터 다시
@@ -192,8 +192,8 @@ function showEntry(notice) {
 
   app.replaceChildren(h("main", { class: "narrow" },
     h("header", { class: "intro" },
-      h("p", { class: "eyebrow" }, fromLink ? "수업 코드 " + code : "수업 응답"),
-      h("h1", {}, "입장하기")),
+      h("p", { class: "eyebrow" }, fromLink ? "수업 코드 " + code : "학생용"),
+      h("h1", {}, "수업 입장하기")),
     form));
   (fromLink ? noIn : codeIn).focus();
 }

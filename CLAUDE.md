@@ -35,4 +35,6 @@
 - 매 요청마다 나중에 최적화·코드 분리·보안 강화가 쉽게 짠다: 한 가지 일은 한 함수로(화면 그리기와 서버 요청을 섞지 않기), 둘 이상이 쓰는 것은 `common.js` 도우미로, 저장소 키·RPC 이름은 한 곳에 상수로, 로그인 정보는 `loginStore` 로만 다룬다.
 - JS/CSS를 바꾸면 `node C:\Users\neptu\class-tools\bump-version.js <이름> [작업트리]` (모든 `?v=` 변경).
 - 학생 표는 열 단위 권한: 교사도 `token`·`pin_hash` 를 못 읽는다(`select` 에 넣지 말 것). 수업 주인(`owner`)은 개발자만 바꾼다.
+- 기타 관리(`teacher-etc.js`)는 패치마다 깨지기 쉬움: 원·표를 지우지 말고 옮기기만, 고친 뒤 `etc` 시나리오(원 개수·자세히·표 위치) 꼭 통과. 묶음마다 try/catch(`paintEtc` 의 `section`)로 한 곳 실패가 탭 전체를 지우지 않게.
+- 패치 노트: PR마다 `patch-notes.js` 맨 위에 [번호, 날, 글, 성격] 한 줄 + 그날 `PATCH_DAYS` 요약 고치기.
 - 새 교사 탭 파일은 `teacher.html` 불러오기 순서·이 표·`teacher.js` 머리 주석에 함께 적는다.
