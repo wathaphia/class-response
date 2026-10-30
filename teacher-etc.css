@@ -1,0 +1,78 @@
+/* 「기타 관리」 탭(teacher-etc.js) 전용 꾸밈. 공통 꼬리표(.tag.bad)·동기화 아이콘 회전(.sync-icon)은 app.css */
+
+/* 기타 관리: 바깥 서비스 사용량 원 띠 그래프(색 = 여유 초록 / 주의 주황 / 위험 빨강, 글자 상태 표시와 함께) */
+.usage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .75rem; }
+.usage-item { margin: 0; display: grid; align-content: start; justify-items: center; gap: .4rem; padding: .8rem .6rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: center; }
+.usage-item figcaption { display: grid; justify-items: center; gap: .15rem; }
+.usage-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem; margin-top: .15rem; }
+.ring svg { display: block; width: 112px; height: 112px; }
+.ring circle { fill: none; stroke-width: 10; }
+.ring-track { stroke: #e8ebf1; }
+.ring-bar { stroke-linecap: round; transition: stroke-dasharray .6s ease; }
+.ring-bar.ok { stroke: #0ca30c; }
+.ring-bar.warn { stroke: #fab219; }
+.ring-bar.bad { stroke: #d03b3b; }
+.ring-bar.great { stroke: #2f7de1; }
+.tag.great { color: #1d5fb8; background: #e6f0fd; }
+/* 원을 누르면 고름 → 아래에 자세한 정보. 소진 주의는 빨간 테두리 + 표식, 맨 위 요약(.risk-card)에 복제 */
+.usage-item { position: relative; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.usage-item:hover { border-color: var(--accent); }
+.usage-item:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 1px; }
+.usage-item.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.usage-item.risky { border-color: #f1b0aa; background: #fffafa; }
+.risk-mark { position: absolute; top: .4rem; right: .45rem; font-size: .72rem; font-weight: 700; color: var(--bad); }
+.risk-card { border: 2px solid #f1b0aa; background: #fff8f7; }
+.risk-none { margin: 0; color: #1d5fb8; }
+.usage-detail { display: grid; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--accent); border-radius: 12px; background: #fff; min-width: 0; }
+.usage-detail h4 { margin: 0; }
+.usage-detail button.small { min-height: 32px; padding: 0 .8rem; font-size: .85rem; }
+.usage-facts { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 0; font-size: .92rem; }
+.usage-facts dt { color: var(--muted); }
+.usage-facts dd { margin: 0; font-weight: 600; }
+/* 자세히: 왼쪽 글, 오른쪽 날짜별 그래프·표(줄여서). 좁으면 위아래 */
+.usage-detail-text { display: grid; gap: .6rem; align-content: start; min-width: 0; }
+.usage-detail.has-side { grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 1rem; align-items: start; }
+.usage-detail-side { min-width: 0; display: grid; gap: .6rem; align-content: start; }
+.usage-detail-side .usage-block h4 { font-size: .85rem; }
+.usage-detail-side .eg-chart svg { min-width: 0; }
+.usage-detail-side .eg-figure { padding: .4rem .5rem; }
+.usage-detail-side .usage-table { max-height: 220px; overflow: auto; }
+.usage-detail-side .usage-table table { font-size: .8rem; }
+.usage-detail-side .usage-table th, .usage-detail-side .usage-table td { padding: .25rem .5rem; }
+@media (max-width: 760px) { .usage-detail.has-side { grid-template-columns: minmax(0, 1fr); } }
+/* 기간 꼬리표: 초기화 단위가 같으면 같은 연한 색(하루 이하 · 한 달 · 누적 · 실시간) */
+.tag.period-day { color: #1f6f70; background: #e3f4f4; }
+.tag.period-month { color: #5b3fa0; background: #f0eafb; }
+.tag.period-acc { color: #6b5b3e; background: #f2efe8; }
+.tag.period-live { color: #5f6420; background: #f4f5dc; }
+.ring text { fill: var(--ink); font-size: 19px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.sync-btn { display: inline-flex; align-items: center; gap: .4rem; }
+.usage-item.unknown .ring text { fill: var(--muted); }
+.usage-tags.start { justify-content: flex-start; align-items: center; }
+.usage-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; align-items: start; }
+.usage-block { display: grid; gap: .4rem; min-width: 0; }
+.usage-block h4 { margin: 0; font-size: .92rem; }
+.usage-block.wide { grid-column: 1 / -1; }
+/* 날마다 전송량 막대 그래프: 두 그래프(캐시 전송량 · 전송량)를 나란히, 좁은 화면에서는 위아래로 */
+.eg-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: .75rem; }
+.eg-figure { margin: 0; display: grid; gap: .3rem; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; min-width: 0; }
+.eg-scroll { overflow-x: auto; }
+.eg-chart svg { display: block; width: 100%; min-width: 420px; height: auto; }
+.eg-grid { stroke: #eef1f6; stroke-width: 1; }
+.eg-axis { stroke: var(--field); stroke-width: 1; }
+.eg-tick, .eg-day-label, .eg-budget-label, .eg-over { fill: var(--muted); font-size: 11px; }
+.eg-tick { text-anchor: end; dominant-baseline: central; }
+.eg-day-label, .eg-over { text-anchor: middle; }
+.eg-day-label.now { fill: var(--ink); font-weight: 700; }
+.eg-over { fill: var(--ink); font-weight: 700; }
+.eg-budget { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+/* 막대와 겹쳐도 읽히게 흰 테두리 */
+.eg-budget-label, .eg-over, .eg-today { stroke: #fff; stroke-width: 3px; stroke-linejoin: round; paint-order: stroke; }
+.eg-hit { fill: transparent; }
+.eg-bar.today { fill: #f59e0b; }
+.eg-today { font-size: 10px; text-anchor: middle; fill: var(--ink, #111); font-weight: 600; }
+.eg-bar { fill: var(--accent); }
+.eg-day:hover .eg-hit { fill: var(--accent-soft); }
+.eg-day:hover .eg-bar { fill: var(--accent-ink); }
+.usage-table table { font-size: .88rem; }
+.usage-table th, .usage-table td { padding: .4rem .7rem; white-space: nowrap; }

@@ -4,9 +4,9 @@
 // ---------- 기타 관리 ----------
 // 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프와 표로 보여 준다.
 // 받는 곳은 셋: Supabase 함수 resource_usage(DB 안 숫자), Worker /usage(Supabase 관리 API·Cloudflare 숫자), GitHub 공개 API.
-// 탭을 열면 5분 넘게 지난 것만, 「동기화」를 누르면 모두 다시 받는다. 탭을 열어 두면 DB 안 숫자(접속 중 학생 등)만 30초마다 새로 받는다
-// (창이 가려져 있으면 받지 않고, 다시 보일 때 받는다)
-// (Worker는 KV 목록 읽기 하루 1,000번, GitHub는 이 PC에서 시간당 60번 한도라 저절로 다시 받지 않는다).
+// 모든 숫자는 세 출처(DB·Worker·GitHub)를 한꺼번에 받는 syncUsage 하나로만 새로 받는다. 탭을 열어 두면 30초마다 살펴
+// 마지막으로 받은 지 1시간 지났으면 모두 다시 받고, 받지 못한 출처만 1분 뒤 다시 받는다(창이 가려져 있으면 쉬고, 다시 보일 때 살핀다).
+// 「동기화」는 10분에 한 번(받지 못한 출처가 있으면 1분 뒤부터) 누를 수 있다. 꾸밈은 teacher-etc.css.
 const GITHUB_REPO = "wathaphia/class-response";
 const MB = 1024 * 1024, GB = 1024 * MB;
 // 기타 관리의 시각·날짜·달은 모두 한국 시간(UTC+9). kstIso(t)는 그 시각의 한국 벽시계를 ISO 꼴로(끝의 Z는 무시)
@@ -210,7 +210,7 @@ const histSave = () => { try { localStorage.setItem("cra-usage-hist", JSON.strin
 const USAGE_LEVEL = { great: "아주 여유", ok: "여유", warn: "주의", bad: "위험" };
 const USAGE_MARK = { great: "◆ ", ok: "● ", warn: "▲ ", bad: "■ " };
 let usageSel = null;   // { id, where }
-// 초기화 단위 묶음: 하루 이하 → 한 달 → 누적 → 실시간 순서로 놓고, 묶음마다 기간 꼬리표 색을 달리한다(app.css .tag.period-*)
+// 초기화 단위 묶음: 하루 이하 → 한 달 → 누적 → 실시간 순서로 놓고, 묶음마다 기간 꼬리표 색을 달리한다(teacher-etc.css .tag.period-*)
 const PERIOD_ORDER = ["day", "month", "acc", "live"];
 const periodGroup = (p) => p === "이번 달" || p === "한 달" ? "month" : p === "누적" ? "acc" : p === "실시간" ? "live" : "day";
 function usageRing(it, where = "sec") {
