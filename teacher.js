@@ -1,6 +1,6 @@
 // 교사 화면(버전 2): 로그인(로그인 · 가입하기) → 수업 고르기 → 위 줄 탭 [접속 QR] [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [버그 제보] (「수업용 화면 띄우기」 창은 「수업 진행」 아래 줄)
 // 오른쪽 위 「수업 모드/편집 모드」 스위치(지금 모드 이름만)로 모드를 바꾸면 그 모드에 보이게 정한 탭만 나온다(SHOW_DEFAULT, 탭 꾸미기에서 바꿈).
-// 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] (+ 개발자만 [전체 선생님 및 학생] [기타 관리]).
+// 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] (+ 개발자만 [전체 선생님 및 학생] [기타 관리] [패치 노트]).
 // 탭 이름·순서·두 줄 자리·모드별 보이기는 프로필의 「탭 꾸미기」(startTabEdit: 탭 이름 바로 고치기, 끌어 옮기기)에서 바꾸고 교사 계정(user_metadata.tabs)에 저장한다.
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
@@ -8,7 +8,9 @@
 //   teacher.js          공유 상태 · 시작 · 로그인 · 데이터 읽기/쓰기 · 탭 틀(이 파일)
 //   teacher-library.js  전체 수업(수업 삭제 포함) · 슬라이드 PDF
 //   teacher-profile.js  프로필 · 전체 수업 틀 · (개발자) 전체 선생님 및 학생(선생님 관리 · 공동 작업자 · 모든 학생)
-//   teacher-etc.js      기타 관리(사용량) · 버그 제보
+//   teacher-etc.js      기타 관리(사용량)
+//   teacher-patch.js    패치 노트(시기별 타임라인 · 날짜별 상자, 기록은 patch-notes.js)
+//   teacher-bugs.js     버그 제보
 //   teacher-run.js      수업 진행 · 실시간 접속 표시
 //   teacher-build.js    자료 추가 · 설명 및 질문 작성기
 //   teacher-students.js 학생 관리 · 학생 화면 보기 · 일괄 미리보기
@@ -27,12 +29,12 @@ let editMode = localStorage.getItem("cra-edit") === "1";   // 수업 모드 / �
 // 탭 두 줄: 위 줄(main) + 「설정」을 누르면 나오는 아래 줄(sub). 개발자 전용 탭(ADMIN_TABS)은 다른 선생님에게는 아예 없다.
 // 탭 꾸미기: { main: [키…], sub: [키…], names: { 키: 이름 }, show: { 키: { class, edit } } }. 교사 계정(user_metadata.tabs)에 저장한다
 const TAB_DEFAULTS = [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"], ["build", "자료 추가"], ["settings", "슬라이드 편집"], ["bugs", "버그 제보"],
-  ["profile", "프로필"], ["library", "전체 수업"], ["people", "전체 선생님 및 학생"], ["etc", "기타 관리"]];
+  ["profile", "프로필"], ["library", "전체 수업"], ["people", "전체 선생님 및 학생"], ["etc", "기타 관리"], ["patch", "패치 노트"]];
 const MAIN_TABS = ["join", "run", "students", "build", "settings", "bugs"];
-const SUB_TABS = ["profile", "library", "people", "etc"];
-const ADMIN_TABS = ["people", "etc"];
+const SUB_TABS = ["profile", "library", "people", "etc", "patch"];
+const ADMIN_TABS = ["people", "etc", "patch"];
 const SHOW_DEFAULT = { join: { class: true, edit: false }, build: { class: false, edit: true }, settings: { class: false, edit: true }, bugs: { class: false, edit: true } };
-const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "people", "etc"];   // 수업을 고르지 않아도 열리는 탭
+const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "people", "etc", "patch"];   // 수업을 고르지 않아도 열리는 탭
 let tabCustom = {};
 const isAdmin = () => !!(profile && profile.admin);
 const tabName = (k, c = tabCustom) => (c.names && c.names[k]) || (TAB_DEFAULTS.find(([x]) => x === k) || [, k])[1];
@@ -148,7 +150,7 @@ function showLogin(signup) {
         const { data: r, error: rpcError } = await sb.rpc("request_teacher_signup", { p_class_no: classNo.value, p_name: name.value, p_email: address });
         if (rpcError || r.error) {
           verify.disabled = false;
-          const why = { no_match: "학번 또는 이름을 다시 확인해 주세요", bad_email: "이메일 형식이 올바르지 않습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
+          const why = { pending: "이미 다른 이메일로 가입 요청이 들어가 있습니다. 개발자에게 알려 주세요", no_match: "학번 또는 이름을 다시 확인해 주세요", bad_email: "이메일 형식이 올바르지 않습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
           const text = rpcError ? "가입 요청을 보내지 못했습니다" : why[r.error] || r.error;
           centerNote(text);
           msg.textContent = rpcError ? text + ": " + rpcError.message : "";
@@ -255,12 +257,17 @@ async function loadLesson() {
   students = [];
   responses = [];
   editing = null;
-  if (lesson) {
-    localStorage.setItem("cra-lesson", lesson.id);
-    const { data, error } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
+  clearTimeout(timer);   // 앞 수업의 응답 새로 받기가 새 수업 값을 덮지 않게
+  respSince = null;
+  const L = lesson;
+  if (L) {
+    try { localStorage.setItem("cra-lesson", L.id); } catch {}
+    const { data, error } = await sb.from("activities").select("*").eq("lesson_id", L.id);
+    if (lesson !== L) return;   // 받는 사이 다른 수업을 골랐다(그쪽 loadLesson 이 그린다)
     if (error) return fatal(error);
     activities = sortActivities(data);
     await loadResponses();
+    if (lesson !== L) return;
     ensureTeacherScreenChannel().catch(() => {});   // 실시간 접속 표시를 위해 수업 채널에 미리 붙는다
     armClass();
   }
@@ -279,9 +286,11 @@ function sortActivities(list) {
 let respSince = null;
 let respTick = 0;
 async function loadResponses(changedOnly = false) {
-  if (!lesson) return;
+  const L = lesson;
+  if (!L) return;
   // 이 수업에 들어온 학생(학생 계정은 웹앱 전체에 하나, 수업마다 참여 기록이 따로 있다)
-  const st = await sb.rpc("teacher_students", { p_lesson: lesson.id });
+  const st = await sb.rpc("teacher_students", { p_lesson: L.id });
+  if (lesson !== L) return;   // 그사이 수업이 바뀌었으면 버린다
   if (st.error) return fatal(st.error);
   students = (st.data || []).sort((x, y) => x.class_no.localeCompare(y.class_no, "ko", { numeric: true }) || x.name.localeCompare(y.name, "ko"));
   const ids = activities.map((a) => a.id);
@@ -290,6 +299,7 @@ async function loadResponses(changedOnly = false) {
   let q = sb.from("responses").select("*").in("activity_id", ids);
   if (part) q = q.gte("updated_at", respSince);
   const rs = await q;
+  if (lesson !== L) return;
   if (rs.error) return fatal(rs.error);
   if (part) {
     const key = (r) => r.student_id + ":" + r.activity_id;
@@ -359,6 +369,7 @@ const TAB_ICONS = {
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   bugs: '<rect x="7" y="7" width="10" height="13" rx="5"/><path d="M12 11v9M9 4.5l1.5 2.5M15 4.5L13.5 7M3.5 13H7M17 13h3.5M4.5 8.5L7 10M19.5 8.5L17 10M4.5 18.5L7 16.5M19.5 18.5L17 16.5"/>',
   etc: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/>',
+  patch: '<path d="M7 3.5h7l4.5 4.5v12.5H7z"/><path d="M14 3.5V8h4.5M10 12.5h5.5M10 16h5.5"/>',
   profile: '<circle cx="12" cy="8.5" r="4"/><path d="M4 20.5a8 8 0 0 1 16 0"/>',
   library: '<path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   people: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="11" r="2.5"/><path d="M5.5 16.5a3.5 3.5 0 0 1 7 0M14.5 10h3.5M14.5 13.5h3.5"/>',
@@ -504,7 +515,7 @@ function draw() {
   app.classList.toggle("tab-editing", !!tabEdit);
   app.replaceChildren(topBar(), main);
   if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
-  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, library: drawLibrary, people: drawPeople, etc: drawEtc, bugs: drawBugs })[tab]();
+  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, library: drawLibrary, people: drawPeople, etc: drawEtc, patch: drawPatch, bugs: drawBugs })[tab]();
   schedule();
 }
 

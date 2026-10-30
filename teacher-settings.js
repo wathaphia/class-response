@@ -40,6 +40,7 @@ function drawSettings() {
     if (activities.length) {
       const r = await sb.from("activities").insert(activities.map((a) => ({
         lesson_id: copy.id, kind: a.kind, title: a.title, page: a.page, show_answer: a.show_answer, named: a.named, questions: a.questions, sort: a.sort,
+        page_to: a.page_to, html: a.html, sim_full: a.sim_full, sim_place: a.sim_place,
       })));
       if (r.error) alert("활동을 복사하지 못했습니다: " + r.error.message);
     }
@@ -47,12 +48,14 @@ function drawSettings() {
     flash("복제했습니다. 제목을 고쳐 주세요.");
   }
 
-  async function remove() {
+  async function remove(ev) {
     const typed = prompt("수업을 지우면 활동, 학생, 응답, 슬라이드가 모두 지워집니다.\n지우려면 수업 코드 「" + lesson.code + "」를 입력하세요.");
     if ((typed || "").trim().toUpperCase() !== lesson.code) return;
-    await removeSlideFiles(lesson);
-    const { error } = await sb.from("lessons").delete().eq("id", lesson.id);
-    if (error) return alert(error.message);
+    const L = lesson, btn = ev && ev.currentTarget;
+    if (btn) btn.disabled = true;
+    const { error } = await sb.from("lessons").delete().eq("id", L.id);
+    if (error) { if (btn) btn.disabled = false; return alert(error.message); }
+    await removeSlideFiles(L).catch(() => {});   // 그림은 수업이 지워진 뒤에(실패해도 수업 삭제는 끝난 것)
     await loadLessons(null);
   }
 
@@ -261,18 +264,18 @@ async function loadZipJs() {
   return window.JSZip;
 }
 
-async function uploadPptx(file, progress) {
+async function uploadPptx(file, progress, L = lesson) {
   if (file.size > 50 * 1024 * 1024) throw new Error("PPTX 파일은 50MB 이하로 올려 주세요.");
   const Zip = await loadZipJs();
   const zip = await Zip.loadAsync(file);
   const pages = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length;
   if (!pages || pages > 300) throw new Error("PPTX에서 슬라이드를 읽지 못했거나 300장을 넘습니다.");
-  const folder = slideFolder(lesson);
-  const old = { home: slideHome(lesson), shared: sharedSlides(lesson) };
+  const folder = slideFolder(L);
+  const old = { home: slideHome(L), shared: sharedSlides(L) };
   const store = await newSlideStore();
   progress(0, 1, "PPTX 올리는 중");
   await store.put(folder + "deck.pptx", file, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-  const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + store.base + folder + "deck.pptx?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", lesson.id);
+  const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + store.base + folder + "deck.pptx?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", L.id);
   if (updateError) throw updateError;
   // 교체 전 PDF/JPG가 남지 않게 이 수업 전용 폴더의 이미지 파일만 정리한다.
   await cleanSlideFolder(old, store, folder, (n) => !/^\d+s?\.jpg$/.test(n));
@@ -588,15 +591,16 @@ async function reorderSlides(order, status) {
 }
 
 async function uploadSlides(files, progress) {
+  const L = lesson;   // 올리는 동안 다른 수업을 골라도 처음 수업에 저장
   if (files.some((f) => /\.ppt$/i.test(f.name))) throw new Error("예전 PowerPoint 형식(PPT)은 올릴 수 없습니다. PowerPoint에서 파일 → 다른 이름으로 저장 → PPTX로 저장해 올리세요.");
   const pptx = files.filter((f) => /\.pptx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   if (pptx.length) {
     if (pptx.length !== 1 || files.length !== 1) throw new Error("PPTX는 한 번에 하나만 올릴 수 있습니다.");
-    return uploadPptx(pptx[0], progress);
+    return uploadPptx(pptx[0], progress, L);
   }
   const images = await toSlideImages(files, progress);
-  const folder = slideFolder(lesson);
-  const old = { home: slideHome(lesson), shared: sharedSlides(lesson) };
+  const folder = slideFolder(L);
+  const old = { home: slideHome(L), shared: sharedSlides(L) };
   const store = await newSlideStore();
   for (const [i, pair] of images.entries()) {
     progress(i, images.length, "올리는 중");
@@ -604,8 +608,8 @@ async function uploadSlides(files, progress) {
     await store.put(folder + (i + 1) + "s.jpg", pair.small, "image/jpeg");
   }
   progress(images.length, images.length, "올리는 중");
-  const dir = withFx(store.base + folder + "{n}.jpg?v=" + Date.now() + "&sm=1", slideFx(lesson));
-  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", lesson.id);
+  const dir = withFx(store.base + folder + "{n}.jpg?v=" + Date.now() + "&sm=1", slideFx(L));
+  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", L.id);
   if (error) throw error;
   // 전보다 쪽 수가 줄었으면 남은 그림과 예전 원본 PPTX를 지운다
   await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return !!m && +m[1] <= images.length; });

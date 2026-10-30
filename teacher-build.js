@@ -74,7 +74,7 @@ async function movePage(a, n) {
   }
   drawBuild();
   const { error } = await sb.from("activities").update(change).eq("id", a.id);
-  if (error) alert("쪽을 바꾸지 못했습니다: " + error.message);
+  if (error) { alert("쪽을 바꾸지 못했습니다: " + error.message); await loadLesson(); }
 }
 
 // 끌어서 순서 바꾸기(dragSort, teacher.js): 같은 쪽 활동끼리만 자리를 바꾸고, 왼쪽 작은 슬라이드 위에 놓으면 그 쪽으로 옮긴다
@@ -100,7 +100,7 @@ async function reorderActivities(group) {
   drawBuild();
   const done = await Promise.all(changed.map(([x, i]) => sb.from("activities").update({ sort: i }).eq("id", x.id)));
   const bad = done.find((r) => r.error);
-  if (bad) alert("순서를 저장하지 못했습니다: " + bad.error.message);
+  if (bad) { alert("순서를 저장하지 못했습니다: " + bad.error.message); await loadLesson(); }
 }
 
 function drawBuild() {
@@ -304,13 +304,17 @@ function simEditor() {
     const to = pageTo(e);
     if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
     if (to !== undefined) row.page_to = to;
-    if (!e.id) { row.lesson_id = lesson.id; row.sort = activities.length; }
+    const L = lesson;
+    if (!e.id) { row.lesson_id = L.id; row.sort = activities.length; }
     const saved = await save("activities", row, e.id);
     if (!saved) return;
-    const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
+    e.id = saved.id;   // 다시 눌러도 새로 넣지 않고 고친다
+    if (lesson !== L) return;   // 그사이 다른 수업으로 옮겼으면 그 화면은 건드리지 않는다
+    const { data } = await sb.from("activities").select("*").eq("lesson_id", L.id);
+    if (lesson !== L) return;
     activities = sortActivities(data || []);
     editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
-    drawBuild();
+    if (tab === "build") drawBuild();
     flash("저장했습니다.");
   }
   return h("section", { class: "card stack editor" },
@@ -355,7 +359,12 @@ function syncSave(btn = main.querySelector(".editor .save-btn")) {
 // 편집기 맨 아래 버튼: [닫기] [저장] [삭제]. 삭제는 저장한 활동에만 있다(학생 응답도 함께 지워짐)
 function editorButtons(onSave, msg, askText, ...extra) {
   const e = editing;
-  const saveBtn = h("button", { class: "primary save-btn", type: "button", onclick: onSave }, "저장");
+  // 저장 중에는 단추를 잠가 두 번 눌러도 한 번만 넣는다
+  const saveBtn = h("button", { class: "primary save-btn", type: "button", async onclick() {
+    if (saveBtn.dataset.busy) return;
+    saveBtn.dataset.busy = "1"; saveBtn.disabled = true;
+    try { await onSave(); } finally { delete saveBtn.dataset.busy; saveBtn.disabled = false; if (saveBtn.isConnected) syncSave(saveBtn); }
+  } }, "저장");
   syncSave(saveBtn);
   return h("div", { class: "row end" }, extra,
     h("button", { class: "ghost", type: "button", onclick() { editing = null; drawBuild(); } }, "닫기"),
@@ -510,11 +519,12 @@ function composeEditor() {
     const to = pageTo(e);
     if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
     // 새 활동은 같은 쪽 활동들의 맨 뒤에 편집기 순서대로 붙인다
+    const L = lesson;
     let next = Math.max(-1, ...activities.filter((a) => (a.page ?? null) === (e.page ?? null)).map((a) => a.sort ?? 0)) + 1;
     for (const [b, row] of rows) {
       row.page = e.page;
       if (to !== undefined) row.page_to = to;
-      if (!b.id) { row.lesson_id = lesson.id; row.sort = next++; }
+      if (!b.id) { row.lesson_id = L.id; row.sort = next++; }
       const s = await save("activities", row, b.id);
       if (!s) return;
       b.id = s.id;
@@ -523,10 +533,12 @@ function composeEditor() {
     }
     e.blocks = e.blocks.filter((b) => b.id);
     editBase.set(e, editSnap(e));
-    const { data } = await sb.from("activities").select("*").eq("lesson_id", lesson.id);
+    if (lesson !== L) return;
+    const { data } = await sb.from("activities").select("*").eq("lesson_id", L.id);
+    if (lesson !== L) return;
     activities = sortActivities(data || []);
     editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
-    drawBuild();
+    if (tab === "build") drawBuild();
     flash(rows.length > 1 ? rows.length + "개를 저장했습니다." : "저장했습니다.");
   }
 

@@ -561,10 +561,15 @@ async function setPage(n) {
   await setLesson({ page: n });
 }
 
+// 쪽을 빨리 넘겨도 저장이 보낸 순서대로 닿게 한 줄로 세운다(늦게 닿은 앞 쪽이 마지막 값이 되지 않게)
+let lessonWrite = Promise.resolve();
 async function setLesson(change) {
-  Object.assign(lesson, change);
+  const L = lesson;
+  Object.assign(L, change);
   refreshRun();
-  const { error } = await sb.from("lessons").update(change).eq("id", lesson.id);
+  const run = lessonWrite.then(() => sb.from("lessons").update(change).eq("id", L.id));
+  lessonWrite = run.catch(() => {});
+  const { error } = await run;
   if (error) fatal(error);
 }
 
@@ -589,7 +594,7 @@ function drawJoin() {
       h("p", { class: "join-code" }, "수업 코드 ", h("strong", {}, lesson.code)),
       h("p", { class: "join-url" }, url),
       h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick(e) { navigator.clipboard.writeText(url).then(() => { e.target.textContent = "복사했습니다"; }); } }, "주소 복사"),
+        h("button", { class: "ghost", type: "button", onclick(e) { navigator.clipboard.writeText(url).then(() => { e.target.textContent = "복사했습니다"; }, () => prompt("복사해 쓰세요.", url)); } }, "주소 복사"),
         h("a", { class: "ghost btn-link", href: url, target: "_blank", rel: "noopener" }, "학생 화면 열기")))));
   if (window.QRCode) new QRCode(qr, { text: url, width: 480, height: 480 });
   else qr.textContent = "QR을 만들지 못했습니다(인터넷 연결 확인).";

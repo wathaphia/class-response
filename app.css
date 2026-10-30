@@ -621,15 +621,29 @@ body.desk-locked { overflow: hidden; }
 .usage-detail-side .usage-table table { font-size: .8rem; }
 .usage-detail-side .usage-table th, .usage-detail-side .usage-table td { padding: .25rem .5rem; }
 @media (max-width: 760px) { .usage-detail.has-side { grid-template-columns: minmax(0, 1fr); } }
-/* 기타 관리 오른쪽 「패치 노트」: 화면에 붙어 있고 안에서만 스크롤. 좁으면 아래로 */
-.etc-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
-.patch-notes { position: sticky; top: 8.25rem; max-height: calc(100vh - 9.5rem); gap: .6rem; }
-.patch-list { flex: 1; overflow-y: auto; min-height: 0; padding-right: .2rem; }
-.patch-day h4 { margin: .5rem 0 .25rem; font-size: .92rem; }
+/* 「패치 노트」 탭: 맨 위 시기별 타임라인(줄이 넘치면 끝에서 꺾여 아래 줄로 이어짐, 홀수 줄은 오른쪽→왼쪽) + 날짜별 상자 */
+.patch-timeline { --tl-gap: 1.1rem; display: flex; flex-direction: column; gap: var(--tl-gap); padding: 0 18px; }
+.tl-row { position: relative; display: flex; }
+.tl-row.rev { flex-direction: row-reverse; }
+.tl-row.turn::after { content: ""; position: absolute; top: 9px; width: 16px; height: calc(100% + var(--tl-gap) + 2px); box-sizing: border-box; border: 2px solid var(--field); }
+.tl-row.turn:not(.rev)::after { left: 100%; border-left: none; border-radius: 0 16px 16px 0; }
+.tl-row.turn.rev::after { right: 100%; border-right: none; border-radius: 16px 0 0 16px; }
+.tl-item { position: relative; flex: 0 0 auto; min-width: 0; display: flex; flex-direction: column; gap: .15rem; padding: 26px .6rem .3rem; margin: 0; border: none; border-radius: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; min-height: 0; }
+.tl-item::before { content: ""; position: absolute; top: 9px; left: 0; right: 0; height: 2px; background: var(--field); }
+.tl-dot { position: absolute; top: 3px; left: .6rem; width: 14px; height: 14px; border-radius: 50%; background: var(--card); border: 3px solid var(--accent); box-sizing: border-box; }
+.tl-item.now .tl-dot { background: var(--accent); }
+.tl-item:hover strong, .tl-item:focus-visible strong { color: var(--accent); text-decoration: underline; }
+.tl-when { color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+.tl-item strong { font-size: .92rem; }
+.tl-text { color: var(--muted); font-size: .8rem; line-height: 1.4; }
+.patch-days { display: flex; flex-direction: column; gap: .8rem; }
+.patch-day { scroll-margin-top: 9rem; border-left: 4px solid var(--accent); }
+.patch-day-head { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; flex-wrap: wrap; padding-bottom: .4rem; border-bottom: 1px solid var(--line); }
+.patch-day-head h3 { margin: 0; }
 .patch-day ul { margin: 0; padding: 0; list-style: none; }
-.patch-day li { padding: .2rem 0; border-top: 1px solid var(--line); font-size: .85rem; line-height: 1.45; }
+.patch-day li { padding: .3rem 0; border-top: 1px solid var(--line); font-size: .88rem; line-height: 1.45; }
+.patch-day li:first-child { border-top: none; }
 .patch-no { color: var(--muted); font-variant-numeric: tabular-nums; }
-@media (max-width: 1100px) { .etc-layout { grid-template-columns: minmax(0, 1fr); } .patch-notes { position: static; max-height: 28rem; } }
 /* 기간 꼬리표: 초기화 단위가 같으면 같은 연한 색(하루 이하 · 한 달 · 누적 · 실시간) */
 .tag.period-day { color: #1f6f70; background: #e3f4f4; }
 .tag.period-month { color: #5b3fa0; background: #f0eafb; }

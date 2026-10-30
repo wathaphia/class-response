@@ -33,7 +33,7 @@ function paintProfile() {
   const email = (p && p.email) || me.email || "";
   const info = (label, value) => h("div", { class: "profile-row" }, h("dt", {}, label), h("dd", {}, value));
   const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code),
-    h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(p.code).then(() => { e.target.textContent = "복사했습니다"; }); } }, "복사")) : "—";
+    h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(p.code).then(() => { e.target.textContent = "복사했습니다"; }, () => prompt("복사해 쓰세요.", p.code)); } }, "복사")) : "—";
   // 재설정 메일의 링크로 들어옴(로그인된 채): 여기서 새 비밀번호를 정한다
   const pw1 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
   const pw2 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
