@@ -19,7 +19,10 @@ const kstClock = (t, o = {}) => new Date(t).toLocaleTimeString("ko-KR", { timeZo
 const ETC_AUTO_MS = 60 * 60 * 1000;
 const ETC_MANUAL_MS = 10 * 60 * 1000;
 const ETC_CHECK_MS = 30000;
-let usage = {};            // 받는 곳 이름 → { data, at, net } 또는 { error, at, net }. net = 이 동기화가 브라우저에서 보낸 요청 수·받은 양
+// Supabase·Worker를 받지 못하면 1분 뒤 저절로 다시 받는다(그 곳만. GitHub는 시간당 60번 한도라 1시간 그대로). 한 번 받기는 30초 안에 끝나야 하고, 실패하면 2초 뒤 한 번 더 해 본다
+const ETC_RETRY_MS = 60 * 1000;
+const USAGE_TIMEOUT_MS = 30000;
+let usage = {};            // 받는 곳 이름 → { data, at, net } 또는 { error, failedAt, at, net }(+ 전에 받은 data가 있으면 그대로). net = 이 동기화가 브라우저에서 보낸 요청 수·받은 양
 try { usage = JSON.parse(localStorage.getItem("cra-usage")) || {}; } catch {}
 let usageBusy = false;
 let etcTimer = null;
@@ -74,11 +77,32 @@ async function usageGithub(net) {
   };
 }
 const USAGE_SOURCES = { db: usageDb, worker: usageWorker, github: usageGithub };
+// 한 곳 받기: 너무 오래 걸리면 끊고, 실패하면(로그인 토큰이 만료됐으면 새로 받아) 한 번 더. GitHub는 시간당 60번 한도라 다시 하지 않는다
+async function fetchUsage(k, net) {
+  for (let i = 0; ; i++) {
+    try {
+      let timer;
+      const late = new Promise((_, no) => { timer = setTimeout(() => no(new Error("응답이 " + USAGE_TIMEOUT_MS / 1000 + "초 넘게 없습니다")), USAGE_TIMEOUT_MS); });
+      try { return await Promise.race([USAGE_SOURCES[k](net), late]); } finally { clearTimeout(timer); }
+    } catch (e) {
+      if (i || k === "github" || /setup.sql|배포|TURN_URL/.test(e.message)) throw e;
+      if (/401|JWT/i.test(e.message)) await sb.auth.refreshSession().catch(() => {});
+      await new Promise((ok) => setTimeout(ok, 2000));
+    }
+  }
+}
 
 const lastSync = () => Math.max(0, ...Object.values(usage).map((u) => u.at || 0));
 // 하나라도 1시간이 지났으면 모두 다시 받는다: 기타 관리의 모든 숫자는 같은 동기화 시각(lastSync) 기준이다
-const staleSources = () => Object.keys(USAGE_SOURCES).some((k) => !usage[k] || Date.now() - usage[k].at >= ETC_AUTO_MS) ? Object.keys(USAGE_SOURCES) : [];
-const manualWait = () => Math.max(0, lastSync() + ETC_MANUAL_MS - Date.now());
+// 그렇지 않아도 받지 못한 곳이 있으면 1분 뒤 그 곳만 다시 받는다. tried = 마지막으로 받아 보려 한 시각(실패했으면 failedAt)
+const tried = (u) => Math.max(u.at || 0, u.failedAt || 0);
+const failedSources = () => ["db", "worker"].filter((k) => usage[k] && usage[k].error);
+const staleSources = () => Object.keys(USAGE_SOURCES).some((k) => !usage[k] || Date.now() - tried(usage[k]) >= ETC_AUTO_MS) ? Object.keys(USAGE_SOURCES)
+  : failedSources().filter((k) => Date.now() - tried(usage[k]) >= ETC_RETRY_MS);
+// 받지 못한 곳이 있으면 10분을 기다리지 않고 1분 뒤 다시 누를 수 있다
+const manualWait = () => failedSources().length
+  ? Math.max(0, ...failedSources().map((k) => tried(usage[k]) + ETC_RETRY_MS - Date.now()))
+  : Math.max(0, lastSync() + ETC_MANUAL_MS - Date.now());
 
 async function syncUsage(names) {
   if (usageBusy || !names.length) return;
@@ -87,8 +111,12 @@ async function syncUsage(names) {
   const at = Date.now();   // 이번 동기화의 기준 시각(모든 받는 곳에 같은 값)
   await Promise.all(names.map(async (k) => {
     const net = { requests: 0, bytes: 0 };
-    try { usage[k] = { data: await USAGE_SOURCES[k](net), at, net }; }
-    catch (e) { usage[k] = { error: e.message || String(e), at, net }; }
+    try { usage[k] = { data: await fetchUsage(k, net), at, net }; }
+    catch (e) {
+      // 전에 받은 값은 지우지 않고 그대로 보여 준다(시각도 그때 것). 처음부터 없었으면 오류만
+      const old = usage[k] && usage[k].data ? usage[k] : null;
+      usage[k] = { ...(old ? { data: old.data, at: old.at, net: old.net } : { at, net }), error: e.message || String(e), failedAt: at };
+    }
   }));
   usageBusy = false;
   try { localStorage.setItem("cra-usage", JSON.stringify(usage)); } catch {}
@@ -432,7 +460,7 @@ function supabaseView() {
 function cloudflareView() {
   const u = usage.worker;
   if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
-  if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
+  if (!u.data) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
   const d = u.data, a = d.analytics, r2 = d.r2;
   const missing = a ? null : "분석 토큰 필요";
   const daily = "Cloudflare 하루 한도는 한국 시간 오전 9시에 초기화", day9 = "오전 9시부터";
@@ -497,7 +525,7 @@ function syncCostView() {
 function githubView() {
   const u = usage.github;
   if (!u) return h("p", { class: "muted small" }, "불러오는 중…");
-  if (u.error) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
+  if (!u.data) return h("p", { class: "banner bad" }, "불러오지 못했습니다: " + u.error);
   const { repo, rate, runsThisMonth, recent, alive, runsHour } = u.data;
   // 공개 저장소에 60일 동안 아무 변화가 없으면 GitHub가 예약 실행(keep-alive)을 멈춘다 → Supabase가 7일 뒤 잠든다
   const idleDays = Math.floor((u.at - Date.parse(repo.pushed_at)) / 86400000);
@@ -522,16 +550,20 @@ function githubView() {
 function paintEtc() {
   if (tab !== "etc" || !main) return;
   const last = lastSync();
-  const section = (name, what, view) => {
+  // keys: 이 묶음이 쓰는 받는 곳. 새로 받지 못했지만 전에 받은 값을 보여 주는 중이면 위에 알린다
+  const section = (name, what, view, keys = []) => {
     let body;
     try { body = view(); } catch (e) { console.error(name, e); body = h("p", { class: "banner bad" }, "그리지 못했습니다: " + (e && e.message || e)); }
-    return h("section", { class: "card stack usage-card" }, h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)), body);
+    const failed = keys.filter((k) => usage[k] && usage[k].error && usage[k].data);
+    const note = failed.length ? h("p", { class: "banner bad small" }, "새로 받지 못해 " + shortTime(Math.min(...failed.map((k) => usage[k].at))) + " 값을 보여 줍니다" + (keys.includes("github") ? ": " : "(1분 뒤 다시 받음): ")
+      + failed.map((k) => usage[k].error).join(" · ")) : null;
+    return h("section", { class: "card stack usage-card" }, h("div", {}, h("h3", {}, name), h("span", { class: "muted small" }, what)), note, body);
   };
   usageRisky = [];
   const secs = [
-    section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView),
-    section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView),
-    section("GitHub", "사이트 · 자동 실행", githubView),
+    section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView, ["db", "worker"]),
+    section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView, ["worker"]),
+    section("GitHub", "사이트 · 자동 실행", githubView, ["github"]),
     section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView)];
   histSave();
   // 맨 위 요약: 초기화 전에 다 쓸 수 있는 자원(소진 주의)을 위험한 순서로 복제해 모아 본다
