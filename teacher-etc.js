@@ -494,7 +494,7 @@ function paintEtc() {
     h("div", { class: "usage-grid" }, risky.map((it) => usageRing(it, "top"))), topPick ? usageDetail(topPick) : null)
     : lastSync() ? h("p", { class: "risk-none small" }, "◆ 지금 속도로는 초기화 전에 다 쓸 것으로 보이는 자원이 없습니다.") : null;
   // 자세히 보는 중에 원·자세히 칸·단추 밖의 빈 곳을 누르면 고른 것을 푼다
-  main.replaceChildren(h("div", { class: "stack", onclick(e) {
+  main.replaceChildren(h("div", { class: "etc-layout" }, h("div", { class: "stack", onclick(e) {
     if (usageSel && !e.target.closest(".usage-item, .usage-detail, button, a, input, select, textarea")) { usageSel = null; paintEtc(); }
   } },
     h("div", { class: "row between" },
@@ -504,7 +504,22 @@ function paintEtc() {
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    summary, ...secs));
+    summary, ...secs), patchNotesView()));
+}
+
+// 오른쪽 「패치 노트」: 합친 PR을 날짜별로(patch-notes.js 의 PATCH_NOTES, 새것이 위). 화면에 붙어 있고 안에서만 스크롤
+function patchNotesView() {
+  const days = [];
+  for (const [no, day, text] of PATCH_NOTES) {
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, items: [] });
+    days[days.length - 1].items.push([no, text]);
+  }
+  const dayText = (d) => { const [y, m, dd] = d.split("-"); return y + "년 " + +m + "월 " + +dd + "일"; };
+  return h("aside", { class: "card stack patch-notes", "aria-label": "패치 노트" },
+    h("div", {}, h("h3", {}, "패치 노트"), h("span", { class: "muted small" }, "지금까지 " + PATCH_NOTES.length + "번 고침 · 날짜는 한국 시간")),
+    h("div", { class: "patch-list" }, days.map((g) => h("section", { class: "patch-day" },
+      h("h4", {}, dayText(g.day), h("span", { class: "muted small" }, " " + g.items.length + "건")),
+      h("ul", {}, g.items.map(([no, text]) => h("li", {}, h("span", { class: "patch-no" }, "#" + no), " " + text)))))));
 }
 
 // ---------- 버그 제보 ----------

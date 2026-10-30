@@ -621,6 +621,15 @@ body.desk-locked { overflow: hidden; }
 .usage-detail-side .usage-table table { font-size: .8rem; }
 .usage-detail-side .usage-table th, .usage-detail-side .usage-table td { padding: .25rem .5rem; }
 @media (max-width: 760px) { .usage-detail.has-side { grid-template-columns: minmax(0, 1fr); } }
+/* 기타 관리 오른쪽 「패치 노트」: 화면에 붙어 있고 안에서만 스크롤. 좁으면 아래로 */
+.etc-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+.patch-notes { position: sticky; top: 8.25rem; max-height: calc(100vh - 9.5rem); gap: .6rem; }
+.patch-list { flex: 1; overflow-y: auto; min-height: 0; padding-right: .2rem; }
+.patch-day h4 { margin: .5rem 0 .25rem; font-size: .92rem; }
+.patch-day ul { margin: 0; padding: 0; list-style: none; }
+.patch-day li { padding: .2rem 0; border-top: 1px solid var(--line); font-size: .85rem; line-height: 1.45; }
+.patch-no { color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .etc-layout { grid-template-columns: minmax(0, 1fr); } .patch-notes { position: static; max-height: 28rem; } }
 /* 기간 꼬리표: 초기화 단위가 같으면 같은 연한 색(하루 이하 · 한 달 · 누적 · 실시간) */
 .tag.period-day { color: #1f6f70; background: #e3f4f4; }
 .tag.period-month { color: #5b3fa0; background: #f0eafb; }
