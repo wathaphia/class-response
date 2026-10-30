@@ -9,6 +9,7 @@ const POLL_LIVE_MS = 10000;   // 수업 채널(nudge)이 이어져 있을 때
 // 학생 계정은 웹앱 전체에 하나. 한 번 입장한 기기는 열쇠(token)를 기억해서, 새 수업 코드만 넣으면 바로 들어간다.
 const TOKEN_KEY = "cra-token";
 const ME_KEY = "cra-me";
+const keep = loginStore("student");   // 열쇠·이름: 「자동 로그인」을 고른 기기만 다음에도 기억(common.js)
 
 let code = "";          // 수업 코드
 let token = null;       // 입장 열쇠(이 기기에 저장)
@@ -70,8 +71,8 @@ else start();
 function start() {
   code = (params.get("c") || ls.get("cra-last-code") || "").trim();
   // 예전 판은 수업마다 열쇠를 따로 저장했다: 있으면 그대로 옮겨 쓴다
-  token = ls.get(TOKEN_KEY) || (code ? ls.get("cra-token:" + code.toLowerCase()) : null);
-  if (token) ls.set(TOKEN_KEY, token);
+  token = keep.getItem(TOKEN_KEY) || (code ? keep.getItem("cra-token:" + code.toLowerCase()) : null);
+  if (token) keep.setItem(TOKEN_KEY, token);
   if (token && code) poll();
   else if (token) showCodeOnly();
   else showEntry();
@@ -97,7 +98,7 @@ function showCodeOnly(notice) {
   closeZoom();
   shell = null;
   cards.clear();
-  const me = ls.get(ME_KEY) || "";
+  const me = keep.getItem(ME_KEY) || "";
   const codeIn = h("input", { type: "text", value: params.get("c") ? "" : code, autocomplete: "off", maxlength: 20, placeholder: "예: K7P2Q", autocapitalize: "characters", required: true });
   const msg = h("p", { class: "msg" }, notice || "");
   app.replaceChildren(h("main", { class: "narrow" },
@@ -138,6 +139,7 @@ function showEntry(notice) {
   let newAccount = false;
   const msg = h("p", { class: "msg" }, notice || "");
   const btn = h("button", { class: "primary big", type: "submit" }, "입장하기");
+  const remember = rememberBox("student");
 
   // 코드·학번·이름을 바꾸면 동의 단계를 처음부터 다시
   [codeIn, noIn, nameIn].forEach((el) => el.addEventListener("input", () => {
@@ -174,8 +176,9 @@ function showEntry(notice) {
         token = data.token;
         code = data.code;
         ls.set("cra-last-code", code);
-        ls.set(TOKEN_KEY, token);
-        ls.set(ME_KEY, whoName(data));
+        setRememberLogin("student", remember.querySelector("input").checked);
+        keep.setItem(TOKEN_KEY, token);
+        keep.setItem(ME_KEY, whoName(data));
         following = true;
         poll();
       } else msg.textContent = "알 수 없는 오류입니다. 다시 시도하세요.";
@@ -185,7 +188,7 @@ function showEntry(notice) {
     h("label", {}, "학번(번호)", noIn),
     h("label", {}, "이름", nameIn),
     consentRow,
-    btn, msg);
+    btn, remember, msg);
 
   app.replaceChildren(h("main", { class: "narrow" },
     h("header", { class: "intro" },
@@ -198,14 +201,18 @@ function showEntry(notice) {
 // 학번이 없는 학생(이름만으로 들어옴)은 이름만
 function whoName(s) { return ((s.class_no || "") + " " + s.name).trim(); }
 
-function logout(notice) {
+// fade: 알림을 화면 가운데 띄웠다가 서서히 사라진 뒤 입장 화면으로(자동 로그인한 학생 정보가 지워졌을 때)
+function logout(notice, fade) {
   stopPolling();
-  ls.del(TOKEN_KEY);
-  ls.del(ME_KEY);
-  if (code) ls.del("cra-token:" + code.toLowerCase());
+  keep.removeItem(TOKEN_KEY);
+  keep.removeItem(ME_KEY);
+  if (code) keep.removeItem("cra-token:" + code.toLowerCase());
   token = null;
   state = null;
-  showEntry(notice);
+  if (!fade) return showEntry(notice);
+  leaveScreenShare();
+  app.replaceChildren();
+  centerNote(notice, () => showEntry());
 }
 
 function leaveScreenShare() {
@@ -238,7 +245,7 @@ async function poll() {
     if (shell) shell.conn.hidden = false;
     else return showCodeOnly("연결하지 못했습니다. 인터넷을 확인하고 다시 입장하세요.");
   } else if (data.error === "logged_out") {
-    return logout("다시 입장해 주세요. 선생님이 비밀번호를 초기화했거나 학생 정보가 지워졌습니다.");
+    return logout("다시 입장해 주세요. 선생님이 비밀번호를 초기화했거나 학생 정보가 지워졌습니다.", true);
   } else if (data.same) {
     if (shell) shell.conn.hidden = true;
   } else {

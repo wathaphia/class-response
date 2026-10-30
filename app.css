@@ -691,6 +691,8 @@ body.desk-locked { overflow: hidden; }
 .center-note { position: fixed; left: 50%; top: 50%; z-index: 1000; transform: translate(-50%, -50%); padding: .9rem 1.6rem; border-radius: 12px;
   background: rgba(20, 28, 44, .88); color: #fff; font-size: 1.15rem; font-weight: 600; pointer-events: none; box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
   animation: center-note 1.8s ease forwards; }
+.center-note.long { max-width: min(30rem, calc(100vw - 32px)); text-align: center; animation-duration: 3.2s; }
+.option.remember { min-height: 0; border: 0; padding: 0; gap: .45rem; color: var(--muted, #5b6474); font-size: .95rem; }
 @keyframes center-note { 0% { opacity: 0; transform: translate(-50%, -40%); } 15%, 60% { opacity: 1; transform: translate(-50%, -50%); } 100% { opacity: 0; transform: translate(-50%, -50%); } }
 @media (prefers-reduced-motion: reduce) { .ring-bar, .sync-icon.spin svg { transition: none; animation: none; } }
 

@@ -322,13 +322,31 @@ function teachersCard(p) {
     await loadProfile();
     return true;
   };
-  // 표 맨 아래 줄: 「추가」 → 이메일 칸에 입력란이 열리고 단추가 「이메일로 추가」로 바뀐다
+  // 표 맨 아래 줄: 「추가」 → 이메일 칸에 입력란이 열리고 단추가 「이메일로 추가」로 바뀐다.
+  // 「취소」·Esc·줄 밖 빈 곳을 누르면 입력란을 닫고 처음 모습(「추가」만)으로 돌아간다.
   const newEmail = h("input", { type: "email", class: "add-email", placeholder: "새 선생님 이메일", "aria-label": "새 선생님 이메일", hidden: true,
-    onkeydown(e) { if (e.key === "Enter") { e.preventDefault(); addBtn.click(); } } });
+    onkeydown(e) {
+      if (e.key === "Enter") { e.preventDefault(); addBtn.click(); }
+      if (e.key === "Escape") closeAdd();
+    } });
+  const cancelBtn = h("button", { class: "link", type: "button", hidden: true, onclick() { closeAdd(); } }, "취소");
+  const outside = (e) => { if (!addRow.isConnected) return document.removeEventListener("pointerdown", outside, true); if (!addRow.contains(e.target)) closeAdd(); };
+  const openAdd = () => {
+    newEmail.hidden = cancelBtn.hidden = false;
+    addBtn.textContent = "이메일로 추가";
+    newEmail.focus();
+    document.addEventListener("pointerdown", outside, true);
+  };
+  const closeAdd = () => {
+    newEmail.hidden = cancelBtn.hidden = true;
+    newEmail.value = "";
+    addBtn.textContent = "추가";
+    document.removeEventListener("pointerdown", outside, true);
+  };
   const addBtn = h("button", {
     class: "link", type: "button",
     async onclick() {
-      if (newEmail.hidden) { newEmail.hidden = false; addBtn.textContent = "이메일로 추가"; newEmail.focus(); return; }
+      if (newEmail.hidden) return openAdd();
       const who = newEmail.value.trim().toLowerCase();
       if (!EMAIL_RE.test(who)) { centerNote("이메일 형식이 올바르지 않습니다"); newEmail.focus(); return; }
       addBtn.disabled = true;
@@ -358,6 +376,7 @@ function teachersCard(p) {
     if (fails.length) alert("빼지 못한 선생님:\n" + fails.join("\n")); else flash(who.length + "명의 선생님을 뺐습니다.");
     await loadProfile();
   };
+  const addRow = h("tr", { class: "add-row" }, h("td", { class: "pick" }), h("td", {}, addBtn), h("td", {}, newEmail), h("td", {}, cancelBtn), h("td"), h("td"));
   return h("section", { class: "card stack teachers-card" },
     h("h3", {}, "선생님 관리"),
     bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: removeMany }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
@@ -368,7 +387,7 @@ function teachersCard(p) {
         h("td", {}, t.code), h("td", {}, isPendingEmail(t.email) ? h("span", { class: "muted" }, "가입 전") : t.email, t.admin ? h("span", { class: "tag warn" }, "개발자") : null),
         h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"),
         h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick() { set(t.email, false); } }, "빼기")))),
-        h("tr", { class: "add-row" }, h("td", { class: "pick" }), h("td", {}, addBtn), h("td", {}, newEmail), h("td"), h("td"), h("td"))))),
+        addRow))),
     requests.length ? h("div", { class: "stack" }, h("h4", {}, "가입 요청 (" + requests.length + ")"),
       h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
         h("thead", {}, h("tr", {}, ["학번", "이름", "가입 이메일", "요청한 때", ""].map((t) => h("th", {}, t)))),
