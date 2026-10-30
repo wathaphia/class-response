@@ -68,8 +68,10 @@ const LITE = { every: 500, maxW: 320, q: 0.4, rtc: { fps: 6, br: 70000, h: 180 }
 if (!sb) notConfigured(app);
 else start();
 
-function start() {
-  code = (params.get("c") || ls.get("cra-last-code") || "").trim();
+async function start() {
+  // 주소에 ?c= 가 없으면 개발자가 고른 학생용 기본 수업 코드를 먼저 쓴다
+  const picked = params.get("c") ? null : await sb.rpc("default_lesson_code").then((r) => r.data, () => null);
+  code = (params.get("c") || picked || ls.get("cra-last-code") || "").trim();
   // 예전 판은 수업마다 열쇠를 따로 저장했다: 있으면 그대로 옮겨 쓴다
   token = keep.getItem(TOKEN_KEY) || (code ? keep.getItem("cra-token:" + code.toLowerCase()) : null);
   if (token) keep.setItem(TOKEN_KEY, token);

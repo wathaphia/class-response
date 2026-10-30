@@ -990,3 +990,28 @@ create policy slides_teacher_update on storage.objects for update to authenticat
 create policy slides_teacher_delete on storage.objects for delete to authenticated
   using (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()
     or exists (select 1 from lessons l where l.id::text = (storage.foldername(name))[2] and can_lesson(l.id))));
+
+-- 학생용 기본 수업: 개발자가 「전체 수업」에서 별로 고른 수업 하나. 학생 화면은 주소에 ?c= 가 없으면 이 코드를 미리 넣는다.
+create table if not exists student_default (
+  id        int primary key default 1 check (id = 1),
+  lesson_id uuid references lessons(id) on delete set null
+);
+alter table student_default enable row level security;
+drop policy if exists student_default_admin on student_default;
+create policy student_default_admin on student_default for select to authenticated using (is_admin());
+
+create or replace function default_lesson_code() returns text
+language sql stable security definer set search_path = public as $$
+  select l.code from student_default d join lessons l on l.id = d.lesson_id where d.id = 1
+$$;
+grant execute on function default_lesson_code() to anon, authenticated;
+
+create or replace function set_default_lesson(p_lesson uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception '개발자만 바꿀 수 있습니다'; end if;
+  insert into student_default (id, lesson_id) values (1, p_lesson)
+    on conflict (id) do update set lesson_id = excluded.lesson_id;
+end $$;
+revoke execute on function set_default_lesson(uuid) from public, anon;
+grant execute on function set_default_lesson(uuid) to authenticated;
