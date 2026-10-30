@@ -604,6 +604,45 @@ $$;
 revoke all on function email_has_account(text) from public;
 grant execute on function email_has_account(text) to anon, authenticated;
 
+-- 비밀번호 재설정 메일 횟수: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 화면은 보내기 전에 claim_password_reset 으로 한 번을 받아 간다
+create table if not exists reset_log (
+  id bigint generated always as identity primary key,
+  email text not null,
+  at timestamptz not null default now()
+);
+create index if not exists reset_log_email_at on reset_log (email, at);
+alter table reset_log enable row level security;
+
+create or replace function claim_password_reset(p_email text)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  e text := lower(trim(p_email));
+  n int;
+  last_at timestamptz;
+begin
+  if not exists (select 1 from auth.users where lower(email) = e) then
+    return jsonb_build_object('ok', false, 'reason', 'no_account');
+  end if;
+  perform pg_advisory_xact_lock(hashtext('reset:' || e));
+  select count(*), max(at) into n, last_at from reset_log
+   where email = e and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
+  if n >= 3 then return jsonb_build_object('ok', false, 'reason', 'limit', 'used', n, 'limit', 3); end if;
+  if last_at > now() - interval '3 seconds' then return jsonb_build_object('ok', false, 'reason', 'cooldown', 'used', n, 'limit', 3); end if;
+  insert into reset_log (email) values (e);
+  return jsonb_build_object('ok', true, 'used', n + 1, 'limit', 3);
+end $$;
+revoke all on function claim_password_reset(text) from public;
+grant execute on function claim_password_reset(text) to anon, authenticated;
+
+-- 로그인한 사람의 오늘 재설정 메일 횟수(프로필 표시용)
+create or replace function my_reset_quota()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('used', count(*), 'limit', 3) from reset_log
+   where email = lower(auth.email()) and at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
+$$;
+revoke all on function my_reset_quota() from public;
+grant execute on function my_reset_quota() to authenticated;
+
 -- ------------------------------------------------------------
 -- 기타 관리(교사 화면): 무료 한도에 견줄 사용량. 교사만 부를 수 있다.
 -- 접속 중 = 최근 20초 안에 수업 화면을 연 학생(교사 화면의 「접속 중」과 같은 기준)
@@ -624,6 +663,7 @@ begin
     'lessons', (select count(*) from lessons),
     'responses', (select count(*) from responses),
     'mail_day', (select count(*) from mail_log where at > now() - interval '24 hours'),
+    'reset_day', (select count(*) from reset_log where at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'),
     'mail_month', (select count(*) from mail_log where at >= date_trunc('month', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'),
     'tables', (select jsonb_agg(jsonb_build_object('name', relname, 'rows', n_live_tup, 'bytes', pg_total_relation_size(relid))
                                 order by pg_total_relation_size(relid) desc)

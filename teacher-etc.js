@@ -195,8 +195,9 @@ function usageRing(it, where = "sec") {
   ring.innerHTML = '<svg viewBox="0 0 100 100"><circle class="ring-track" cx="50" cy="50" r="40"/>'
     + (known && p > 0 ? '<circle class="ring-bar ' + level + '" cx="50" cy="50" r="40" transform="rotate(-90 50 50)" stroke-dasharray="' + Math.max(Math.min(p, 1) * c, 0.5).toFixed(2) + " " + c.toFixed(2) + '"/>' : "")
     + '<text x="50" y="50">' + pct + "</text></svg>";
-  const amount = known ? usageAmount(it.used, it.fmt) + " / " + usageAmount(it.limit, it.fmt) : it.missing || "알 수 없음";
-  const left = known ? "남음 " + usageAmount(Math.max(it.limit - it.used, 0), it.fmt) : "";
+  const u = it.unit || "";
+  const amount = !known ? it.missing || "알 수 없음" : u ? it.limit.toLocaleString() + u + " 중 " + it.used.toLocaleString() + u + " 사용" : usageAmount(it.used, it.fmt) + " / " + usageAmount(it.limit, it.fmt);
+  const left = known ? "남음 " + usageAmount(Math.max(it.limit - it.used, 0), it.fmt) + u : "";
   return h("figure", {
     class: "usage-item" + (known ? "" : " unknown") + (st.risky ? " risky" : "") + (sel ? " selected" : ""),
     role: "button", tabindex: "0", "aria-pressed": sel ? "true" : "false",
@@ -399,8 +400,8 @@ function supabaseView() {
     { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
     { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
     { label: "로그인 사용자(MAU)", used: d.mau, limit: 50000, period: "이번 달", hint: "교사 계정 기준(학생은 세지 않음)" },
-    { label: "Gmail 인증 메일", used: d.mail_day, limit: 100, period: "최근 24시간", missing: d.mail_day == null ? "setup.sql 적용 필요" : null,
-      hint: "비밀번호 재설정·가입 확인 메일을 개발자 Gmail(Apps Script)로 보냄 · 하루 100통" },
+    { label: "Gmail 인증 메일", used: d.mail_day, limit: 100, unit: "통", period: "최근 24시간", missing: d.mail_day == null ? "setup.sql 적용 필요" : null,
+      hint: (d.reset_day != null ? "오늘 비밀번호 재설정 " + d.reset_day + "통(한 사람 하루 3번) · " : "") + "비밀번호 재설정·가입 확인 메일을 개발자 Gmail(Apps Script)로 보냄 · 하루 100통" },
     { label: "Edge Function 호출", used: d.mail_month, limit: 500000, period: "이번 달", missing: d.mail_month == null ? "setup.sql 적용 필요" : null,
       hint: "지금 쓰는 함수는 인증 메일(send-email) 하나 · 보낸 메일 수로 셈" },
     { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
