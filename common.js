@@ -29,8 +29,8 @@ function reqCooling(key) {
 }
 document.addEventListener("click", (e) => {
   const b = e.target instanceof Element && e.target.closest("button, input[type=submit], input[type=button]");
-  // 탭·메뉴처럼 화면만 바꾸는 단추(nav 안, 모드 스위치, 프로필)는 요청이 아니라 뺀다
-  if (!b || b.disabled || b.matches(".arrow, [data-rapid], nav button, .mode-switch, .profile-btn")) return;
+  // 탭·메뉴처럼 화면만 바꾸는 단추(nav 안, 모드 스위치, 프로필)와 편집기 안의 칸 추가·토글은 요청이 아니라 뺀다
+  if (!b || b.disabled || b.matches(".arrow, [data-rapid], nav button, .mode-switch, .profile-btn, .editor button:not(.primary, .danger, [type=submit])")) return;
   // 다시 그려져 새로 생긴 같은 단추도 막되, 다른 폼·창의 같은 글자 단추(줄의 「승격」 → 창의 「승격」)는 막지 않는다
   const box = b.closest("form, dialog, .modal, tr");
   const key = (box ? (box.reqBox ||= ++reqBoxes) : 0) + ":" + (b.textContent || b.value || "").trim();

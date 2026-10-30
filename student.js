@@ -369,7 +369,7 @@ async function setMonitorChoice(v) {
   if (monitorInAccount()) {
     state.me.monitor = v === "yes";
     renderScreenNotice();
-    const { error } = await sb.rpc("student_set_monitor", { p_token: token, p_consent: v === "yes" }).catch((e) => ({ error: e }));
+    const { error } = await Promise.resolve(sb.rpc("student_set_monitor", { p_token: token, p_consent: v === "yes" })).catch((e) => ({ error: e }));
     if (error) { state.me.monitor = v !== "yes"; renderScreenNotice(); alert("바꾸지 못했습니다. 인터넷을 확인하고 다시 해 주세요."); return; }
   } else {
     try { ls.set(monitorKey(), v); } catch {}
