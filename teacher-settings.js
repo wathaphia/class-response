@@ -73,10 +73,10 @@ function drawSettings() {
       h("div", { class: "row" },
         h("button", { class: "primary big", type: "submit" }, "수업 만들기"),
         // 만들기 취소: 「+ 수업 추가」 전의 수업(없으면 처음 수업)과 탭으로 돌아간다
-        lessons.length ? h("button", { class: "ghost big", type: "button", async onclick() {
+        lessons.some(canOpenLesson) ? h("button", { class: "ghost big", type: "button", async onclick() {
           const back = newFrom || {};
           newFrom = null;
-          lesson = lessons.find((l) => l.id === back.id) || lessons[0];
+          lesson = lessons.find((l) => l.id === back.id) || lessons.find(canOpenLesson) || null;
           tab = back.tab && back.tab !== "settings" ? back.tab : "library";
           localStorage.setItem("cra-tab", tab);
           await loadLesson();

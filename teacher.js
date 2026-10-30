@@ -37,11 +37,17 @@ const SHOW_DEFAULT = { join: { class: true, edit: false }, build: { class: false
 const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "people", "etc", "patch"];   // 수업을 고르지 않아도 열리는 탭
 let tabCustom = {};
 const isAdmin = () => !!(profile && profile.admin);
+const isObserver = () => !!(profile && profile.observer);
+const seesAdminTabs = () => isAdmin() || isObserver();
+// 관찰자가 개발자 권한 단추를 누르면 알림만 띄운다(서버도 is_admin 으로 막는다)
+function devOnly(fn) { return function (...args) { if (isObserver()) return centerNote("개발자 고유의 권한입니다"); return fn.apply(this, args); }; }
+// 지금 수업으로 열 수 있는지: 관찰자에게 보이는 다른 선생님 수업은 보기만 한다
+const canOpenLesson = (l) => !isObserver() || l.owner === me.id || ((profile && profile.shared_with_me) || []).some((s) => s.lesson_id === l.id);
 const tabName = (k, c = tabCustom) => (c.names && c.names[k]) || (TAB_DEFAULTS.find(([x]) => x === k) || [, k])[1];
 const tabShown = (k, mode, c = tabCustom) => { const s = (c.show && c.show[k]) || SHOW_DEFAULT[k] || {}; return s[mode] !== false; };
 // 저장된 순서를 지금 쓸 수 있는 탭으로 맞춘다(없는 탭은 원래 줄 끝에, 프로필은 늘 아래 줄)
 function tabLayout(c = tabCustom) {
-  const ok = (k) => TAB_DEFAULTS.some(([x]) => x === k) && (isAdmin() || !ADMIN_TABS.includes(k));
+  const ok = (k) => TAB_DEFAULTS.some(([x]) => x === k) && (seesAdminTabs() || !ADMIN_TABS.includes(k));
   const main = (c.main || MAIN_TABS).filter((k) => ok(k) && k !== "profile");
   const sub = (c.sub || SUB_TABS).filter((k) => ok(k) && !main.includes(k));
   if (!sub.includes("profile")) sub.unshift("profile");
@@ -70,6 +76,7 @@ let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
 let me = null;            // 로그인한 교사(auth user)
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+let passwordChange = false;     // 프로필의 「비밀번호 재설정」을 눌러 변경 칸을 열었음(현재 비밀번호도 묻는다)
 let passwordRecovery = false;   // 비밀번호 재설정 메일의 링크로 들어옴: 로그인된 채로 「프로필」의 새 비밀번호 칸을 연다
 let booted = false;              // init 을 끝까지 마쳤는지(탭을 그릴 수 있는지)
 let screenChannel = null;
@@ -282,7 +289,8 @@ async function loadLessons(selectId) {
   const { data, error } = await sb.from("lessons").select("*").order("created_at");
   if (error) return fatal(error);
   lessons = data;
-  lesson = lessons.find((l) => l.id === selectId) || lessons[0] || null;
+  const openable = lessons.filter(canOpenLesson);
+  lesson = openable.find((l) => l.id === selectId) || openable[0] || null;
   if (!lesson) tab = "settings";
   await loadLesson();
 }
@@ -599,7 +607,13 @@ function topBar() {
   const modeSwitch = h("button", {
     type: "button", role: "switch", "aria-checked": String(editMode), class: editMode ? "mode-switch editing" : "mode-switch",
     title: editMode ? "누르면 수업 모드로 바꿉니다" : "누르면 편집 모드로 바꿉니다",
-    onclick() { editMode = !editMode; localStorage.setItem("cra-edit", editMode ? "1" : "0"); draw(); },
+    onclick() {
+      editMode = !editMode;
+      localStorage.setItem("cra-edit", editMode ? "1" : "0");
+      // 지금 탭이 새 모드에도 있으면 위쪽 틀만 바꾼다(화면을 다시 그리거나 다시 읽지 않는다)
+      const stays = !tabEdit && (tabLayout().sub.includes(tab) || tabShown(tab, editMode ? "edit" : "class"));
+      if (stays) repaintTop(); else draw();
+    },
   }, h("span", { class: "knob", "aria-hidden": "true" }), h("span", { class: "mode-name" }, editMode ? "편집 모드" : "수업 모드"));
   const inSub = subTabs.includes(tab);
   // 설정: 누르면 아래 줄 탭(프로필 · 전체 수업 · …)이 열린다

@@ -18,7 +18,6 @@ function drawRun() {
   const stage = h("div", { class: "stage" }, img, simStage, simLayer);
   const resync = () => { if (run && run.img === img) syncSimLayer(simLayer, img); };
   img.addEventListener("load", resync);
-  stage.addEventListener("fullscreenchange", () => setTimeout(resync, 50));
   const panel = h("div", { class: "stack" });
   const roster = h("section", { class: "card stack" });
   const hasSlides = lesson.slide_count > 0;
@@ -26,9 +25,8 @@ function drawRun() {
   main.replaceChildren(h("div", { class: "run" },
     h("div", { class: "run-left stack" },
       hasSlides ? stage : h("p", { class: "card muted" }, lesson.kind === "survey" ? "설문 전용입니다. 학생 화면에는 모든 설문이 보입니다." : "슬라이드가 없는 수업입니다. 학생 화면에는 모든 활동이 보입니다."),
-      // 접속 QR은 「접속 QR」 탭, 전체 응답 CSV는 「학생 관리」에 있다. 「전체 화면」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
-      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn, presentBtn(), presentSyncBtn(),
-        h("button", { class: "ghost", type: "button", onclick() { if (stage.requestFullscreen) stage.requestFullscreen(); } }, "전체 화면")) : null,
+      // 접속 QR은 「접속 QR」 탭, 전체 응답 CSV는 「학생 관리」에 있다. 「동기화」 오른쪽 끝은 슬라이드 오른쪽 끝에 맞춘다(pinRun이 줄 너비도 슬라이드에 맞춤)
+      hasSlides ? h("nav", { class: "pager" }, prev, where, next, h("span", { class: "spacer" }), deckBtn, presentBtn(), presentSyncBtn()) : null,
       classBar()),
     h("aside", { class: "run-right stack" },
       h("section", { class: "card row between" }, openText, openBtn),
@@ -153,7 +151,7 @@ function paintStage(s, editable) {
 }
 
 // ---------- 수업용 화면(TV·빔 프로젝터에 띄우는 창) ----------
-// 「수업 진행」 아래 줄, 「전체 화면」 왼쪽: 「수업용 화면 띄우기」와 「동기화」(창을 처음부터 다시 그린다)
+// 「수업 진행」 아래 줄 오른쪽 끝: 「수업용 화면 띄우기」와 「동기화」(창을 처음부터 다시 그린다)
 function presentBtn() {
   return h("button", { class: "ghost present-btn", type: "button", title: "슬라이드만 따라 보여 주는 창을 엽니다(TV·빔 프로젝터용, 한 개만)", onclick() { openPresent(); } },
     tabIcon("present"), h("span", {}, "수업용 화면 띄우기"));

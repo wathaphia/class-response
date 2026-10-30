@@ -69,15 +69,20 @@ legend { font-weight: 500; margin-bottom: .5rem; padding: 0; }
 /* 버튼 */
 button { font: inherit; border-radius: 10px; min-height: 44px; padding: 0 1rem; cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
+/* 모든 버튼의 바닥 피드백(CLAUDE.md 「버튼」 규칙): 호버·누름은 밝기로 보여 크기와 자리가 변하지 않는다 */
+button { transition: filter .12s; }
+button:hover:not(:disabled) { filter: brightness(.96); }
+button:active:not(:disabled) { filter: brightness(.86); }
 .primary { background: var(--accent); color: #fff; border: 0; font-weight: 700; }
-.primary { transition: background-color .15s, box-shadow .15s, transform .15s; }
-.primary:hover:not(:disabled) { background: var(--accent-ink); box-shadow: 0 3px 10px rgba(36, 86, 214, .35); transform: translateY(-1px); }
-.primary:active:not(:disabled) { transform: none; box-shadow: none; }
+.primary { transition: background-color .15s, box-shadow .15s, filter .12s; }
+.primary:hover:not(:disabled) { background: var(--accent-ink); box-shadow: 0 3px 10px rgba(36, 86, 214, .35); }
+.primary:active:not(:disabled) { box-shadow: none; }
 /* 편집기 저장 버튼: 바꾼 내용이 없으면 연한 회색 「저장됨」 */
 .primary.save-btn:disabled { opacity: 1; background: #e8ebf0; color: #8a93a3; cursor: not-allowed; }
 .ghost { background: #fff; color: var(--ink); border: 1px solid var(--field); }
 .ghost:hover:not(:disabled) { border-color: var(--accent); }
 .link { background: none; border: 0; color: var(--accent); padding: 0 .4rem; }
+.link:hover:not(:disabled) { text-decoration: underline; }
 .danger { color: var(--bad); }
 .big { min-height: 52px; font-size: 1.05rem; width: 100%; }
 
@@ -147,8 +152,6 @@ main.lesson textarea, main.lesson input[type=text] { font-size: 1.05rem; }
 .pager { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .where { font-weight: 700; min-width: 4.5rem; text-align: center; }
 .stage { position: relative; aspect-ratio: 16 / 9; background: #fff; border-radius: 12px; }
-.stage:fullscreen { max-width: none !important; display: flex; align-items: center; justify-content: center; background: #000; }
-.stage:fullscreen .slide { border: 0; border-radius: 0; max-height: 100vh; }
 main.lesson .slide { cursor: zoom-in; }
 /* 학생: 슬라이드를 누르면 화면 가득 */
 .slide-zoom { position: fixed; inset: 0; z-index: 40; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: zoom-out; }
@@ -735,6 +738,11 @@ td.grid-cell > span { white-space: nowrap; }
 /* 선생님 줄(「빼기」 단추)도 개발자 줄과 같은 높이: 단추가 줄 높이를 늘리지 않게 */
 .teachers-table button { min-height: 0; padding-block: 0; line-height: inherit; }
 .teachers-table td.row { display: table-cell; }
+.role-switch { --sw: var(--accent); display: inline-flex; align-items: center; gap: .35rem; padding-inline: .2rem .55rem; border: 0; border-radius: 999px; background: var(--sw); color: #fff; font-size: .8rem; font-weight: 600; transition: background .15s; }
+.role-switch.on { --sw: #e8710a; flex-direction: row-reverse; padding-inline: .55rem .2rem; }
+.role-switch .knob { width: .85em; height: .85em; border-radius: 50%; background: #fff; }
+.role-switch:hover { filter: brightness(1.08); }
+.role-switch:focus-visible { outline: 2px solid var(--sw); outline-offset: 2px; }
 .teachers-table td.row button + button { margin-left: .6rem; }
 .teachers-table .add-cell { position: relative; }
 .teachers-table .add-spacer { visibility: hidden; }
