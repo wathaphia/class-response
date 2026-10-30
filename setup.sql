@@ -575,6 +575,23 @@ create policy slides_teacher_update on storage.objects for update to authenticat
 create policy slides_teacher_delete on storage.objects for delete to authenticated using (bucket_id = 'slides' and is_teacher());
 
 -- ------------------------------------------------------------
+-- 인증 메일 기록: 함수 send-email(class-tools\mail-hook)이 Gmail(Apps Script, 하루 100통)로 보낼 때마다 한 줄. 화면에선 못 읽음(서비스 키만)
+create table if not exists mail_log (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  kind text not null
+);
+alter table mail_log enable row level security;
+
+-- 비밀번호 재설정 전에: 이 이메일에 연결된 계정이 있는가(없으면 메일을 보내지 않고 화면에 알림)
+create or replace function email_has_account(p_email text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from auth.users where lower(email) = lower(trim(p_email)));
+$$;
+revoke all on function email_has_account(text) from public;
+grant execute on function email_has_account(text) to anon, authenticated;
+
+-- ------------------------------------------------------------
 -- 기타 관리(교사 화면): 무료 한도에 견줄 사용량. 교사만 부를 수 있다.
 -- 접속 중 = 최근 20초 안에 수업 화면을 연 학생(교사 화면의 「접속 중」과 같은 기준)
 -- ------------------------------------------------------------
@@ -593,6 +610,7 @@ begin
     'students', (select count(*) from students),
     'lessons', (select count(*) from lessons),
     'responses', (select count(*) from responses),
+    'mail_day', (select count(*) from mail_log where at > now() - interval '24 hours'),
     'tables', (select jsonb_agg(jsonb_build_object('name', relname, 'rows', n_live_tup, 'bytes', pg_total_relation_size(relid))
                                 order by pg_total_relation_size(relid) desc)
                from pg_stat_user_tables where schemaname = 'public'));
