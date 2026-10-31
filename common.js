@@ -86,6 +86,8 @@ function centerNote(text, then) {
 const SB_URL = String(SUPABASE_URL).trim().replace(/\/(rest|auth|storage)\/v1.*$/, "").replace(/\/+$/, "");
 const configured = (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(SB_URL))
   && !/여기에/.test(SUPABASE_KEY) && String(SUPABASE_KEY).trim() !== "";
+// 인증·재설정 메일 링크의 결과(주소 # 뒤). Supabase 가 곧 지우므로 만들기 전에 읽어 둔다
+const authLink = new URLSearchParams(location.hash.slice(1));
 const sb = configured ? supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { global: { fetch: watchedFetch }, auth: { storage: loginStore("teacher") } }) : null;
 // 수업 내용(lessons·activities·responses)을 바꾸는 요청이 성공하면 onDataWrite 를 부른다.
 // 교사 화면은 이때 학생들에게 「nudge」 신호를 보내, 학생 화면이 자주 묻지 않고도 바로 새 내용을 받게 한다.

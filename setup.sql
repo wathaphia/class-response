@@ -610,6 +610,14 @@ $$;
 revoke all on function email_has_account(text) from public;
 grant execute on function email_has_account(text) to anon, authenticated;
 
+-- 가입하기: 메일의 인증 링크를 눌렀는가(가입 창이 3초마다 묻는다). 존재 여부는 email_has_account 로도 이미 알 수 있다
+create or replace function email_confirmed(p_email text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from auth.users where lower(email) = lower(trim(p_email)) and email_confirmed_at is not null);
+$$;
+revoke all on function email_confirmed(text) from public;
+grant execute on function email_confirmed(text) to anon, authenticated;
+
 -- 비밀번호 재설정 메일 횟수: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 화면은 보내기 전에 claim_password_reset 으로 한 번을 받아 간다
 create table if not exists reset_log (
   id bigint generated always as identity primary key,
