@@ -98,8 +98,10 @@ addEventListener("DOMContentLoaded", () => {
 
 // ---------- 로그인 ----------
 // fresh: 방금 로그인 칸에서 들어옴. 아니면 저장된 로그인(자동 로그인·새로 고침)으로 들어온 것.
+// 「signup」: 가입하기 칸에서 들어옴 → 교사가 아니면 가운데 알림(자동 로그인 실패와 같이).
 async function init(fresh) {
   const { data } = await sb.auth.getSession();
+  if (authLink.get("type") === "signup" || authLink.get("error_code")) return showEmailVerified(!authLink.get("error_code"));
   if (!data.session) return showLogin();
   me = data.session.user;
   // 저장된 로그인은 서버에 계정이 아직 있는지 확인한다(지워진 계정이면 getUser 가 실패)
@@ -107,10 +109,10 @@ async function init(fresh) {
   const { data: ok, error } = gone ? { data: false, error: gone } : await sb.rpc("is_teacher");
   if (error || !ok) {
     if (passwordRecovery) return showPasswordRecovery();   // 교사 화면을 못 쓰는 계정: 비밀번호만 바꾼다
-    if (!fresh) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다");
+    if (fresh !== true) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다. 개발자에게 문의해 주세요.");
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
       h("h1", {}, "교사로 등록되지 않은 계정입니다"),
-      h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
+      h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. 개발자에게 문의해 주세요. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
       error ? h("p", { class: "error" }, error.message) : null,
       h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))));
   }
@@ -134,7 +136,17 @@ async function autoLoginFailed(text) {
   centerNote(text, () => showLogin());
 }
 
-// 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호 → 「이메일 인증」(확인 메일) → 메일의 링크를 누른 뒤 「가입하기」로 들어온다.
+// 인증 메일의 링크로 열린 창: 결과만 알리고 로그인은 남기지 않는다(가입은 원래 창의 「가입하기」로)
+async function showEmailVerified(ok) {
+  history.replaceState(null, "", location.pathname + location.search);
+  await sb.auth.signOut({ scope: "local" }).catch(() => {});
+  app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
+    h("h1", {}, ok ? "이메일 인증이 완료되었습니다" : "인증하지 못했습니다"),
+    h("p", {}, ok ? "가입 창으로 돌아가 「가입하기」를 눌러 주세요. 이 창은 닫아도 됩니다."
+      : "만료되었거나 이미 사용한 링크입니다. 원래 창으로 돌아가 메일을 다시 받아 주세요."))));
+}
+
+// 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호(두 번) → 「이메일 인증」(확인 메일) → 메일의 링크를 누르면 「인증완료」로 바뀌고 「가입하기」로 들어온다.
 // 교사 화면은 teachers 표에 있는 이메일(선생님 추가·승격된 학생)만 쓸 수 있다.
 // 비밀번호 재설정 메일: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 서버(claim_password_reset)가 세고 쓴 횟수를 돌려준다.
 const RESET_COOLDOWN = 3;
@@ -183,12 +195,48 @@ function showLogin(signup) {
   const askBtns = [["yes", "예"], ["no", "아니오"]].map(([v, t]) => h("button", { type: "button", role: "radio", "data-v": v, class: v === "no" ? "on" : "", "aria-checked": String(v === "no"), onclick() { pick(v === "yes"); } }, t));
   const ask = signup ? h("div", { class: "stack promoted-ask" }, h("span", {}, "학생에서 승격되었습니까?"),
     h("div", { class: "seg", role: "radiogroup", "aria-label": "학생에서 승격되었습니까?" }, askBtns)) : null;
+  // 비밀번호 다시 입력: 어느 칸이든 고칠 때마다 비교한다(다시 입력 칸이 비어 있으면 아직 표시하지 않음)
+  const pwAgain = signup ? h("input", { type: "password", autocomplete: "new-password", required: true }) : null;
+  const pwMatch = signup ? h("p", { class: "pw-match" }) : null;
+  let verified = false;
+  const syncJoin = () => { if (signup) join.disabled = !verified || pw.value !== pwAgain.value; };
+  const checkPw = () => {
+    const shown = pwAgain.value !== "", same = pw.value === pwAgain.value;
+    pwAgain.classList.toggle("mismatch", shown && !same);
+    pwMatch.classList.toggle("ok", shown && same);
+    pwMatch.classList.toggle("error", shown && !same);
+    pwMatch.textContent = !shown ? "" : same ? "비밀번호가 일치합니다." : "비밀번호가 일치하지 않습니다.";
+    syncJoin();
+  };
+  // 안내 문구는 늘 자리를 차지하고 보이기만 바뀐다(아래 칸이 움직이지 않게)
+  const sentHint = signup ? h("p", { class: "email-hint muted small" }, "메일함에서 「인증하기」를 눌러 주세요. 보이지 않으면 스팸함을 확인해 주세요.") : null;
+  // 메일을 보낸 뒤 인증이 끝났는지 3초마다 묻는다(이 창을 보고 있을 때만, 링크가 유효한 30분 동안)
+  let sentTo = "", watchRun = 0;
+  const watchVerified = async (address) => {
+    const run = ++watchRun, until = Date.now() + 30 * 60000;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 3000));
+      if (run !== watchRun || !email.isConnected) return;
+      if (document.hidden) continue;
+      const { data } = await sb.rpc("email_confirmed", { p_email: address });
+      if (run !== watchRun) return;
+      if (data !== true) continue;
+      verified = true;
+      verify.textContent = "인증완료";
+      verify.disabled = true;
+      verify.classList.add("done");
+      sentHint.classList.remove("on");
+      syncJoin();
+      return;
+    }
+  };
   const verify = signup ? h("button", {
     class: "ghost", type: "button",
     async onclick() {
       const address = email.value.trim();
       if (promoted && (!classNo.value.trim() || !name.value.trim())) { msg.textContent = "학번과 이름을 넣어 주세요."; (classNo.value.trim() ? name : classNo).focus(); return; }
       if (!address || pw.value.length < 6) { msg.textContent = "이메일과 비밀번호(6자 이상)를 넣고 다시 눌러 주세요."; (address ? pw : email).focus(); return; }
+      if (pw.value !== pwAgain.value) { msg.textContent = "비밀번호를 두 칸에 똑같이 넣고 다시 눌러 주세요."; pwAgain.focus(); return; }
       if (!EMAIL_RE.test(address)) { centerNote("이메일 형식이 올바르지 않습니다"); email.focus(); return; }
       verify.disabled = true;
       if (promoted) {
@@ -204,15 +252,34 @@ function showLogin(signup) {
         }
       }
       msg.textContent = "인증 메일을 보내는 중…";
-      const { error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: here } });
+      const { data, error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: here } });
       verify.disabled = false;
       if (error) { msg.textContent = "인증 메일을 보내지 못했습니다: " + error.message; return; }
-      join.disabled = false;
+      // 이미 인증까지 마친 이메일이면 Supabase 는 오류 없이 메일을 보내지 않는다(identities 가 빈 목록)
+      if (!data.user?.identities?.length) { msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
       if (promoted) centerNote("가입 요청을 보냈습니다");
-      msg.textContent = promoted ? "메일함에서 인증 링크를 누르고, 개발자가 가입 요청을 승인하면 「가입하기」로 들어올 수 있습니다."
-        : "메일함에서 인증 링크를 누른 뒤 「가입하기」를 눌러 주세요.";
+      msg.textContent = promoted ? "개발자가 가입 요청을 승인하면 「가입하기」로 들어올 수 있습니다." : "";
+      sentTo = address;
+      sentHint.classList.add("on");
+      watchVerified(address);
     },
   }, "이메일 인증") : null;
+  if (signup) {
+    pw.addEventListener("input", checkPw);
+    pwAgain.addEventListener("input", checkPw);
+    // 메일을 보낸 뒤 이메일을 고치면 인증을 처음부터
+    email.addEventListener("input", () => {
+      if (!sentTo || email.value.trim() === sentTo) return;
+      sentTo = "";
+      watchRun++;
+      verified = false;
+      verify.textContent = "이메일 인증";
+      verify.disabled = false;
+      verify.classList.remove("done");
+      sentHint.classList.remove("on");
+      syncJoin();
+    });
+  }
   const resetIn = h("input", { type: "email", autocomplete: "username", placeholder: "가입한 이메일" });
   const resetMsg = h("p", { class: "msg" });
   const resetBtn = h("button", { class: "ghost", type: "submit" }, "비밀번호 재설정 이메일 보내기");
@@ -238,12 +305,18 @@ function showLogin(signup) {
         msg.textContent = "로그인 중…";
         setRememberLogin("teacher", remember.querySelector("input").checked);   // 세션을 어디에 둘지 로그인 전에 정한다
         const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
-        if (!error) return init(true);
+        if (!error) return init(signup ? "signup" : true);
         msg.textContent = signup && /confirm/i.test(error.message)
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
-          : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
+          : signup && /invalid/i.test(error.message)
+            ? "「이메일 인증」을 누를 때 넣은 비밀번호와 같아야 합니다. 그 비밀번호를 넣어 주세요."
+            : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
-    }, ask, studentBox, h("label", {}, "이메일", email), h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw), verify, join, remember, msg),
+    }, ask, studentBox,
+      signup ? h("div", { class: "email-field" }, h("div", { class: "email-row" }, h("label", {}, "이메일", email), verify), sentHint) : h("label", {}, "이메일", email),
+      h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw),
+      signup ? h("div", { class: "email-field" }, h("label", {}, "비밀번호 다시 입력", pwAgain), pwMatch) : null,
+      join, remember, msg),
     signup ? null : h("p", { class: "center" }, h("button", {
       class: "link", type: "button",
       onclick() { resetBox.hidden = !resetBox.hidden; if (!resetBox.hidden) { resetIn.value = email.value.trim(); resetIn.focus(); } },

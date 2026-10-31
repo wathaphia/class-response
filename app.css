@@ -809,3 +809,14 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .bug-copy { flex-shrink: 0; min-height: 32px; padding: 0 .8rem; font-size: .85rem; }
 .bug-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .bug-text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+
+/* 가입하기: 이메일 칸 오른쪽 인증 단추, 안내·일치 문구는 자리를 미리 차지(아래 칸이 움직이지 않게) */
+.email-field { display: grid; gap: .3rem; }
+.email-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: end; }
+.email-row button { min-height: 46px; white-space: nowrap; }
+.email-row button.done { color: var(--ok); border-color: var(--ok); }
+.email-hint { visibility: hidden; margin: 0; }
+.email-hint.on { visibility: visible; }
+.pw-match { min-height: 1.4em; margin: 0; font-size: .9rem; line-height: 1.4; }
+input.mismatch, input.mismatch:focus { border-color: var(--bad); }
+input.mismatch:focus { outline-color: #fde7e5; }
