@@ -122,7 +122,7 @@ function withdrawCard() {
       location.reload();
     },
   }, h("h3", {}, "회원탈퇴"),
-    h("p", { class: "error" }, "계정과 폴더·보낸 버그 신고가 지워지고 되돌릴 수 없습니다. 내 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다."),
+    h("p", { class: "error" }, "계정과 폴더가 지워지고 되돌릴 수 없습니다. 내 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남고 공동 작업자는 그대로 씁니다. 버그 신고는 「탈퇴한 유저」 이름으로 남습니다."),
     h("label", {}, "현재 비밀번호", pw),
     h("div", { class: "row" },
       h("button", { class: "ghost danger", type: "submit" }, "회원탈퇴"),
@@ -136,7 +136,7 @@ function sharedCard(p) {
   return h("section", { class: "card stack" }, h("h3", {}, "나에게 공유된 수업"),
     h("ul", { class: "collab-list" }, p.shared_with_me.map((s) => h("li", { class: "row between" },
       h("span", {}, h("strong", {}, s.title), h("span", { class: "muted small" }, " · " + (s.owner || "주인 모름"))),
-      h("button", { class: "link danger", type: "button", onclick() { removeCollaborator(s.lesson_id, p.email, "「" + s.title + "」 공동 작업에서 빠질까요?"); } }, "빠지기")))));
+      p.admin ? null : h("button", { class: "link danger", type: "button", onclick() { removeCollaborator(s.lesson_id, p.email, "「" + s.title + "」 공동 작업에서 빠질까요?"); } }, "빠지기")))));
 }
 
 async function removeCollaborator(lessonId, who, text) {
@@ -307,7 +307,7 @@ function collaboratorCard(p) {
     byLesson.size ? h("ul", { class: "collab-list" }, [...byLesson].map(([id, g]) => h("li", {},
       h("strong", {}, g.title), h("span", { class: "muted small" }, " · " + g.code),
       h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, whoText(c, p),
-        h("button", { class: "link danger", type: "button", title: "공동 작업자에서 빼기", "aria-label": c.email + " 빼기",
+        c.email === p.email ? null : h("button", { class: "link danger", type: "button", title: "공동 작업자에서 빼기", "aria-label": c.email + " 빼기",
           onclick: devOnly(() => removeCollaborator(id, c.email, "「" + g.title + "」에서 " + c.email + " 선생님을 뺄까요?")) }, "×")))))))
       : h("p", { class: "muted small" }, "아직 함께 쓰는 선생님이 없습니다."));
 }
@@ -362,7 +362,7 @@ async function checkPassword(email, password) {
 // 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
   const set = async (who, on) => {
-    if (!on && !confirm(who + " 선생님을 뺄까요? 회원탈퇴와 같아서 그 계정과 폴더·버그 신고가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다.")) return false;
+    if (!on && !confirm(who + " 선생님을 뺄까요? 회원탈퇴와 같아서 그 계정과 폴더가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남고 공동 작업자는 그대로 씁니다. 버그 신고는 「탈퇴한 유저」 이름으로 남습니다.")) return false;
     const { data, error } = await sb.rpc("admin_set_teacher", { p_email: who, p_on: on });
     const why = { bad_email: "이메일 형식이 올바르지 않습니다", self: "내 계정은 뺄 수 없습니다" };
     if (error || data.error) { centerNote((on ? "추가하지 못했습니다: " : "빼지 못했습니다: ") + (error ? error.message : why[data.error] || data.error)); return false; }
@@ -436,7 +436,7 @@ function teachersCard(p) {
   const repaint = () => { const old = main && main.querySelector(".teachers-card"); if (old) old.replaceWith(teachersCard(p)); };
   const removeMany = async () => {
     const who = [...picked];
-    if (!confirm(who.length + "명의 선생님을 뺄까요?\n" + who.join(", ") + "\n회원탈퇴와 같아서 그 계정과 폴더·버그 신고가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다.")) return;
+    if (!confirm(who.length + "명의 선생님을 뺄까요?\n" + who.join(", ") + "\n회원탈퇴와 같아서 그 계정과 폴더가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남고 공동 작업자는 그대로 씁니다. 버그 신고는 「탈퇴한 유저」 이름으로 남습니다.")) return;
     const fails = [];
     for (const w of who) {
       const { data, error } = await sb.rpc("admin_set_teacher", { p_email: w, p_on: false });
