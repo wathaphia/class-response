@@ -209,6 +209,8 @@ const OBSERVER_COPIES = 3;
 let copyingLesson = false;
 async function openObserverCopy(src, btn, msg) {
   if (copyingLesson) return;
+  const hasCopy = lessons.some((x) => x.owner === me.id && x.observer_copy && x.copied_from === src.id);
+  if (!hasCopy && !confirm("공동 작업자가 아닌 수업을 관찰자 권한으로 불러오려면 사본을 만들어야 합니다.\n편집 내용은 원본을 덮어쓰지 않고 사본에 저장됩니다. 사본은 최대 " + OBSERVER_COPIES + "개까지 저장되며, 넘치면 먼저 만든 사본부터 삭제됩니다.\n사본을 만들까요?")) return;
   copyingLesson = true;
   const label = btn && btn.textContent;
   const status = (text) => { if (btn) btn.textContent = text; };
@@ -232,9 +234,7 @@ async function openObserverCopy(src, btn, msg) {
     }
     pickedId = copy.id;
     await loadLessons(copy.id);
-    centerNote(data.reused
-      ? "이미 만든 사본을 불러왔습니다. 편집 내용은 원본을 덮어쓰지 않고 이 사본에 저장됩니다."
-      : "별개의 사본을 만들어 불러왔습니다. 편집 내용은 원본을 덮어쓰지 않고 사본에 저장됩니다. 사본은 최대 " + OBSERVER_COPIES + "개까지 저장되며, 이후에는 먼저 저장된 사본부터 삭제됩니다.", null, true);
+    centerNote(data.reused ? "이미 만든 사본을 불러왔습니다." : "사본을 만들어 불러왔습니다.", null, true);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = label; }
     if (msg) msg.textContent = "사본을 만들지 못했습니다: " + (e.message || e);
