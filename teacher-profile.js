@@ -103,7 +103,7 @@ function paintProfile() {
     p && (p.shared_with_me || []).length ? sharedCard(p) : "");   // replaceChildren 은 null 을 「null」 글자로 넣는다
 }
 
-// 회원탈퇴: 현재 비밀번호를 확인하고 계정과 종속 정보를 모두 지운다. 슬라이드는 저장소 권한이 있는 탈퇴 전에 지운다
+// 회원탈퇴: 현재 비밀번호를 확인하고 계정과 계정 고유 정보를 지운다. 수업은 개발자 소유로 남는다
 function withdrawCard() {
   const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
   const msg = h("p", { class: "msg" });
@@ -115,7 +115,6 @@ function withdrawCard() {
       const why = await checkPassword(me.email, pw.value);
       if (why) { msg.textContent = why; return pw.focus(); }
       msg.textContent = "지우는 중…";
-      await removeTeacherSlides(me.email);
       const { data, error } = await sb.rpc("withdraw_account");
       if (error || data.error) { msg.textContent = "탈퇴하지 못했습니다: " + (error ? error.message : data.error); return; }
       await sb.auth.signOut({ scope: "local" }).catch(() => {});
@@ -123,7 +122,7 @@ function withdrawCard() {
       location.reload();
     },
   }, h("h3", {}, "회원탈퇴"),
-    h("p", { class: "error" }, "계정과 내 수업(슬라이드·학생 응답 포함)·폴더·보낸 버그 신고가 모두 지워지고 되돌릴 수 없습니다."),
+    h("p", { class: "error" }, "계정과 폴더·보낸 버그 신고가 지워지고 되돌릴 수 없습니다. 내 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다."),
     h("label", {}, "현재 비밀번호", pw),
     h("div", { class: "row" },
       h("button", { class: "ghost danger", type: "submit" }, "회원탈퇴"),
@@ -363,8 +362,7 @@ async function checkPassword(email, password) {
 // 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
   const set = async (who, on) => {
-    if (!on && !confirm(who + " 선생님을 뺄까요? 회원탈퇴와 같아서 그 계정과 수업(슬라이드·학생 응답 포함)·폴더·버그 신고가 모두 지워지고 되돌릴 수 없습니다.")) return false;
-    if (!on) await removeTeacherSlides(who);
+    if (!on && !confirm(who + " 선생님을 뺄까요? 회원탈퇴와 같아서 그 계정과 폴더·버그 신고가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다.")) return false;
     const { data, error } = await sb.rpc("admin_set_teacher", { p_email: who, p_on: on });
     const why = { bad_email: "이메일 형식이 올바르지 않습니다", self: "내 계정은 뺄 수 없습니다" };
     if (error || data.error) { centerNote((on ? "추가하지 못했습니다: " : "빼지 못했습니다: ") + (error ? error.message : why[data.error] || data.error)); return false; }
@@ -438,10 +436,9 @@ function teachersCard(p) {
   const repaint = () => { const old = main && main.querySelector(".teachers-card"); if (old) old.replaceWith(teachersCard(p)); };
   const removeMany = async () => {
     const who = [...picked];
-    if (!confirm(who.length + "명의 선생님을 뺄까요?\n" + who.join(", ") + "\n회원탈퇴와 같아서 그 계정과 수업(슬라이드·학생 응답 포함)·폴더·버그 신고가 모두 지워지고 되돌릴 수 없습니다.")) return;
+    if (!confirm(who.length + "명의 선생님을 뺄까요?\n" + who.join(", ") + "\n회원탈퇴와 같아서 그 계정과 폴더·버그 신고가 지워지고 되돌릴 수 없습니다. 수업(슬라이드·학생 응답 포함)은 개발자 소유로 남습니다.")) return;
     const fails = [];
     for (const w of who) {
-      await removeTeacherSlides(w);
       const { data, error } = await sb.rpc("admin_set_teacher", { p_email: w, p_on: false });
       if (error || data.error) fails.push(w + ": " + (error ? error.message : data.error)); else picked.delete(w);
     }
