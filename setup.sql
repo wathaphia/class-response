@@ -788,11 +788,12 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 begin
   -- 주인·개발자가 빼거나, 공동 작업자가 스스로 빠진다
   if not (owns_lesson(p_lesson) or (is_teacher() and lower(p_email) = lower(auth.jwt() ->> 'email'))) then raise exception 'not allowed'; end if;
+  if exists (select 1 from teachers where email = lower(p_email) and is_admin) then raise exception '개발자는 공동 작업에서 뺄 수 없습니다'; end if;
   delete from lesson_collaborators where lesson_id = p_lesson and email = lower(p_email);
   return jsonb_build_object('ok', true);
 end $$;
 
--- 회원탈퇴의 본체: 교사 계정과 계정 고유 정보(폴더·버그 신고·재설정 기록·가입 요청·공동 작업 자리)를 지운다. 수업(슬라이드·응답 포함)은 teachers_hand_over 가 개발자 소유로 넘긴다. 개발자 계정은 못 지운다.
+-- 회원탈퇴의 본체: 교사 계정과 계정 고유 정보(폴더·재설정 기록·가입 요청·공동 작업 자리)를 지운다. 수업(슬라이드·응답 포함)은 teachers_hand_over 가 개발자 소유로 넘기고(다른 공동 작업자는 유지), 버그 신고는 쓴 사람만 지워 남긴다(화면에 「탈퇴한 유저」). 개발자 계정은 못 지운다.
 -- 이메일 인증 기록까지 지우므로 같은 이메일로 다시 로그인하면 가입한 적 없는 계정과 같은 문구가 나온다
 create or replace function wipe_teacher(e text)
 returns void language plpgsql security definer set search_path = public as $$
@@ -802,7 +803,7 @@ begin
   select id into gone from auth.users where lower(email) = e limit 1;
   if gone is not null then
     delete from lesson_folders where owner = gone;
-    delete from bug_reports where author = gone;
+    update bug_reports set author = null, author_email = '' where author = gone;
   end if;
   delete from lesson_collaborators where email = e;
   delete from teacher_requests where lower(email) = e;
@@ -987,8 +988,10 @@ create table if not exists bug_reports (
   updated_at   timestamptz not null default now()
 );
 alter table bug_reports enable row level security;
+alter table bug_reports alter column author drop not null;   -- 비면 탈퇴한 유저(wipe_teacher)
+-- security invoker: 화면에서 고칠 때만 쓴 사람을 지킨다(wipe_teacher 는 소유자 권한으로 돌아 쓴 사람을 지울 수 있다)
 create or replace function bug_reports_guard() returns trigger
-language plpgsql security definer set search_path = public as $$
+language plpgsql security invoker set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
     new.author := auth.uid();
@@ -997,7 +1000,7 @@ begin
     if (select count(*) from bug_reports where author = new.author) >= 5 then
       raise exception '버그 제보는 한 사람당 5개까지 쓸 수 있습니다. 예전 제보를 지우거나 고쳐 주세요.';
     end if;
-  else
+  elsif current_user in ('anon', 'authenticated') then
     new.author := old.author; new.author_email := old.author_email; new.created_at := old.created_at;
   end if;
   new.updated_at := now();
@@ -1103,7 +1106,7 @@ create policy observer_read on lesson_students for select to authenticated using
 create policy observer_read on lesson_collaborators for select to authenticated using (is_observer());
 create policy observer_read on student_default for select to authenticated using (is_observer());
 
--- 새 수업은 개발자와 공동 작업으로 만들어진다(선생님·관찰자 모두). 예전 수업에는 소급하지 않는다
+-- 모든 수업은 개발자와 공동 작업이다(선생님·관찰자 모두). 예전 수업은 아래 insert 로 맞춘다
 create or replace function lessons_admin_collab() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -1115,8 +1118,11 @@ begin
 end $$;
 drop trigger if exists lessons_admin_collab on lessons;
 create trigger lessons_admin_collab after insert on lessons for each row execute function lessons_admin_collab();
+insert into lesson_collaborators (lesson_id, email)
+  select l.id, t.email from lessons l join auth.users u on u.id = l.owner join teachers t on t.is_admin and t.email <> lower(u.email)
+  on conflict do nothing;
 
--- 교사가 빠지면(회원탈퇴·빼기·자격 해제·학생 삭제) 수업 전체를 그대로 두고 주인만 개발자로 넘긴다. 폴더는 없이 보인다
+-- 교사가 빠지면(회원탈퇴·빼기·자격 해제·학생 삭제) 수업 전체를 그대로 두고 주인만 개발자로 넘긴다. 다른 공동 작업자는 그대로 남고, 없으면 개발자 혼자의 수업이 된다. 폴더는 없이 보인다
 create or replace function teachers_hand_over() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare gone uuid; dev uuid; dev_email text;
@@ -1142,4 +1148,37 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 revoke all on function admin_set_observer(text, boolean) from public;
+
+-- 가입을 마쳤는가: 인증 메일만 눌렀거나 명단에서 빠진 계정과 구분한다. 로그인이 끝나면 mark_joined 로 켠다
+alter table teachers add column if not exists joined boolean not null default false;
+update teachers t set joined = true where not joined and exists (select 1 from auth.users u where lower(u.email) = t.email and u.email_confirmed_at is not null and u.last_sign_in_at is not null);
+
+create or replace function mark_joined()
+returns void language sql security definer set search_path = public as $$
+  update teachers set joined = true where email = lower(auth.jwt() ->> 'email') and not joined;
+$$;
+revoke all on function mark_joined() from public, anon;
+grant execute on function mark_joined() to authenticated;
+
+-- 「이메일 인증」을 누르기 전에: 가입을 마친 계정이면 registered, 아니면 남은 계정을 지워 처음 가입처럼 인증 메일이 가게 한다.
+-- 수업이 있는 계정은 지우지 않고, 아직 인증하지 않은 계정은 메일 간격(60초)이 지나야 지운다(같은 주소로 메일을 연달아 보내지 못하게)
+create or replace function prepare_signup(p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare e text := lower(trim(p_email)); u auth.users;
+begin
+  select * into u from auth.users where lower(email) = e limit 1;
+  if u.id is null then return jsonb_build_object('state', 'ready'); end if;
+  if exists (select 1 from teachers where email = e and joined) or exists (select 1 from lessons where owner = u.id) then
+    return jsonb_build_object('state', 'registered');
+  end if;
+  if u.email_confirmed_at is null and u.confirmation_sent_at > now() - interval '60 seconds' then
+    return jsonb_build_object('state', 'ready');
+  end if;
+  delete from lesson_folders where owner = u.id;
+  update bug_reports set author = null, author_email = '' where author = u.id;
+  delete from auth.users where id = u.id;
+  return jsonb_build_object('state', 'ready');
+end $$;
+revoke all on function prepare_signup(text) from public;
+grant execute on function prepare_signup(text) to anon, authenticated;
 grant execute on function admin_set_observer(text, boolean) to authenticated;

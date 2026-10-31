@@ -211,7 +211,7 @@ function showLogin(signup) {
     syncJoin();
   };
   // 안내 문구는 늘 자리를 차지하고 보이기만 바뀐다(아래 칸이 움직이지 않게)
-  const sentHint = signup ? h("p", { class: "email-hint muted small" }, "메일함에서 「인증하기」를 눌러 주세요. 보이지 않으면 스팸함을 확인해 주세요.") : null;
+  const sentHint = signup ? h("p", { class: "email-hint muted small" }, "메일함에서 「인증하기」를 눌러 주세요.") : null;
   // 메일을 보낸 뒤 인증이 끝났는지 3초마다 묻는다(이 창을 보고 있을 때만, 링크가 유효한 30분 동안)
   let sentTo = "", watchRun = 0;
   const watchVerified = async (address) => {
@@ -252,12 +252,22 @@ function showLogin(signup) {
         }
       }
       msg.textContent = "인증 메일을 보내는 중…";
+      const failed = (error) => {
+        syncVerify();
+        const text = "인증 메일을 보내지 못했습니다. 오류 코드: " + (error.code || error.status || "없음");
+        centerNote(text);
+        msg.textContent = text + " (" + error.message + ")";
+      };
+      // 가입을 마치지 않은 계정(인증만 함·명단에서 빠짐)은 서버가 지워 처음 가입처럼 메일이 간다
+      const { data: ready, error: readyError } = await sb.rpc("prepare_signup", { p_email: address });
+      if (readyError) return failed(readyError);
+      if (ready.state === "registered") { syncVerify(); msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
       const { data, error } = await sb.auth.signUp({ email: address, password: tempPw, options: { emailRedirectTo: here } });
+      if (error) return failed(error);
       syncVerify();
-      if (error) { msg.textContent = "인증 메일을 보내지 못했습니다: " + error.message; return; }
-      // 이미 인증까지 마친 이메일이면 Supabase 는 오류 없이 메일을 보내지 않는다(identities 가 빈 목록)
+      // prepare_signup 뒤에 다른 곳에서 가입을 마친 경우: Supabase 는 오류 없이 메일을 보내지 않는다(identities 가 빈 목록)
       if (!data.user?.identities?.length) { msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
-      if (promoted) centerNote("가입 요청을 보냈습니다");
+      centerNote((promoted ? "가입 요청과 인증 메일을" : "인증 메일을") + " 성공적으로 보냈습니다. 메일이 보이지 않으면 스팸 메일함을 확인해 주세요.");
       msg.textContent = promoted ? "개발자가 가입 요청을 승인하면 「가입하기」로 들어올 수 있습니다." : "";
       sentTo = address;
       sentHint.classList.add("on");
@@ -327,12 +337,13 @@ function showLogin(signup) {
               return;
             }
           }
+          await sb.rpc("mark_joined");   // 실패해도 다음 로그인 때 다시 켠다
           return init(signup ? "signup" : true);
         }
         msg.textContent = signup && /confirm/i.test(error.message)
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
           : signup && /invalid/i.test(error.message)
-            ? "이 이메일은 전에 인증을 시작한 계정입니다. 「로그인」 칸의 「비밀번호 재설정」으로 비밀번호를 정해 주세요."
+            ? "인증 정보가 맞지 않습니다. 새로 고침한 뒤 「이메일 인증」부터 다시 해 주세요."
             : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
     }, ask, studentBox,

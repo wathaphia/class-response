@@ -38,7 +38,7 @@ function paintBugs() {
     } }, "복사");
     const edited = Date.parse(b.updated_at) - Date.parse(b.created_at) > 2000;
     const head = h("div", { class: "bug-head" },
-      h("span", { class: "muted small" }, (b.author === me.id ? "나 · " : "") + b.author_email + " · " + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
+      h("span", { class: "muted small" }, (b.author === me.id ? "나 · " : "") + (b.author ? b.author_email : "탈퇴한 유저") + " · " + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
       copy);
     if (editing) {
       const box = h("textarea", { class: "bug-text", rows: 5, maxlength: 4000, value: b.body });
