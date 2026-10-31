@@ -100,7 +100,6 @@ addEventListener("DOMContentLoaded", () => {
 
 // ---------- 로그인 ----------
 // fresh: 방금 로그인 칸에서 들어옴. 아니면 저장된 로그인(자동 로그인·새로 고침)으로 들어온 것.
-// 「signup」: 가입하기 칸에서 들어옴 → 교사가 아니면 가운데 알림(자동 로그인 실패와 같이).
 async function init(fresh) {
   const { data } = await sb.auth.getSession();
   if (authLink.get("type") === "signup" || authLink.get("error_code")) return showEmailVerified(!authLink.get("error_code"));
@@ -113,8 +112,8 @@ async function init(fresh) {
     if (passwordRecovery) return showPasswordRecovery();   // 교사 화면을 못 쓰는 계정: 비밀번호만 바꾼다
     if (fresh !== true) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다. 개발자에게 문의해 주세요.");
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
-      h("h1", {}, "교사로 등록되지 않은 계정입니다"),
-      h("p", {}, (me.email || "") + " 계정은 아직 교사로 쓸 수 없습니다. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
+      h("h1", {}, "아직 교사로 승인되지 않았습니다"),
+      h("p", {}, (me.email || "") + " 계정은 아직 교사로 쓸 수 없습니다. 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
       error ? h("p", { class: "error" }, error.message) : null,
       h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))));
   }
@@ -149,7 +148,7 @@ async function showEmailVerified(ok) {
 }
 
 // 「로그인 | 가입하기」. 가입하기: 이메일·비밀번호(두 번) → 「이메일 인증」(확인 메일) → 메일의 링크를 누르면 「인증완료」로 바뀌고 「가입하기」로 들어온다.
-// 교사 화면은 teachers 표에 있는 이메일(선생님 추가·승격된 학생)만 쓸 수 있다.
+// 교사 화면은 teachers 표에 있는 이메일만 쓸 수 있다. 없는 이메일로 가입하면 개발자의 승인을 기다린다(request_teacher_signup).
 // 비밀번호 재설정 메일: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 서버(claim_password_reset)가 세고 쓴 횟수를 돌려준다.
 const RESET_COOLDOWN = 3;
 async function sendResetMail(address, btn, msgEl) {
@@ -183,20 +182,6 @@ function showLogin(signup) {
   const msg = h("p", { class: "msg" });
   const join = h("button", { class: "primary big", type: "submit", disabled: !!signup }, signup ? "가입하기" : "로그인");
   const remember = rememberBox("teacher");
-  // 가입하기: 「학생에서 승격되었습니까?」 예 → 학번·이름을 더 받아 승격된 학생과 맞는지 보고 가입 요청을 남긴다(개발자가 승인)
-  let promoted = false;
-  const classNo = h("input", { type: "text", autocomplete: "off", placeholder: "예: 10203" });
-  const name = h("input", { type: "text", autocomplete: "off", placeholder: "이름" });
-  const studentBox = h("div", { class: "stack", hidden: true }, h("label", {}, "학번", classNo), h("label", {}, "이름", name));
-  const pick = (yes) => {
-    promoted = yes;
-    studentBox.hidden = !yes;
-    for (const b of askBtns) { const on = (b.dataset.v === "yes") === yes; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); }
-    (yes ? classNo : email).focus();
-  };
-  const askBtns = [["yes", "예"], ["no", "아니오"]].map(([v, t]) => h("button", { type: "button", role: "radio", "data-v": v, class: v === "no" ? "on" : "", "aria-checked": String(v === "no"), onclick() { pick(v === "yes"); } }, t));
-  const ask = signup ? h("div", { class: "stack promoted-ask" }, h("span", {}, "학생에서 승격되었습니까?"),
-    h("div", { class: "seg", role: "radiogroup", "aria-label": "학생에서 승격되었습니까?" }, askBtns)) : null;
   // 비밀번호 다시 입력: 어느 칸이든 고칠 때마다 비교한다(다시 입력 칸이 비어 있으면 아직 표시하지 않음)
   const pwAgain = signup ? h("input", { type: "password", autocomplete: "new-password", required: true }) : null;
   const pwMatch = signup ? h("p", { class: "pw-match" }) : null;
@@ -237,20 +222,7 @@ function showLogin(signup) {
     class: "ghost", type: "button", disabled: true,
     async onclick() {
       const address = email.value.trim();
-      if (promoted && (!classNo.value.trim() || !name.value.trim())) { msg.textContent = "학번과 이름을 넣어 주세요."; (classNo.value.trim() ? name : classNo).focus(); return; }
       verify.disabled = true;
-      if (promoted) {
-        msg.textContent = "승격된 학생인지 확인하는 중…";
-        const { data: r, error: rpcError } = await sb.rpc("request_teacher_signup", { p_class_no: classNo.value, p_name: name.value, p_email: address });
-        if (rpcError || r.error) {
-          syncVerify();
-          const why = { pending: "이미 다른 이메일로 가입 요청이 들어가 있습니다. 개발자에게 알려 주세요", no_match: "학번 또는 이름을 다시 확인해 주세요", bad_email: "이메일 형식이 올바르지 않습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
-          const text = rpcError ? "가입 요청을 보내지 못했습니다" : why[r.error] || r.error;
-          centerNote(text);
-          msg.textContent = rpcError ? text + ": " + rpcError.message : "";
-          return;
-        }
-      }
       msg.textContent = "인증 메일을 보내는 중…";
       const failed = (error) => {
         syncVerify();
@@ -262,13 +234,14 @@ function showLogin(signup) {
       const { data: ready, error: readyError } = await sb.rpc("prepare_signup", { p_email: address });
       if (readyError) return failed(readyError);
       if (ready.state === "registered") { syncVerify(); msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
+      if (ready.state === "pending") { syncVerify(); msg.textContent = ""; centerNote("가입 승인을 기다리고 있습니다. 개발자가 승인하면 로그인할 수 있습니다.", null, true); return; }
       const { data, error } = await sb.auth.signUp({ email: address, password: tempPw, options: { emailRedirectTo: here } });
       if (error) return failed(error);
       syncVerify();
       // prepare_signup 뒤에 다른 곳에서 가입을 마친 경우: Supabase 는 오류 없이 메일을 보내지 않는다(identities 가 빈 목록)
       if (!data.user?.identities?.length) { msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
-      centerNote((promoted ? "가입 요청과 인증 메일을" : "인증 메일을") + " 성공적으로 보냈습니다. 메일이 보이지 않으면 스팸 메일함을 확인해 주세요.");
-      msg.textContent = promoted ? "개발자가 가입 요청을 승인하면 「가입하기」로 들어올 수 있습니다." : "";
+      centerNote("인증 메일을 성공적으로 보냈습니다. 메일이 보이지 않으면 스팸 메일함을 확인해 주세요.", null, true);
+      msg.textContent = "";
       sentTo = address;
       sentHint.classList.add("on");
       watchVerified(address);
@@ -328,17 +301,34 @@ function showLogin(signup) {
           ({ error } = await sb.auth.signInWithPassword({ email: address, password: pw.value }));   // 전에 비밀번호까지 정한 계정
         }
         if (!error) {
-          // 로그인 칸: 탈퇴·제외되어 교사가 아니고 승인을 기다리지도 않으면 가입한 적 없는 계정과 같은 문구
-          if (!signup) {
-            const { data: ok, error: notSure } = await sb.rpc("is_teacher");
-            if (!notSure && !ok && (await sb.rpc("has_teacher_request")).data === false) {
+          // 가입하기: 명단에 있는 이메일은 바로 가입, 없으면 승인 대기 목록에 넣고 로그인 칸으로
+          if (signup) {
+            const { data: r, error: reqError } = await sb.rpc("request_teacher_signup");
+            if (reqError) {
               await sb.auth.signOut({ scope: "local" }).catch(() => {});
-              msg.textContent = "로그인하지 못했습니다: Invalid login credentials";
+              msg.textContent = "가입하지 못했습니다: " + reqError.message;
               return;
             }
+            if (r.state === "teacher") {
+              await sb.rpc("mark_joined");   // 실패해도 다음 로그인 때 다시 켠다
+              await init(true);
+              centerNote("가입이 완료되었습니다.");
+              return;
+            }
+            app.replaceChildren();
+            await sb.auth.signOut({ scope: "local" }).catch(() => {});
+            centerNote("가입 요청을 보냈습니다. 개발자가 승인하면 로그인할 수 있습니다.", () => showLogin(), true);
+            return;
+          }
+          // 로그인 칸: 탈퇴·제외되어 교사가 아니고 승인을 기다리지도 않으면 가입한 적 없는 계정과 같은 문구
+          const { data: ok, error: notSure } = await sb.rpc("is_teacher");
+          if (!notSure && !ok && (await sb.rpc("has_teacher_request")).data === false) {
+            await sb.auth.signOut({ scope: "local" }).catch(() => {});
+            msg.textContent = "로그인하지 못했습니다: Invalid login credentials";
+            return;
           }
           await sb.rpc("mark_joined");   // 실패해도 다음 로그인 때 다시 켠다
-          return init(signup ? "signup" : true);
+          return init(true);
         }
         msg.textContent = signup && /confirm/i.test(error.message)
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
@@ -346,7 +336,7 @@ function showLogin(signup) {
             ? "인증 정보가 맞지 않습니다. 새로 고침한 뒤 「이메일 인증」부터 다시 해 주세요."
             : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
-    }, ask, studentBox,
+    },
       signup ? h("div", { class: "email-field" }, h("div", { class: "email-row" }, h("label", {}, "이메일", email), verify), sentHint) : h("label", {}, "이메일", email),
       h("label", {}, "비밀번호" + (signup ? " (6자 이상)" : ""), pw),
       signup ? h("div", { class: "email-field" }, h("label", {}, "비밀번호 다시 입력", pwAgain), pwMatch) : null,
@@ -501,8 +491,6 @@ async function save(table, row, id) {
 }
 
 const nameOf = (s) => ((s.class_no || "") + " " + s.name).trim();   // 이름만으로 들어온 학생은 학번이 비어 있다
-// 승격할 때 이메일을 비워 두면 들어가는 자리표시 이메일(가입 요청을 승인하면 진짜 이메일로 바뀐다)
-const isPendingEmail = (e) => /@promoted\.invalid$/.test(e || "");
 const studentById = (id) => students.find((s) => s.id === id);
 const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentById(r.student_id))
   .map((r) => ({ name: nameOf(studentById(r.student_id)), answers: r.answers, r }));

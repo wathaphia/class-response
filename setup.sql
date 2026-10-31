@@ -735,12 +735,10 @@ begin
   if not found then raise exception 'not a teacher'; end if;
   if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
   return jsonb_build_object(
-    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at, 'student', t.student_id is not null,
-    'promoted', promoted_students(),   -- 선생님으로 승격된 학생(아래)
-    -- 공동 작업자로 고를 수 있는 다른 선생님(「선생님 추가」로 넣은 선생님 먼저, 그다음 승격된 학생)
-    'colleagues', coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'account', u.id is not null,
-        'class_no', s.class_no, 'name', s.name) order by s.id is not null, s.class_no, s.name, x.email)
-      from teachers x left join students s on s.id = x.student_id left join auth.users u on lower(u.email) = x.email
+    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at,
+    -- 공동 작업자로 고를 수 있는 다른 선생님
+    'colleagues', coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'account', u.id is not null) order by x.email)
+      from teachers x left join auth.users u on lower(u.email) = x.email
       where x.email <> me), '[]'::jsonb),
     'own', (select count(*) from lessons where owner = auth.uid()),
     'shared', (select count(*) from lesson_collaborators where email = me),
@@ -757,10 +755,9 @@ begin
         'observer', x.is_observer, 'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id),
         'reset_used', (select count(*) from reset_log r where r.email = x.email and not r.waived and r.at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')) order by x.created_at)
       from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end,
-    -- (개발자) 승격된 학생의 가입 요청(아래 teacher_requests)
-    'requests', case when t.is_admin or t.is_observer then coalesce((select jsonb_agg(jsonb_build_object('student_id', r.student_id, 'class_no', s.class_no, 'name', s.name,
-        'email', r.email, 'at', r.created_at, 'confirmed', u.email_confirmed_at is not null) order by r.created_at)
-      from teacher_requests r join students s on s.id = r.student_id left join auth.users u on lower(u.email) = r.email), '[]'::jsonb) end);
+    -- (개발자) 승인 대기 중인 가입 요청(아래 teacher_requests)
+    'requests', case when t.is_admin or t.is_observer then coalesce((select jsonb_agg(jsonb_build_object('email', r.email, 'at', r.created_at) order by r.created_at)
+      from teacher_requests r), '[]'::jsonb) end);
 end $$;
 
 -- 공동 작업자 추가: 상대 교사의 6자리 ID와 나눌 수업들(내 수업만, 개발자는 모든 수업)
@@ -829,7 +826,7 @@ grant execute on function withdraw_account() to authenticated;
 
 drop function if exists teacher_slides(text);   -- 수업을 넘기므로 탈퇴 때 슬라이드를 지우지 않는다
 
--- 로그인한 계정의 가입 요청이 승인을 기다리는지(승격된 학생)
+-- 로그인한 계정의 가입 요청이 승인을 기다리는지
 create or replace function has_teacher_request()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from teacher_requests where lower(email) = lower(auth.jwt() ->> 'email'));
@@ -844,7 +841,11 @@ declare e text := lower(trim(p_email));
 begin
   if not is_admin() then raise exception 'admin only'; end if;
   if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
-  if p_on then insert into teachers (email) values (e) on conflict do nothing;
+  if p_on then
+    -- 승인을 기다리던 이메일은 이미 가입 절차를 마친 계정이다(비밀번호를 지켜야 하니 joined 로 넣어 prepare_signup 이 지우지 않게)
+    insert into teachers (email, joined) values (e, exists (select 1 from teacher_requests where email = e))
+      on conflict (email) do update set joined = teachers.joined or excluded.joined;
+    delete from teacher_requests where email = e;
   else
     if e = lower(auth.jwt() ->> 'email') then return jsonb_build_object('error', 'self'); end if;
     perform wipe_teacher(e);
@@ -867,115 +868,65 @@ grant execute on function can_lesson(uuid) to authenticated;
 grant execute on function owns_lesson(uuid) to authenticated;
 
 -- ------------------------------------------------------------
--- 학생을 선생님으로 승격(개발자만, 「학생 관리」에서): 학생 계정에 로그인 이메일을 붙여 teachers 에 넣는다.
--- 승격된 학생은 그 이메일로 교사 화면의 「가입하기」를 해 로그인하고,
--- 선생님들은 「공동 작업자 추가」에서 승격된 학생이나 「선생님 추가」로 넣은 선생님을 골라 수업을 함께 쓴다.
--- 학생 계정을 지우면 선생님 자격도 함께 없어진다(그 사람이 만든 수업은 개발자 수업으로 넘어간다).
+-- 가입 승인: 교사 화면 「가입하기」를 끝까지 마쳤는데 teachers 에 없는 이메일이면 요청이 남고,
+-- 개발자가 「전체 선생님 및 학생」 → 선생님 관리의 「승인 대기 중」에서 승인·거절한다.
+-- 개발자가 미리 「선생님 추가」로 넣어 둔 이메일은 요청 없이 바로 가입된다.
 -- ------------------------------------------------------------
-alter table teachers add column if not exists student_id uuid references students(id) on delete cascade;
-create unique index if not exists teachers_student_key on teachers (student_id);
-
-create or replace function promote_student(p_student uuid, p_email text)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare e text := lower(trim(p_email));
-begin
-  if not is_admin() then raise exception 'admin only'; end if;
-  -- 이메일을 비워 두면 임시 주소(가입 전)를 붙이고, 학생이 「가입하기」에서 보낸 요청을 개발자가 승인할 때 진짜 이메일로 바뀐다
-  if coalesce(e, '') = '' then e := 'pending-' || replace(p_student::text, '-', '') || '@promoted.invalid'; end if;
-  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
-  if not exists (select 1 from students where id = p_student) then return jsonb_build_object('error', 'no_student'); end if;
-  if exists (select 1 from teachers where student_id = p_student) then return jsonb_build_object('error', 'already'); end if;
-  if exists (select 1 from teachers where email = e) then return jsonb_build_object('error', 'email_taken'); end if;
-  insert into teachers (email, student_id) values (e, p_student);
-  return jsonb_build_object('ok', true, 'code', (select code from teachers where email = e));
+-- 옛 학생 승격(teachers.student_id, 학생 기준 요청 표)을 걷어 낸다
+drop function if exists promote_student(uuid, text);
+drop function if exists demote_student(uuid);
+drop function if exists promoted_students();
+drop function if exists request_teacher_signup(text, text, text);
+drop function if exists decide_teacher_request(uuid, boolean);
+alter table teachers drop column if exists student_id;
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'teacher_requests' and column_name = 'student_id') then
+    drop table teacher_requests;
+  end if;
 end $$;
 
--- 선생님 자격 해제: 학생 계정은 그대로 두고, 공동 작업자 권한은 함께 없어진다
-create or replace function demote_student(p_student uuid)
-returns jsonb language plpgsql security definer set search_path = public as $$
-begin
-  if not is_admin() then raise exception 'admin only'; end if;
-  delete from teachers where student_id = p_student and not is_admin;
-  return jsonb_build_object('ok', true);
-end $$;
-
--- 승격된 학생 목록(모든 선생님이 봄: 학생 관리 위쪽 표 · 공동 작업자 고르기)
-create or replace function promoted_students()
-returns jsonb language sql stable security definer set search_path = public as $$
-  select case when is_teacher() then coalesce((select jsonb_agg(jsonb_build_object(
-      'student_id', s.id, 'class_no', s.class_no, 'name', s.name, 'email', t.email, 'code', t.code, 'since', t.created_at,
-      'account', u.id is not null, 'confirmed', u.email_confirmed_at is not null, 'last_sign_in', u.last_sign_in_at,
-      'own', (select count(*) from lessons l where l.owner = u.id),
-      'shared', (select count(*) from lesson_collaborators c where c.email = t.email))
-    order by s.class_no, s.name)
-    from teachers t join students s on s.id = t.student_id left join auth.users u on lower(u.email) = t.email), '[]'::jsonb) end
-$$;
-
-revoke all on function promote_student(uuid, text) from public;
-revoke all on function demote_student(uuid) from public;
-revoke all on function promoted_students() from public;
-grant execute on function promote_student(uuid, text) to authenticated;
-grant execute on function demote_student(uuid) to authenticated;
-grant execute on function promoted_students() to authenticated;
-
--- ------------------------------------------------------------
--- 승격된 학생의 가입 요청: 교사 화면 「가입하기」에서 「학생에서 승격되었습니까? 예」를 고르고 학번·이름·이메일을 적는다.
--- 학번·이름이 승격된 학생과 맞으면 요청이 남고, 개발자가 「전체 선생님 및 학생」 → 선생님 관리에서 승인하면
--- 그 이메일이 그 학생의 교사 로그인 이메일이 된다(승격할 때 적은 이메일은 바뀐다). 학생 한 명에 요청 하나(다시 보내면 덮어씀).
--- ------------------------------------------------------------
 create table if not exists teacher_requests (
-  student_id uuid primary key references students(id) on delete cascade,
-  email      text not null,
+  email      text primary key,
   created_at timestamptz not null default now()
 );
 alter table teacher_requests enable row level security;   -- 정책 없음: 아래 RPC로만 읽고 쓴다
 
--- 승인하면 교사 이메일이 바뀌므로 공동 작업자 표도 따라 바뀌게
-alter table lesson_collaborators drop constraint if exists lesson_collaborators_email_fkey;
-alter table lesson_collaborators add constraint lesson_collaborators_email_fkey
-  foreign key (email) references teachers(email) on delete cascade on update cascade;
-
-create or replace function request_teacher_signup(p_class_no text, p_name text, p_email text)
+-- 「가입하기」: 로그인된 본인 이메일로만. 명단에 있으면 teacher(바로 가입), 없으면 요청을 남기고 pending
+create or replace function request_teacher_signup()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare
-  e text := lower(trim(p_email));
-  sid uuid;
+declare e text := lower(auth.jwt() ->> 'email');
 begin
-  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then return jsonb_build_object('error', 'bad_email'); end if;
-  select s.id into sid from students s join teachers t on t.student_id = s.id
-    where tidy(s.class_no) = tidy(p_class_no) and tidy(s.name) = tidy(p_name) limit 1;
-  if sid is null then return jsonb_build_object('error', 'no_match'); end if;
-  if exists (select 1 from teachers where email = e and student_id is distinct from sid) then return jsonb_build_object('error', 'email_taken'); end if;
-  if exists (select 1 from teacher_requests where student_id = sid and email <> e) then return jsonb_build_object('error', 'pending'); end if;
-  insert into teacher_requests (student_id, email) values (sid, e)
-    on conflict (student_id) do update set created_at = now();
-  return jsonb_build_object('ok', true);
+  if coalesce(e, '') = '' then raise exception 'no email'; end if;
+  if exists (select 1 from teachers where email = e) then return jsonb_build_object('state', 'teacher'); end if;
+  insert into teacher_requests (email) values (e) on conflict do nothing;
+  return jsonb_build_object('state', 'pending');
 end $$;
 
--- 개발자: 가입 요청 승인(p_ok) 또는 거절
-create or replace function decide_teacher_request(p_student uuid, p_ok boolean)
+-- 개발자: 승인(p_ok)하면 선생님이 되고, 거절하면 요청과 계정을 지워 같은 이메일로 다시 가입할 수 있다(수업이 있는 계정은 지우지 않는다)
+create or replace function decide_teacher_request(p_email text, p_ok boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare r teacher_requests;
+declare e text := lower(trim(p_email)); gone uuid;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
-  select * into r from teacher_requests where student_id = p_student;
-  if not found then return jsonb_build_object('error', 'no_request'); end if;
+  if not exists (select 1 from teacher_requests where email = e) then return jsonb_build_object('error', 'no_request'); end if;
   if p_ok then
-    if not exists (select 1 from teachers where student_id = p_student) then
-      delete from teacher_requests where student_id = p_student;
-      return jsonb_build_object('error', 'not_promoted');
+    insert into teachers (email, joined) values (e, true) on conflict (email) do update set joined = true;
+  elsif not exists (select 1 from teachers where email = e) then
+    select id into gone from auth.users where lower(email) = e limit 1;
+    if gone is not null and not exists (select 1 from lessons where owner = gone) then
+      delete from lesson_folders where owner = gone;
+      update bug_reports set author = null, author_email = '' where author = gone;
+      delete from auth.users where id = gone;
     end if;
-    if exists (select 1 from teachers where email = r.email and student_id is distinct from p_student) then return jsonb_build_object('error', 'email_taken'); end if;
-    update teachers set email = r.email where student_id = p_student;
   end if;
-  delete from teacher_requests where student_id = p_student;
-  return jsonb_build_object('ok', true, 'email', r.email);
+  delete from teacher_requests where email = e;
+  return jsonb_build_object('ok', true, 'email', e);
 end $$;
 
-revoke all on function request_teacher_signup(text, text, text) from public;
-revoke all on function decide_teacher_request(uuid, boolean) from public;
-grant execute on function request_teacher_signup(text, text, text) to anon, authenticated;
-grant execute on function decide_teacher_request(uuid, boolean) to authenticated;
+revoke all on function request_teacher_signup() from public, anon;
+revoke all on function decide_teacher_request(text, boolean) from public, anon;
+grant execute on function request_teacher_signup() to authenticated;
+grant execute on function decide_teacher_request(text, boolean) to authenticated;
 
 -- 버그 제보(편집 모드 「버그 제보」 탭): 선생님 누구나 쓰고 모두 읽는다. 고치기·지우기는 쓴 사람과 개발자(is_admin)만.
 -- 한 사람당 5개까지(지우면 다시 쓸 수 있음). 쓴 사람·이메일·시각은 서버가 채운다.
@@ -1160,14 +1111,18 @@ $$;
 revoke all on function mark_joined() from public, anon;
 grant execute on function mark_joined() to authenticated;
 
--- 「이메일 인증」을 누르기 전에: 가입을 마친 계정이면 registered, 아니면 남은 계정을 지워 처음 가입처럼 인증 메일이 가게 한다.
+-- 「이메일 인증」을 누르기 전에: 가입을 마친 계정이면 registered, 승인을 기다리는 계정이면 pending(비밀번호를 정한 계정이라 지우지 않는다), 아니면 남은 계정을 지워 처음 가입처럼 인증 메일이 가게 한다.
 -- 수업이 있는 계정은 지우지 않고, 아직 인증하지 않은 계정은 메일 간격(60초)이 지나야 지운다(같은 주소로 메일을 연달아 보내지 못하게)
 create or replace function prepare_signup(p_email text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare e text := lower(trim(p_email)); u auth.users;
 begin
   select * into u from auth.users where lower(email) = e limit 1;
-  if u.id is null then return jsonb_build_object('state', 'ready'); end if;
+  if u.id is null then
+    delete from teacher_requests where email = e;   -- 계정이 사라진 요청은 남기지 않는다
+    return jsonb_build_object('state', 'ready');
+  end if;
+  if exists (select 1 from teacher_requests where email = e) then return jsonb_build_object('state', 'pending'); end if;
   if exists (select 1 from teachers where email = e and joined) or exists (select 1 from lessons where owner = u.id) then
     return jsonb_build_object('state', 'registered');
   end if;

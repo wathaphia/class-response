@@ -1,7 +1,7 @@
 // 교사 화면 · 「설정」(오른쪽 위 단추)을 누르면 나오는 아래 줄 탭:
 //   「프로필」 내 정보 · 로그아웃 · 비밀번호 재설정 · 회원탈퇴 · 탭 꾸미기(teacher.js startTabEdit) · 나에게 공유된 수업
 //   「전체 수업」 teacher-library.js 의 drawManage 가 .manage-pane 에 그린다(drawLibrary)
-//   「전체 선생님 및 학생」(개발자만) 선생님 관리 · 공동 작업자 · 승격된 학생 · 모든 학생(drawPeople)
+//   「전체 선생님 및 학생」(개발자만) 선생님 관리 · 공동 작업자 · 모든 학생(drawPeople)
 // 받는 곳: Supabase my_profile() · add_collaborator()(개발자만) · remove_collaborator() · admin_set_teacher() · withdraw_account()(setup.sql).
 
 let resetQuotaText;   // 「오늘 3번 중 n번 사용」: 화면을 다시 그려도 깜빡이지 않게 처음 한 번만 읽는다
@@ -179,12 +179,12 @@ function paintPeople() {
   if (tab !== "people" || !page) return;
   const p = profile && !profile.error ? profile : null;
   if (!p || !seesAdminTabs()) return page.replaceChildren(h("p", { class: "muted" }, "불러오는 중…"));
-  page.replaceChildren(teachersCard(p), collaboratorCard(p), promotedCard(), studentsCard());
+  page.replaceChildren(teachersCard(p), collaboratorCard(p), studentsCard());
 }
 
 // ---------- 표에서 여러 줄 고르기(전체 선생님 및 학생) ----------
 // 표마다 고른 줄의 id 모음. 다시 그려도 남고, 없어진 줄은 그릴 때 뺀다
-const peoplePick = { students: new Set(), teachers: new Set(), promoted: new Set() };
+const peoplePick = { students: new Set(), teachers: new Set() };
 function pickPrune(set, ids) { for (const id of [...set]) if (!ids.includes(id)) set.delete(id); }
 function pickCell(set, id, label, repaint) {
   return h("td", { class: "pick" }, h("input", { type: "checkbox", checked: set.has(id), "aria-label": label + " 고르기",
@@ -207,36 +207,6 @@ function bulkBar(set, ids, repaint, ...actions) {
     actions.map((a) => { if (!set.size) a.disabled = true; return a; }));
 }
 
-// 여러 학생 승격: 학생마다 로그인 이메일을 받는다
-function promoteMany(list) {
-  if (list.length === 1) return promoteStudent(list[0]);
-  const emails = list.map((s) => h("input", { type: "email", placeholder: "로그인 이메일 (비워도 됨)","aria-label": nameOf(s) + " 로그인 이메일" }));
-  const msg = h("p", { class: "msg" });
-  const close = openModal(list.length + "명을 선생님으로 승격", h("form", {
-    class: "stack promote-form",
-    async onsubmit(e) {
-      e.preventDefault();
-      const why = { bad_email: "이메일 모양이 아닙니다", no_student: "학생 계정이 없습니다", already: "이미 선생님입니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
-      const fails = [];
-      let ok = 0;
-      for (const [i, s] of list.entries()) {
-        msg.textContent = "승격하는 중… (" + (i + 1) + "/" + list.length + ")";
-        const { data, error } = await sb.rpc("promote_student", { p_student: s.id, p_email: emails[i].value.trim() });
-        if (error || data.error) fails.push(nameOf(s) + ": " + (error ? error.message : why[data.error] || data.error));
-        else { ok++; peoplePick.students.delete(s.id); }
-      }
-      if (fails.length) msg.textContent = ok + "명 승격, " + fails.length + "명 못 함 — " + fails.join(" · ");
-      else { close(); flash(ok + "명을 선생님으로 승격했습니다."); }
-      await loadProfile();
-      if (!fails.length) draw();
-    },
-  },
-    list.map((s, i) => h("label", {}, nameOf(s), emails[i])),
-    h("p", { class: "muted small" }, "이메일을 적으면 학생은 그 이메일로 「가입하기」를 하면 됩니다. 비워 두면 학생이 「가입하기」에서 학번·이름과 쓸 이메일을 적어 가입 요청을 보내고, 「전체 선생님 및 학생」에서 승인합니다."),
-    h("button", { class: "primary", type: "submit" }, list.length + "명 승격"), msg));
-  emails[0].focus();
-}
-
 async function deleteStudents(list) {
   const names = list.slice(0, 10).map(nameOf).join(", ") + (list.length > 10 ? " 외 " + (list.length - 10) + "명" : "");
   if (!confirm(list.length + "명의 학생 계정을 완전히 지울까요?\n" + names + "\n모든 수업에서 빠지고, 모든 수업의 응답이 지워집니다.")) return;
@@ -256,7 +226,6 @@ function studentsCard() {
   const set = peoplePick.students, ids = list.map((s) => s.id);
   if (Array.isArray(allStudents)) pickPrune(set, ids);
   const chosen = list.filter((s) => set.has(s.id));
-  const canPromote = chosen.filter((s) => !promotedOf(s));
   const reloadIcon = h("span", { class: "sync-icon" + (studentsBusy ? " spin" : ""), "aria-hidden": "true" });
   reloadIcon.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>';
   return h("section", { class: "card stack all-students-card" },
@@ -264,17 +233,15 @@ function studentsCard() {
       h("button", { class: "ghost reload-btn", type: "button", disabled: studentsBusy, onclick() { loadAllStudents(true); } }, reloadIcon, studentsBusy ? "읽는 중…" : "새로 읽기")),
     allStudents && allStudents.error ? h("p", { class: "error small" }, allStudents.error) : null,
     !Array.isArray(allStudents) ? (allStudents ? null : h("p", { class: "muted small" }, "불러오는 중…")) : [bulkBar(set, ids, paintStudents,
-      h("button", { class: "ghost small", type: "button", disabled: !canPromote.length, onclick: devOnly(() => promoteMany(canPromote)) }, "승격" + (canPromote.length ? " (" + canPromote.length + ")" : "")),
       h("button", { class: "ghost small danger", type: "button", onclick: devOnly(() => deleteStudents(chosen)) }, "계정 삭제" + (chosen.length ? " (" + chosen.length + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "all-students-table" },
       h("thead", {}, h("tr", {}, pickHead(set, ids, paintStudents), ["이름", "학번(번호)", "들어온 수업", "마지막 접속", "만든 날", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, list.map((s) => h("tr", { class: set.has(s.id) ? "picked-row" : null },
         pickCell(set, s.id, nameOf(s), paintStudents),
-        h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님") : null), h("td", {}, s.class_no || "—"),
+        h("td", {}, s.name), h("td", {}, s.class_no || "—"),
         h("td", {}, (s.lesson_students || []).map((m) => title(m.lesson_id)).join(", ") || "—"),
         h("td", {}, seen(s) ? dateText(seen(s)) : "—"), h("td", {}, dateText(s.created_at)),
         h("td", { class: "actions" },
-          promotedOf(s) ? null : h("button", { class: "link small", type: "button", onclick: devOnly(() => promoteStudent(s)) }, "승격"),
           h("button", {
             class: "link danger", type: "button",
             onclick: devOnly(async () => {
@@ -287,11 +254,8 @@ function studentsCard() {
           }, "계정 삭제")))))))]);
 }
 
-// 공동 작업자 이름: 승격된 학생이면 학번·이름, 아니면 이메일(교사 ID)
-function whoText(c, p) {
-  const s = (p.promoted || []).find((x) => x.email === c.email);
-  return s ? nameOf(s) + " (" + c.email + ")" : c.email + " (" + c.code + ")";
-}
+// 공동 작업자 이름: 이메일(교사 ID)
+const whoText = (c) => c.email + " (" + c.code + ")";
 
 // 공동 작업자(개발자만 붙이고 뗀다): 수업마다 함께 쓰는 선생님
 function collaboratorCard(p) {
@@ -306,13 +270,13 @@ function collaboratorCard(p) {
     h("p", { class: "muted small" }, "선생님들은 공동 작업자를 직접 넣지 못합니다. 개발자는 모든 수업에 함께하며, 여기서 수업에 다른 선생님을 넣습니다."),
     byLesson.size ? h("ul", { class: "collab-list" }, [...byLesson].map(([id, g]) => h("li", {},
       h("strong", {}, g.title), h("span", { class: "muted small" }, " · " + g.code),
-      h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, whoText(c, p),
+      h("div", { class: "row wrap" }, g.list.map((c) => h("span", { class: "chip collab" }, whoText(c),
         c.email === p.email ? null : h("button", { class: "link danger", type: "button", title: "공동 작업자에서 빼기", "aria-label": c.email + " 빼기",
           onclick: devOnly(() => removeCollaborator(id, c.email, "「" + g.title + "」에서 " + c.email + " 선생님을 뺄까요?")) }, "×")))))))
       : h("p", { class: "muted small" }, "아직 함께 쓰는 선생님이 없습니다."));
 }
 
-// 공동 작업자 추가: 다른 선생님(「선생님 추가」로 넣은 선생님 · 승격된 학생) 한 명 + 나눌 수업 고르기(모든 수업)
+// 공동 작업자 추가: 다른 선생님 한 명 + 나눌 수업 고르기(모든 수업)
 function addCollaborator() {
   const all = lessons;
   const people = (profile && profile.colleagues) || [];
@@ -337,9 +301,9 @@ function addCollaborator() {
     },
   },
     h("fieldset", { class: "stack collab-people" }, h("legend", {}, "함께 쓸 선생님"),
-      people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + (p.name ? nameOf(p) : p.email),
-        h("span", { class: "muted small" }, (p.name ? " · " + p.email : "") + " · ID " + p.code + (p.account ? "" : " · 아직 가입 전"))))
-        : h("p", { class: "muted small" }, "고를 수 있는 선생님이 없습니다. 선생님 관리 표의 「추가」로 선생님을 넣거나 학생을 승격해 주세요.")),
+      people.length ? people.map((p, i) => h("label", { class: "check" }, picks[i], " " + p.email,
+        h("span", { class: "muted small" }, " · ID " + p.code + (p.account ? "" : " · 아직 가입 전"))))
+        : h("p", { class: "muted small" }, "고를 수 있는 선생님이 없습니다. 선생님 관리 표의 「추가」로 선생님을 넣어 주세요.")),
     h("fieldset", { class: "stack collab-lessons" }, h("legend", {}, "함께 쓸 수업"),
       all.length ? all.map((l, i) => h("label", { class: "check collab-lesson" }, boxes[i],
         l.slide_count && !isPptx(l) ? h("img", { class: "lesson-thumb mini", src: slideSrc(l, 1, true), alt: "", loading: "lazy" })
@@ -423,10 +387,10 @@ function teachersCard(p) {
     }),
   }, "초기화"));
   const decide = async (r, ok) => {
-    if (!ok && !confirm(nameOf(r) + " 의 가입 요청(" + r.email + ")을 거절할까요?")) return;
-    const { data, error } = await sb.rpc("decide_teacher_request", { p_student: r.student_id, p_ok: ok });
-    const why = { no_request: "요청이 이미 처리되었습니다", not_promoted: "승격이 해제된 학생이라 요청을 지웠습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
-    centerNote(error ? "처리하지 못했습니다: " + error.message : data.error ? why[data.error] || data.error : ok ? nameOf(r) + " 가입을 승인했습니다" : "가입 요청을 거절했습니다");
+    if (!ok && !confirm(r.email + " 의 가입 요청을 거절할까요?\n그 계정도 지워지며, 같은 이메일로 다시 가입할 수 있습니다.")) return;
+    const { data, error } = await sb.rpc("decide_teacher_request", { p_email: r.email, p_ok: ok });
+    const why = { no_request: "요청이 이미 처리되었습니다" };
+    centerNote(error ? "처리하지 못했습니다: " + error.message : data.error ? why[data.error] || data.error : ok ? r.email + " 가입을 승인했습니다" : "가입 요청을 거절했습니다");
     await loadProfile();
   };
   const requests = p.requests || [];
@@ -455,19 +419,19 @@ function teachersCard(p) {
       h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "직위", "수업", "마지막 로그인", "오늘 비밀번호 재설정", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, (p.teachers || []).map((t) => h("tr", { class: picked.has(t.email) ? "picked-row" : null },
         t.admin ? h("td", { class: "pick" }) : pickCell(picked, t.email, t.email, repaint),
-        h("td", {}, t.code), h("td", {}, isPendingEmail(t.email) ? h("span", { class: "muted" }, "가입 전") : t.email),
+        h("td", {}, t.code), h("td", {}, t.email),
         h("td", {}, t.admin ? h("span", { class: "tag warn" }, "개발자") : roleSwitch(t)),
         h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"), resetCell(t),
         h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick: devOnly(() => set(t.email, false)) }, "빼기")))),
         addRow))),
-    requests.length ? h("div", { class: "stack" }, h("h4", {}, "가입 요청 (" + requests.length + ")"),
-      h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
-        h("thead", {}, h("tr", {}, ["학번", "이름", "가입 이메일", "요청한 때", ""].map((t) => h("th", {}, t)))),
+    h("div", { class: "stack" }, h("h4", {}, "승인 대기 중 (" + requests.length + ")"),
+      requests.length ? h("div", { class: "table-wrap" }, h("table", { class: "teachers-table requests-table" },
+        h("thead", {}, h("tr", {}, ["가입 이메일", "요청한 때", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, requests.map((r) => h("tr", {},
-          h("td", {}, r.class_no || "—"), h("td", {}, r.name || "—"),
-          h("td", {}, r.email, r.confirmed ? null : h("span", { class: "tag info" }, "메일 인증 전")), h("td", {}, dateText(r.at)),
+          h("td", {}, r.email), h("td", {}, dateText(r.at)),
           h("td", { class: "row" },
             h("button", { class: "link", type: "button", onclick: devOnly(() => decide(r, true)) }, "승인"),
-            h("button", { class: "link danger", type: "button", onclick: devOnly(() => decide(r, false)) }, "거절")))))))) : "",
-    h("p", { class: "muted small" }, "추가한 선생님은 교사 화면의 「가입하기」에서 같은 이메일로 가입하면 로그인할 수 있습니다. 승격된 학생은 「가입하기」에서 학번·이름을 적어 가입 요청을 보내고, 여기서 승인하면 그 이메일로 로그인합니다."));
+            h("button", { class: "link danger", type: "button", onclick: devOnly(() => decide(r, false)) }, "거절")))))))
+        : h("p", { class: "muted small" }, "승인을 기다리는 가입 요청이 없습니다.")),
+    h("p", { class: "muted small" }, "추가한 선생님은 교사 화면의 「가입하기」에서 같은 이메일로 가입하면 바로 로그인할 수 있습니다. 명단에 없는 이메일로 가입하면 「승인 대기 중」 목록에 들어오고, 여기서 승인하면 로그인할 수 있습니다."));
 }
