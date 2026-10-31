@@ -580,9 +580,6 @@ body.desk-locked { overflow: hidden; }
 .lesson-card { display: grid; gap: .25rem; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: grab; user-select: none; }
 .lesson-card:hover { border-color: #9db4e8; }
 .lesson-card.picked { border-color: var(--accent, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
-.lesson-card.dragging { opacity: .45; }
-.lesson-card.drop-before { box-shadow: -4px 0 0 var(--accent, #2563eb); }
-.lesson-card.drop-after { box-shadow: 4px 0 0 var(--accent, #2563eb); }
 .lesson-card .tag { justify-self: start; }
 /* 학생용 기본 수업 별(첫 슬라이드 오른쪽 위). 크기·위치는 그대로 두고 색만 바꿔 밀림이 없게 */
 .thumb-box { position: relative; }
@@ -597,7 +594,7 @@ body.desk-locked { overflow: hidden; }
 /* 저장/저장됨: 글자가 바뀌어도 너비가 같고, 마우스·누름에 위치가 움직이지 않게 */
 .default-save { min-width: 6.5rem; }
 .default-save:hover:not(:disabled), .default-save:active:not(:disabled) { transform: none; }
-.drop-on { outline: 2px dashed rgba(37, 99, 235, .7); outline-offset: 2px; background: #f2f6ff; }
+.folder.drop { outline: 3px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
 .picked-bar { padding: .6rem .8rem; border-radius: 10px; background: #f2f6ff; }
 .manage .folder-add { display: flex; flex-wrap: nowrap; align-items: center; gap: .5rem; }
 .manage .folder-add input { width: 16rem; max-width: 52vw; }
