@@ -31,7 +31,7 @@ document.addEventListener("click", (e) => {
   const b = e.target instanceof Element && e.target.closest("button, input[type=submit], input[type=button]");
   // 탭·메뉴처럼 화면만 바꾸는 단추(nav 안, 모드 스위치, 프로필)와 편집기 안의 칸 추가·토글은 요청이 아니라 뺀다
   if (!b || b.disabled || b.matches(".arrow, [data-rapid], nav button, .mode-switch, .profile-btn, .editor button:not(.primary, .danger, [type=submit])")) return;
-  // 다시 그려져 새로 생긴 같은 단추도 막되, 다른 폼·창의 같은 글자 단추(줄의 「승격」 → 창의 「승격」)는 막지 않는다
+  // 다시 그려져 새로 생긴 같은 단추도 막되, 다른 폼·창의 같은 글자 단추(줄의 「삭제」 → 창의 「삭제」)는 막지 않는다
   const box = b.closest("form, dialog, .modal, tr");
   const key = (box ? (box.reqBox ||= ++reqBoxes) : 0) + ":" + (b.textContent || b.value || "").trim();
   if (reqCooling(b) | reqCooling(key)) { e.preventDefault(); e.stopImmediatePropagation(); }
@@ -75,9 +75,10 @@ function rememberBox(kind) {
   return h("label", { class: "option remember" }, h("input", { type: "checkbox", name: "remember", checked: rememberLogin(kind) }), h("span", {}, "자동 로그인"));
 }
 // 가운데 알림(잠깐 떴다 서서히 사라짐). then 은 다 사라진 뒤에 부른다.
-function centerNote(text, then) {
+// slow: 긴 문구를 두 배로 오래 보여 준다
+function centerNote(text, then, slow) {
   document.querySelector(".center-note")?.remove();
-  const n = h("div", { class: "center-note" + (then ? " long" : ""), role: "status" }, text);
+  const n = h("div", { class: "center-note" + (then || slow ? " long" : "") + (slow ? " slow" : ""), role: "status" }, text);
   document.body.append(n);
   n.addEventListener("animationend", () => { n.remove(); then?.(); });
 }

@@ -518,96 +518,14 @@ function gridCell(s, now) {
   return t.el;
 }
 
-// ---------- 선생님으로 승격된 학생(학생 관리 위쪽 표) ----------
-// 목록은 프로필(my_profile 의 promoted)과 함께 받는다. 승격·해제는 개발자만(promote_student · demote_student).
-let profileAsk = null;
-function needProfile() {
-  if (profile && !profile.error) return false;
-  if (!profileAsk) profileAsk = loadProfile().finally(() => { profileAsk = null; if (tab === "students") drawStudents(); });
-  return true;
-}
-const promotedOf = (s) => ((profile && profile.promoted) || []).find((p) => p.student_id === s.id);
-
-function promoteStudent(s) {
-  const email = h("input", { type: "email", placeholder: "비워도 됩니다","aria-label": "로그인 이메일" });
-  const msg = h("p", { class: "msg" });
-  const close = openModal(nameOf(s) + " 학생을 선생님으로 승격", h("form", {
-    class: "stack promote-form",
-    async onsubmit(e) {
-      e.preventDefault();
-      msg.textContent = "승격하는 중…";
-      const { data, error } = await sb.rpc("promote_student", { p_student: s.id, p_email: email.value.trim() });
-      const why = { bad_email: "이메일 모양이 아닙니다.", no_student: "학생 계정이 없습니다.", already: "이미 선생님입니다.", email_taken: "그 이메일은 이미 다른 선생님이 씁니다." };
-      if (error || data.error) { msg.textContent = error ? error.message : why[data.error] || data.error; return; }
-      close();
-      flash(nameOf(s) + " 학생을 선생님으로 승격했습니다(교사 ID " + data.code + ").");
-      await loadProfile();
-      draw();
-    },
-  },
-    h("label", {}, "교사 화면에 로그인할 이메일 (선택)", email),
-    h("p", { class: "muted small" }, "이메일을 적으면 학생은 교사 화면(teacher.html)에서 그 이메일로 「가입하기」를 하면 됩니다. 비워 두면 학생이 「가입하기」에서 「학생에서 승격되었습니까? 예」를 골라 학번·이름·이메일을 적어 가입 요청을 보내고, 개발자가 「전체 선생님 및 학생」에서 승인합니다. 학생 계정·응답은 그대로 남고, 개발자가 「전체 선생님 및 학생」에서 이 학생을 수업의 공동 작업자로 넣을 수 있습니다."),
-    h("button", { class: "primary", type: "submit" }, "승격"), msg));
-  email.focus();
-}
-
-function promotedCard() {
-  const list = (profile && profile.promoted) || [];
-  const admin = seesAdminTabs();   // 관찰자는 보이기만 하고 단추는 devOnly 가 막는다
-  if (!list.length && !admin) return h("section", { class: "promoted-card", hidden: true });
-  const account = (p) => !p.account ? h("span", { class: "tag info" }, "계정 만들기 전")
-    : !p.confirmed ? h("span", { class: "tag warn" }, "메일 확인 기다림")
-    : h("span", { class: "tag ok" }, p.last_sign_in ? "마지막 로그인 " + dateText(p.last_sign_in) : "로그인 안 함");
-  // 개발자: 여러 명 골라 한꺼번에 자격 해제(teacher-profile.js bulkBar)
-  const set = peoplePick.promoted, ids = list.map((p) => p.student_id);
-  pickPrune(set, ids);
-  const repaint = () => { const old = main && main.querySelector(".promoted-card"); if (old) old.replaceWith(promotedCard()); };
-  const demoteMany = async () => {
-    const who = list.filter((p) => set.has(p.student_id));
-    if (!confirm(who.length + "명의 선생님 자격을 해제할까요?\n" + who.map((p) => p.name).join(", ") + "\n학생 계정·응답은 그대로이고, 공동 작업자로 함께 쓰던 수업에서 빠집니다.")) return;
-    const fails = [];
-    for (const p of who) {
-      const { error } = await sb.rpc("demote_student", { p_student: p.student_id });
-      if (error) fails.push(p.name + ": " + error.message); else set.delete(p.student_id);
-    }
-    if (fails.length) alert("해제하지 못한 학생:\n" + fails.join("\n")); else flash(who.length + "명의 선생님 자격을 해제했습니다.");
-    await loadProfile();
-    draw();
-  };
-  return h("section", { class: "card stack promoted-card" },
-    h("div", { class: "row between wrap" }, h("h2", {}, "선생님으로 승격된 학생 " + list.length + "명"),
-      h("p", { class: "muted small" }, "승격된 학생은 교사 화면에 로그인해 수업을 만들 수 있고, 개발자가 「전체 선생님 및 학생」에서 공동 작업자로 넣을 수 있습니다." + (admin ? " 아래 학생 표에서 이름 밑의 「승격」을 눌러 추가합니다." : ""))),
-    list.length && admin ? bulkBar(set, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: devOnly(demoteMany) }, "선생님 자격 해제" + (set.size ? " (" + set.size + ")" : ""))) : null,
-    list.length ? h("div", { class: "table-wrap" }, h("table", { class: "promoted-table" },
-      h("thead", {}, h("tr", {}, admin ? pickHead(set, ids, repaint) : null, ["학번(번호)", "이름", "로그인 이메일", "교사 ID", "승격한 날", "교사 계정", "내 수업", "공유받은 수업", ""].map((t) => h("th", {}, t)))),
-      h("tbody", {}, list.map((p) => h("tr", { "data-sid": p.student_id, class: set.has(p.student_id) ? "picked-row" : null },
-        admin ? pickCell(set, p.student_id, p.name, repaint) : null,
-        h("td", {}, p.class_no), h("td", {}, p.name), h("td", {}, isPendingEmail(p.email) ? h("span", { class: "muted" }, "가입 전") : p.email), h("td", {}, p.code), h("td", {}, dateText(p.since)),
-        h("td", {}, account(p)), h("td", {}, p.own + "개"), h("td", {}, p.shared + "개"),
-        h("td", { class: "actions" }, admin ? h("button", {
-          class: "link danger", type: "button",
-          onclick: devOnly(async () => {
-            if (!confirm(p.name + " 학생의 선생님 자격을 해제할까요?\n학생 계정·응답은 그대로이고, 공동 작업자로 함께 쓰던 수업에서 빠집니다. 만든 수업은 개발자 수업으로 넘어갑니다.")) return;
-            const { error } = await sb.rpc("demote_student", { p_student: p.student_id });
-            if (error) return alert(error.message);
-            await loadProfile();
-            draw();
-          }),
-        }, "선생님 자격 해제") : null))))))
-      : h("p", { class: "muted small" }, "아직 승격된 학생이 없습니다."));
-}
-
 function drawStudents() {
   const now = Date.now();
-  needProfile();
-  const admin = seesAdminTabs();
   const live = classOn();   // 「수업 진행」에서 수업을 시작했을 때만 학생 화면을 본다
   const rows = students.map((s) => {
     const mine = responses.filter((r) => r.student_id === s.id);
     const last = mine.reduce((t, r) => (r.updated_at > t ? r.updated_at : t), "");
     return h("tr", {},
-      h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name, promotedOf(s) ? h("span", { class: "tag ok" }, "선생님")   // 승격 단추는 이름 아래 작게(넓은 단추 칸을 더 넓히지 않게)
-        : admin ? h("div", {}, h("button", { class: "link small promote-btn", type: "button", title: "이 학생을 선생님으로 승격", onclick: devOnly(() => promoteStudent(s)) }, "승격")) : null),
+      h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name),
       h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)),
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
@@ -657,7 +575,6 @@ function drawStudents() {
       });
     });
     main.querySelector(".students-count").textContent = "학생 " + students.length + "명";
-    main.querySelector(".promoted-card").replaceWith(promotedCard());
     return;
   }
   for (const td of rows.flatMap((row) => [...row.cells])) if (td.dataset.sid && cells.has(td.dataset.sid)) td.append(cells.get(td.dataset.sid));
@@ -669,7 +586,7 @@ function drawStudents() {
   }, grid ? "■ 일괄 미리보기 끄기" : "▦ 실시간 화면 일괄 미리보기"),
     h("button", { class: "ghost csv-btn", type: "button", title: "접속한 모든 학생에게 화면 보기 허용과 전체 화면 공유를 권합니다(학생이 거절할 수 있음)", onclick: askAllShare }, "공유 요청"),
     h("button", { class: "ghost csv-btn", type: "button", onclick() { downloadCSV(activities, lesson.code + "_전체응답"); } }, "전체 응답 CSV")));
-  main.replaceChildren(promotedCard(), h("section", { class: "card stack" },
+  main.replaceChildren(h("section", { class: "card stack" },
     h("div", { class: "row between wrap" },
       h("h2", { class: "students-count" }, "학생 " + students.length + "명"),
       h("p", { class: "muted small" }, "학생 계정은 웹앱 전체에 하나라서, 수업 코드와 이름만으로 들어옵니다(같은 수업에 같은 이름이면 같은 학생). 실시간 화면은 학생이 가입할 때(또는 수업 화면에서) 「화면 보기」에 동의해야 바로 보이며, 이 수업 화면(보고 있는 쪽, 쓰고 있는 답, 시뮬레이션)만 보입니다. 학생은 언제든 동의를 바꿀 수 있습니다. 크게 보기는 한 번에 한 명, 「일괄 미리보기」는 동의한 학생 모두를 작게(240p 미만, 시뮬레이션 영상 10 FPS) 함께 봅니다. 칸을 누르면 크게 봅니다."),
