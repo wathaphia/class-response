@@ -8,6 +8,13 @@ let pickedId = null;
 // 학생용 기본 수업(개발자만): defaultSaved = 저장된 수업 id(undefined 면 아직 안 읽음), defaultPick = 별로 고른(저장 전) 수업 id
 let defaultSaved;
 let defaultPick = null;
+// 다른 선생님 수업의 내 화면 순서(수업 id 목록, undefined 면 아직 안 읽음). 수업 주인의 순서(lessons.sort)는 건드리지 않는다
+let othersOrder;
+let draggingId = null;
+
+async function saveOthersOrder() {
+  return sb.from("others_lesson_order").upsert({ teacher: me.id, lesson_ids: othersOrder });
+}
 
 async function drawManage() {
   const { data, error } = await sb.from("lesson_folders").select("*").eq("owner", me.id).order("sort").order("created_at");
@@ -22,25 +29,42 @@ async function drawManage() {
     defaultSaved = defaultPick = (d.data && d.data.lesson_id) || null;
     if (tab !== "library" || !main.querySelector(".manage-pane")) return;
   }
+  if (othersOrder === undefined && lessons.some((l) => l.owner !== me.id)) {
+    const o = await sb.from("others_lesson_order").select("lesson_ids").maybeSingle();
+    othersOrder = (o.data && o.data.lesson_ids) || [];
+    if (tab !== "library" || !main.querySelector(".manage-pane")) return;
+  }
   const known = (id) => (lessons.some((l) => l.id === id) ? id : null);   // 지워진 수업은 고른 것이 없는 것으로
   const msg = h("p", { class: "msg" });
-  // 다른 선생님 수업(공유받은 것, 개발자는 모든 선생님 것)은 내 폴더에 넣지 않고 따로 묶는다(끌어 옮기기 없음)
+  // 다른 선생님 수업(공유받은 것, 개발자는 모든 선생님 것)은 내 폴더에 넣지 않고 따로 묶는다(그 묶음 안에서 순서만 바꾼다)
   const mine = (l) => l.owner === me.id;
   const others = lessons.filter((l) => !mine(l));
   const OTHERS = "others";
   const groups = [...folders.map((f) => ({ id: f.id, name: f.name })), { id: null, name: "폴더 없음" }];
-  const inGroup = (gid) => lessons
-    .filter((l) => gid === OTHERS ? !mine(l) : mine(l) && (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null) === gid)
-    .sort((x, y) => (x.sort || 0) - (y.sort || 0) || x.created_at.localeCompare(y.created_at));
+  const groupOf = (l) => mine(l) ? (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null) : OTHERS;
+  // 내가 순서를 정한 적 없는 다른 선생님 수업은 뒤로
+  const othersRank = (l) => { const i = (othersOrder || []).indexOf(l.id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  const inGroup = (gid) => {
+    const list = lessons.filter((l) => groupOf(l) === gid)
+      .sort((x, y) => (x.sort || 0) - (y.sort || 0) || x.created_at.localeCompare(y.created_at));
+    return gid === OTHERS ? list.sort((x, y) => othersRank(x) - othersRank(y)) : list;
+  };
   const picked = () => lessons.find((l) => l.id === pickedId) || null;
 
-  // 끌어 놓기: 수업 카드 위에 놓으면 그 앞에, 폴더 빈 곳에 놓으면 맨 뒤에 넣고 그 폴더 순서를 다시 매겨 저장한다
-  async function moveLesson(id, gid, beforeId) {
+  // 끌어 놓기: 수업 카드의 왼쪽 절반에 놓으면 그 앞에, 오른쪽 절반이면 그 뒤에, 폴더 빈 곳에 놓으면 맨 뒤에 넣고 순서를 다시 매겨 저장한다
+  async function moveLesson(id, gid, targetId, after) {
     const l = lessons.find((x) => x.id === id);
-    if (!l || id === beforeId) return;
+    if (!l || id === targetId) return;
     const list = inGroup(gid).filter((x) => x.id !== id);
-    const at = beforeId ? list.findIndex((x) => x.id === beforeId) : -1;
-    list.splice(at < 0 ? list.length : at, 0, l);
+    const at = targetId ? list.findIndex((x) => x.id === targetId) : -1;
+    list.splice(at < 0 ? list.length : at + (after ? 1 : 0), 0, l);
+    if (gid === OTHERS) {
+      othersOrder = list.map((x) => x.id);
+      drawManage();
+      const r = await saveOthersOrder();
+      if (r.error) alert("순서를 저장하지 못했습니다: " + r.error.message);
+      return;
+    }
     const changes = list.map((x, i) => ({ x, change: { folder_id: gid, sort: i } }))
       .filter(({ x, change }) => (x.folder_id || null) !== change.folder_id || (x.sort || 0) !== change.sort);
     changes.forEach(({ x, change }) => Object.assign(x, change));
@@ -50,15 +74,29 @@ async function drawManage() {
       if (r.error) return alert("옮기지 못했습니다: " + r.error.message);
     }
   }
-  const dropZone = (el, gid, beforeId) => {
-    el.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); el.classList.add("drop-on"); });
-    el.addEventListener("dragleave", () => el.classList.remove("drop-on"));
-    el.addEventListener("drop", (e) => {
+  // 다른 선생님 수업은 그 묶음 안에서만, 내 수업은 내 폴더 사이에서만 옮긴다
+  const canDrop = (gid) => {
+    const l = lessons.find((x) => x.id === draggingId);
+    return !!l && (groupOf(l) === OTHERS) === (gid === OTHERS);
+  };
+  const dropZone = (el, gid, targetId) => {
+    const isAfter = (e) => { const r = el.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };
+    const clear = () => el.classList.remove("drop-on", "drop-before", "drop-after");
+    el.addEventListener("dragover", (e) => {
+      if (!canDrop(gid)) return;
       e.preventDefault();
       e.stopPropagation();
-      el.classList.remove("drop-on");
-      const id = e.dataTransfer.getData("text/plain");
-      if (id) moveLesson(id, gid, beforeId);
+      clear();
+      if (targetId === draggingId) return;
+      el.classList.add(!targetId ? "drop-on" : isAfter(e) ? "drop-after" : "drop-before");
+    });
+    el.addEventListener("dragleave", clear);
+    el.addEventListener("drop", (e) => {
+      if (!canDrop(gid)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clear();
+      moveLesson(draggingId, gid, targetId, !!targetId && isAfter(e));
     });
   };
 
@@ -87,11 +125,11 @@ async function drawManage() {
   };
   const card = (l, top) => {
     const el = h("article", {
-      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: mine(l) && !top ? "true" : "false", tabindex: "0",
+      class: "lesson-card" + (l.id === pickedId ? " picked" : ""), draggable: !top ? "true" : "false", tabindex: "0",
       onclick() { pickedId = l.id; drawManage(); },
       ondblclick() { pickedId = l.id; loadPicked(); },
       onkeydown(e) { if (e.key === "Enter") { pickedId = l.id; drawManage(); } },
-      ondragstart(e) { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; el.classList.add("dragging"); },
+      ondragstart(e) { draggingId = l.id; e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; el.classList.add("dragging"); },
       ondragend() { el.classList.remove("dragging"); },
     },
       h("strong", {}, (l.kind === "survey" ? "[설문] " : "") + l.title),
@@ -105,14 +143,14 @@ async function drawManage() {
           ? h("img", { class: "lesson-thumb", src: slideSrc(l, 1, true), alt: l.title + " 첫 슬라이드", loading: "lazy", draggable: "false" })
           : h("div", { class: "lesson-thumb empty" }, l.kind === "survey" ? "설문" : isPptx(l) ? "PowerPoint 자료" : "슬라이드 없음"),
         viewAll ? star(l) : null));
-    if (mine(l) && !top) dropZone(el, (folders.some((f) => f.id === l.folder_id) ? l.folder_id : null), l.id);
+    if (!top) dropZone(el, groupOf(l), l.id);
     return el;
   };
 
   const folderBox = (g) => {
     const items = inGroup(g.id);
-    const list = h("div", { class: "lesson-list" }, items.length ? items.map(card) : h("p", { class: "muted small" }, "여기로 수업을 끌어 놓으세요."));
-    if (g.id !== OTHERS) dropZone(list, g.id, null);
+    const list = h("div", { class: "lesson-list" }, items.length ? items.map((l) => card(l)) : h("p", { class: "muted small" }, "여기로 수업을 끌어 놓으세요."));
+    dropZone(list, g.id, null);
     const f = folders.find((x) => x.id === g.id);
     return h("section", { class: "card stack folder" },
       h("div", { class: "row between" },
@@ -176,7 +214,7 @@ async function drawManage() {
             lesson = null; tab = "settings"; localStorage.setItem("cra-tab", tab);
             await loadLesson();
           } }, "+ 수업 추가"))),
-      h("p", { class: "muted small" }, "수업 카드를 끌어 폴더에 넣거나 순서를 바꿀 수 있습니다. 카드를 눌러 고른 뒤 「불러오기」(또는 두 번 누르기)를 하면 그 수업이 지금 수업이 됩니다. 화면은 그대로이고, 다른 탭에서 바로 그 수업을 씁니다."),
+      h("p", { class: "muted small" }, "수업 카드를 끌어 폴더에 넣거나 순서를 바꿀 수 있습니다. 다른 선생님 수업은 그 묶음 안에서 순서만 바꿀 수 있고, 내 화면에만 적용됩니다. 카드를 눌러 고른 뒤 「불러오기」(또는 두 번 누르기)를 하면 그 수업이 지금 수업이 됩니다. 화면은 그대로이고, 다른 탭에서 바로 그 수업을 씁니다."),
       error ? h("p", { class: "error" }, "폴더 기능을 쓰려면 Supabase에서 새 setup.sql을 실행해야 합니다.") : null,
       p ? h("div", { class: "row wrap picked-bar" },
         h("strong", {}, "고른 수업: " + p.title + " (" + p.code + ")"),
