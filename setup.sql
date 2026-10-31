@@ -241,6 +241,15 @@ drop policy if exists teacher_all on lesson_folders;
 create policy teacher_all on lesson_folders for all to authenticated
   using (is_teacher() and (owner = auth.uid() or is_admin())) with check (is_teacher() and (owner = auth.uid() or is_admin()));
 alter table lessons add column if not exists folder_id uuid references lesson_folders(id) on delete set null;
+-- 다른 선생님 수업의 내 화면 순서(수업 주인의 lessons.sort 와 별개, 교사마다 한 줄)
+create table if not exists others_lesson_order (
+  teacher    uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+  lesson_ids uuid[] not null default '{}'
+);
+alter table others_lesson_order enable row level security;
+drop policy if exists own_row on others_lesson_order;
+create policy own_row on others_lesson_order for all to authenticated
+  using (is_teacher() and teacher = auth.uid()) with check (is_teacher() and teacher = auth.uid());
 alter table lessons add column if not exists sort int not null default 0;
 
 -- 새 수업 만들기: 겹치지 않는 수업 코드를 서버가 정한다(헷갈리는 0, O, 1, I 는 쓰지 않음)

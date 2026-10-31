@@ -581,6 +581,8 @@ body.desk-locked { overflow: hidden; }
 .lesson-card:hover { border-color: #9db4e8; }
 .lesson-card.picked { border-color: var(--accent, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 .lesson-card.dragging { opacity: .45; }
+.lesson-card.drop-before { box-shadow: -4px 0 0 var(--accent, #2563eb); }
+.lesson-card.drop-after { box-shadow: 4px 0 0 var(--accent, #2563eb); }
 .lesson-card .tag { justify-self: start; }
 /* 학생용 기본 수업 별(첫 슬라이드 오른쪽 위). 크기·위치는 그대로 두고 색만 바꿔 밀림이 없게 */
 .thumb-box { position: relative; }
