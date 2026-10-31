@@ -50,19 +50,20 @@ async function drawManage() {
   };
   const picked = () => lessons.find((l) => l.id === pickedId) || null;
 
-  // 새 순서를 화면에 그리고 저장한다. 다른 선생님 수업은 내 화면 순서만, 내 수업은 폴더와 순서를 수업에 저장한다
+  // 새 순서를 저장한다. 다른 선생님 수업은 내 화면 순서만, 내 수업은 폴더와 순서를 수업에 저장한다.
+  // 칸은 끌어 놓을 때 이미 옮겨 두었다(sortCards). 다시 그리면 폴더 목록을 받는 동안 옛 배치가 보이므로, 폴더가 바뀔 때(개수·빈 칸 안내가 달라짐)만 다시 그린다
   async function saveGroup(gid, list) {
     if (gid === OTHERS) {
       othersOrder = list.map((x) => x.id);
-      drawManage();
       const r = await saveOthersOrder();
       if (r.error) alert("순서를 저장하지 못했습니다: " + r.error.message);
       return;
     }
     const changes = list.map((x, i) => ({ x, change: { folder_id: gid, sort: i } }))
       .filter(({ x, change }) => (x.folder_id || null) !== change.folder_id || (x.sort || 0) !== change.sort);
+    const moved = changes.some(({ x, change }) => (x.folder_id || null) !== change.folder_id);
     changes.forEach(({ x, change }) => Object.assign(x, change));
-    drawManage();
+    if (moved) drawManage();
     for (const { x, change } of changes) {
       const r = await sb.from("lessons").update(change).eq("id", x.id);
       if (r.error) return alert("옮기지 못했습니다: " + r.error.message);
@@ -94,9 +95,15 @@ async function drawManage() {
         let near = null, bd = Infinity;
         box.querySelectorAll(".lesson-card").forEach((c) => { const d = dist(c.getBoundingClientRect()); if (d < bd) { bd = d; near = c; } });
         const r = near && near.getBoundingClientRect();
-        moveLesson(el.dataset.id, box.dataset.gid || null, near && near.dataset.id, near && lastEv.clientX > r.left + r.width / 2);
+        const after = near && lastEv.clientX > r.left + r.width / 2;
+        if (near) near[after ? "after" : "before"](el);
+        else box.querySelector(".lesson-list").replaceChildren(el);   // 빈 폴더: 안내 문구 자리에
+        moveLesson(el.dataset.id, box.dataset.gid || null, near && near.dataset.id, after);
       },
-      onDrop: (cards) => saveGroup(gid, cards.map((c) => lessons.find((x) => x.id === c.dataset.id))),
+      onDrop(cards) {
+        list.append(...cards);
+        saveGroup(gid, cards.map((c) => lessons.find((x) => x.id === c.dataset.id)));
+      },
     });
   };
 
