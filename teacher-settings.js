@@ -627,6 +627,34 @@ async function removeSlideFiles(l) {
   if (names.length) await home.store.remove(names.map((n) => home.folder + n));
 }
 
+// 관찰자 사본: 원본 그림을 사본 전용 폴더로 복사한다(원본이 바뀌거나 지워져도 사본은 그대로). 우리 저장소 밖의 주소면 주소만 쓴다.
+async function copySlideFiles(src, copy, progress) {
+  const home = slideHome(src);
+  let dir = src.slide_dir;
+  if (home) {
+    const store = await newSlideStore();
+    const folder = slideFolder(copy);
+    const tail = /(?:\{n\}\.jpg|deck\.pptx)(\?.*)?$/.exec(dir);
+    const query = tail[1] || "";
+    const names = isPptx(src) ? ["deck.pptx"] : Array.from({ length: src.slide_count }, (_, i) => i + 1).flatMap((n) => /[?&]sm=1/.test(dir) ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]);
+    let done = 0, next = 0;
+    const worker = async () => {
+      while (next < names.length) {
+        const name = names[next++];
+        const r = await fetch(home.store.base + home.folder + name + query);
+        if (!r.ok) throw new Error(name + " 응답 " + r.status);
+        const blob = await r.blob();
+        await store.put(folder + name, blob, blob.type || "image/jpeg");
+        progress(++done, names.length);
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    dir = (isPptx(src) ? "pptx:" : "") + store.base + folder + tail[0];
+  }
+  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: src.slide_count }).eq("id", copy.id);
+  if (error) throw error;
+}
+
 // ---------- CSV ----------
 function downloadCSV(acts, fileName) {
   acts = acts.filter((a) => a.kind !== "sim");

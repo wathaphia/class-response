@@ -1137,3 +1137,30 @@ end $$;
 revoke all on function prepare_signup(text) from public;
 grant execute on function prepare_signup(text) to anon, authenticated;
 grant execute on function admin_set_observer(text, boolean) to authenticated;
+
+-- ---------- 관찰자 사본(2026-10-31) ----------
+-- 관찰자가 공동 작업자가 아닌 수업을 불러오면 주인이 관찰자인 사본을 만든다. 원본 활동은 관찰자가 직접 못 읽으므로 이 함수가 복사한다.
+-- 슬라이드 파일은 브라우저가 사본 폴더로 복사하고, 3개를 넘는 오래된 사본도 브라우저가 파일과 함께 지운다. 여기서는 그 과정이 끊겨도 4개를 넘지 않게만 막는다.
+alter table lessons add column if not exists observer_copy boolean not null default false;
+alter table lessons add column if not exists copied_from uuid references lessons(id) on delete set null;
+create or replace function observer_copy_lesson(p_lesson uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  src lessons;
+  l lessons;
+begin
+  if not is_observer() then raise exception 'not an observer'; end if;
+  select * into src from lessons where id = p_lesson;
+  if not found then raise exception 'no such lesson'; end if;
+  if can_lesson(p_lesson) then raise exception 'not a copy target'; end if;
+  select * into l from lessons where owner = auth.uid() and observer_copy and copied_from = p_lesson order by created_at desc limit 1;
+  if found then return jsonb_build_object('lesson', to_jsonb(l), 'reused', true); end if;
+  delete from lessons where id in (select id from lessons where owner = auth.uid() and observer_copy order by created_at desc offset 3);
+  l := create_lesson(left(case when src.observer_copy then src.title else src.title || ' (관찰자 사본)' end, 100), src.kind);
+  update lessons set observer_copy = true, copied_from = p_lesson where id = l.id returning * into l;
+  insert into activities (lesson_id, kind, title, page, show_answer, named, questions, sort, page_to, html, sim_full, sim_place)
+    select l.id, kind, title, page, show_answer, named, questions, sort, page_to, html, sim_full, sim_place from activities where lesson_id = p_lesson;
+  return jsonb_build_object('lesson', to_jsonb(l), 'reused', false);
+end $$;
+revoke all on function observer_copy_lesson(uuid) from public;
+grant execute on function observer_copy_lesson(uuid) to authenticated;

@@ -15,7 +15,7 @@ async function drawManage() {
   if (tab !== "library" || !pane) return;
   folders = error ? [] : data;
   const admin = !!(profile && profile.admin);
-  const observer = isObserver();   // 다른 선생님 수업은 보기만: 별·저장·불러오기·삭제는 알림만 띄운다
+  const observer = isObserver();   // 다른 선생님 수업은 불러오면 사본으로 열린다. 별·저장·삭제는 알림만 띄운다
   const viewAll = admin || observer;
   if (viewAll && defaultSaved === undefined) {
     const d = await sb.from("student_default").select("lesson_id").maybeSingle();
@@ -66,7 +66,7 @@ async function drawManage() {
   const loadPicked = async (btn) => {
     const l = picked();
     if (!l || l.id === lesson?.id) return;
-    if (!canOpenLesson(l)) return centerNote("개발자 고유의 권한입니다");
+    if (!canOpenLesson(l)) return openObserverCopy(l, btn, msg);
     if (btn) { btn.disabled = true; btn.textContent = "불러오는 중…"; }
     lesson = l;
     await loadLesson();   // 위쪽 수업 고르기 칸과 다른 탭이 이 수업으로 바뀐다
@@ -98,6 +98,7 @@ async function drawManage() {
       h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString()),
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
       mine(l) ? null : h("span", { class: "tag info" }, canOpenLesson(l) ? "공유받음" : "다른 선생님"),
+      l.observer_copy ? h("span", { class: "tag warn observer-copy" }, "관찰자 수정본") : null,
       // 첫 슬라이드(끌기를 방해하지 않게 그림 자체는 끌 수 없게)
       h("div", { class: "thumb-box" },
         l.slide_count && !isPptx(l)
@@ -182,7 +183,7 @@ async function drawManage() {
         p.id === lesson?.id
           ? h("button", { class: "primary", type: "button", disabled: true }, "불러오기 완료")
           : h("button", { class: "primary", type: "button", onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
-        h("button", { class: "ghost", type: "button", onclick() { if (!canOpenLesson(p)) return centerNote("개발자 고유의 권한입니다"); exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+        h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
         // 수업 삭제: 주인 또는 개발자만(공동 작업자는 못 지운다)
         mine(p) || viewAll ? h("button", { class: "ghost danger delete-lesson", type: "button", async onclick(ev) {
           if (!mine(p) && observer) return centerNote("개발자 고유의 권한입니다");
@@ -200,7 +201,46 @@ async function drawManage() {
         : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
       msg),
     groups.map(folderBox),
-    others.length ? folderBox({ id: OTHERS, name: admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : observer ? "다른 선생님 수업(관찰자 · 보기만)" : "공유받은 수업" }) : null));
+    others.length ? folderBox({ id: OTHERS, name: admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : observer ? "다른 선생님 수업(불러오면 내 사본으로 열림)" : "공유받은 수업" }) : null));
+}
+
+// 관찰자가 공동 작업자가 아닌 수업을 불러오면 원본 대신 내 사본을 연다. 사본은 한 사람당 OBSERVER_COPIES 개까지이고 넘치면 오래된 것부터 지운다.
+const OBSERVER_COPIES = 3;
+let copyingLesson = false;
+async function openObserverCopy(src, btn, msg) {
+  if (copyingLesson) return;
+  copyingLesson = true;
+  const label = btn && btn.textContent;
+  const status = (text) => { if (btn) btn.textContent = text; };
+  if (btn) btn.disabled = true;
+  status("사본 만드는 중…");
+  try {
+    const { data, error } = await sb.rpc("observer_copy_lesson", { p_lesson: src.id });
+    if (error) throw error;
+    const copy = data.lesson;
+    // 사본에 그림을 못 옮겼으면(새로 만들었거나 지난번에 도중에 끊겼으면) 옮긴다. 실패하면 새 사본만 지워 다른 사본을 잃지 않게 한다
+    if (src.slide_count && !copy.slide_count) {
+      try { await copySlideFiles(src, copy, (i, n) => status("슬라이드 복사 중 " + i + " / " + n)); }
+      catch (e) { if (!data.reused) await sb.from("lessons").delete().eq("id", copy.id); throw e; }
+    }
+    const { data: all, error: e2 } = await sb.from("lessons").select("*").eq("owner", me.id).eq("observer_copy", true).order("created_at");
+    if (e2) throw e2;
+    for (const old of all.filter((x) => x.id !== copy.id).slice(0, Math.max(all.length - OBSERVER_COPIES, 0))) {
+      const r = await sb.from("lessons").delete().eq("id", old.id);
+      if (r.error) throw r.error;
+      await removeSlideFiles(old).catch(() => {});   // 그림은 수업이 지워진 뒤에
+    }
+    pickedId = copy.id;
+    await loadLessons(copy.id);
+    centerNote(data.reused
+      ? "이미 만든 사본을 불러왔습니다. 편집 내용은 원본을 덮어쓰지 않고 이 사본에 저장됩니다."
+      : "별개의 사본을 만들어 불러왔습니다. 편집 내용은 원본을 덮어쓰지 않고 사본에 저장됩니다. 사본은 최대 " + OBSERVER_COPIES + "개까지 저장되며, 이후에는 먼저 저장된 사본부터 삭제됩니다.", null, true);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    if (msg) msg.textContent = "사본을 만들지 못했습니다: " + (e.message || e);
+  } finally {
+    copyingLesson = false;
+  }
 }
 
 // 슬라이드 PDF: 슬라이드마다 한 쪽. 애니메이션 단계 그림 수업이면 각 슬라이드의 마지막 단계(모두 나타난 화면)를 쓴다.
