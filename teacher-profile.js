@@ -1,11 +1,12 @@
 // 교사 화면 · 「설정」(오른쪽 위 단추)을 누르면 나오는 아래 줄 탭:
-//   「프로필」 내 정보 · 로그아웃 · 비밀번호 재설정 · 탭 꾸미기(teacher.js startTabEdit) · 나에게 공유된 수업
+//   「프로필」 내 정보 · 로그아웃 · 비밀번호 재설정 · 회원탈퇴 · 탭 꾸미기(teacher.js startTabEdit) · 나에게 공유된 수업
 //   「전체 수업」 teacher-library.js 의 drawManage 가 .manage-pane 에 그린다(drawLibrary)
 //   「전체 선생님 및 학생」(개발자만) 선생님 관리 · 공동 작업자 · 승격된 학생 · 모든 학생(drawPeople)
-// 받는 곳: Supabase my_profile() · add_collaborator()(개발자만) · remove_collaborator() · admin_set_teacher()(setup.sql).
+// 받는 곳: Supabase my_profile() · add_collaborator()(개발자만) · remove_collaborator() · admin_set_teacher() · withdraw_account()(setup.sql).
 
 let resetQuotaText;   // 「오늘 3번 중 n번 사용」: 화면을 다시 그려도 깜빡이지 않게 처음 한 번만 읽는다
 let profile = null;   // my_profile() 결과 또는 { error }
+let withdrawOpen = false;   // 프로필의 「회원탈퇴」를 눌러 확인 칸을 열었음
 
 function drawProfile() {
   main.replaceChildren(h("div", { class: "profile-page" }, h("div", { class: "profile-side stack" })));
@@ -91,13 +92,44 @@ function paintProfile() {
         h("button", {
           class: "ghost", type: "button",
           onclick() { passwordChange = true; paintProfile(); },
-        }, "비밀번호 재설정"), resetUsed)),
+        }, "비밀번호 재설정"), resetUsed,
+        p && !p.admin ? h("button", { class: "ghost danger", type: "button", onclick() { withdrawOpen = true; paintProfile(); } }, "회원탈퇴") : null)),
     recovery,
+    withdrawOpen ? withdrawCard() : "",
     h("section", { class: "card stack" },
       h("div", { class: "row between" }, h("h3", {}, "탭 꾸미기"),
         h("button", { class: "primary tabs-edit-btn", type: "button", onclick: startTabEdit }, "탭 꾸미기")),
       h("p", { class: "muted small" }, "탭 이름을 눌러 바로 고치고, 탭을 끌어 두 줄 사이에서 자리를 옮기며, 위 줄 탭마다 수업 모드·편집 모드 중 어디에 보일지 고릅니다. 내 계정에 저장되어 다른 기기에서도 같습니다.")),
     p && (p.shared_with_me || []).length ? sharedCard(p) : "");   // replaceChildren 은 null 을 「null」 글자로 넣는다
+}
+
+// 회원탈퇴: 현재 비밀번호를 확인하고 계정과 종속 정보를 모두 지운다. 슬라이드는 저장소 권한이 있는 탈퇴 전에 지운다
+function withdrawCard() {
+  const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const msg = h("p", { class: "msg" });
+  const card = h("form", {
+    class: "card stack withdraw-card",
+    async onsubmit(e) {
+      e.preventDefault();
+      msg.textContent = "확인하는 중…";
+      const why = await checkPassword(me.email, pw.value);
+      if (why) { msg.textContent = why; return pw.focus(); }
+      msg.textContent = "지우는 중…";
+      await removeTeacherSlides(me.email);
+      const { data, error } = await sb.rpc("withdraw_account");
+      if (error || data.error) { msg.textContent = "탈퇴하지 못했습니다: " + (error ? error.message : data.error); return; }
+      await sb.auth.signOut({ scope: "local" }).catch(() => {});
+      alert("회원탈퇴가 끝났습니다.");
+      location.reload();
+    },
+  }, h("h3", {}, "회원탈퇴"),
+    h("p", { class: "error" }, "계정과 내 수업(슬라이드·학생 응답 포함)·폴더·보낸 버그 신고가 모두 지워지고 되돌릴 수 없습니다."),
+    h("label", {}, "현재 비밀번호", pw),
+    h("div", { class: "row" },
+      h("button", { class: "ghost danger", type: "submit" }, "회원탈퇴"),
+      h("button", { class: "ghost", type: "button", onclick() { withdrawOpen = false; paintProfile(); } }, "취소")), msg);
+  requestAnimationFrame(() => { card.scrollIntoView({ block: "center" }); pw.focus(); });
+  return card;
 }
 
 // 나에게 공유된 수업(공동 작업자는 개발자가 넣는다). 직접 빠질 수는 있다
@@ -331,7 +363,8 @@ async function checkPassword(email, password) {
 // 개발자 전용: 모든 선생님 목록 · 선생님 추가/빼기. 개발자는 모든 수업을 보고 고치며 공동 작업자도 바꿀 수 있다
 function teachersCard(p) {
   const set = async (who, on) => {
-    if (!on && !confirm(who + " 선생님을 교사 목록에서 뺄까요? 그 선생님의 수업은 지워지지 않고 개발자 수업으로 넘어갑니다.")) return false;
+    if (!on && !confirm(who + " 선생님을 뺄까요? 회원탈퇴와 같아서 그 계정과 수업(슬라이드·학생 응답 포함)·폴더·버그 신고가 모두 지워지고 되돌릴 수 없습니다.")) return false;
+    if (!on) await removeTeacherSlides(who);
     const { data, error } = await sb.rpc("admin_set_teacher", { p_email: who, p_on: on });
     const why = { bad_email: "이메일 형식이 올바르지 않습니다", self: "내 계정은 뺄 수 없습니다" };
     if (error || data.error) { centerNote((on ? "추가하지 못했습니다: " : "빼지 못했습니다: ") + (error ? error.message : why[data.error] || data.error)); return false; }
@@ -405,9 +438,10 @@ function teachersCard(p) {
   const repaint = () => { const old = main && main.querySelector(".teachers-card"); if (old) old.replaceWith(teachersCard(p)); };
   const removeMany = async () => {
     const who = [...picked];
-    if (!confirm(who.length + "명의 선생님을 교사 목록에서 뺄까요?\n" + who.join(", ") + "\n그 선생님들의 수업은 지워지지 않고 개발자 수업으로 넘어갑니다.")) return;
+    if (!confirm(who.length + "명의 선생님을 뺄까요?\n" + who.join(", ") + "\n회원탈퇴와 같아서 그 계정과 수업(슬라이드·학생 응답 포함)·폴더·버그 신고가 모두 지워지고 되돌릴 수 없습니다.")) return;
     const fails = [];
     for (const w of who) {
+      await removeTeacherSlides(w);
       const { data, error } = await sb.rpc("admin_set_teacher", { p_email: w, p_on: false });
       if (error || data.error) fails.push(w + ": " + (error ? error.message : data.error)); else picked.delete(w);
     }

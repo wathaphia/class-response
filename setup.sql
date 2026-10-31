@@ -792,7 +792,63 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- 개발자 전용: 선생님 추가·빼기(빼면 그 교사의 수업은 개발자 수업으로 넘어간다, teachers_hand_over)
+-- 회원탈퇴의 본체: 교사 계정과 종속 정보(수업과 그 응답·폴더·버그 신고·재설정 기록·가입 요청·공동 작업 자리)를 모두 지운다. 개발자 계정은 못 지운다.
+-- 이메일 인증 기록까지 지우므로 같은 이메일로 다시 로그인하면 가입한 적 없는 계정과 같은 문구가 나온다
+create or replace function wipe_teacher(e text)
+returns void language plpgsql security definer set search_path = public as $$
+declare gone uuid;
+begin
+  if not exists (select 1 from teachers where email = e and not is_admin) then return; end if;
+  select id into gone from auth.users where lower(email) = e limit 1;
+  if gone is not null then
+    delete from lessons where owner = gone;
+    delete from lesson_folders where owner = gone;
+    delete from bug_reports where author = gone;
+  end if;
+  delete from lesson_collaborators where email = e;
+  delete from teacher_requests where lower(email) = e;
+  delete from reset_log where lower(email) = e;
+  delete from teachers where email = e;
+  if gone is not null then delete from auth.users where id = gone; end if;
+end $$;
+revoke all on function wipe_teacher(text) from public, anon, authenticated;   -- Supabase 는 anon·authenticated 에 따로 실행 권한을 주므로 public 만으로 부족하다
+
+-- 본인: 회원탈퇴
+create or replace function withdraw_account()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare e text := lower(auth.jwt() ->> 'email');
+begin
+  if not is_teacher() then raise exception 'teacher only'; end if;
+  if is_admin() then return jsonb_build_object('error', 'admin'); end if;
+  perform wipe_teacher(e);
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function withdraw_account() from public, anon;
+grant execute on function withdraw_account() to authenticated;
+
+-- 회원탈퇴 전에 화면이 지울 슬라이드 폴더 주소. 탈퇴 뒤에는 저장소 권한이 없고, 다른 교사의 수업이 같은 그림을 쓰면 남긴다
+create or replace function teacher_slides(p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare e text := lower(trim(p_email)); gone uuid;
+begin
+  if not (is_admin() or (is_teacher() and e = lower(auth.jwt() ->> 'email'))) then raise exception 'not allowed'; end if;
+  select id into gone from auth.users where lower(email) = e limit 1;
+  return coalesce((select jsonb_agg(distinct l.slide_dir) from lessons l
+    where l.owner = gone and coalesce(l.slide_count, 0) > 0
+      and not exists (select 1 from lessons x where x.owner is distinct from gone and split_part(x.slide_dir, '?', 1) = split_part(l.slide_dir, '?', 1))), '[]'::jsonb);
+end $$;
+revoke all on function teacher_slides(text) from public, anon;
+grant execute on function teacher_slides(text) to authenticated;
+
+-- 로그인한 계정의 가입 요청이 승인을 기다리는지(승격된 학생)
+create or replace function has_teacher_request()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from teacher_requests where lower(email) = lower(auth.jwt() ->> 'email'));
+$$;
+revoke all on function has_teacher_request() from public, anon;
+grant execute on function has_teacher_request() to authenticated;
+
+-- 개발자 전용: 선생님 추가·빼기(빼면 회원탈퇴와 같이 계정과 종속 정보를 모두 지운다, wipe_teacher)
 create or replace function admin_set_teacher(p_email text, p_on boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare e text := lower(trim(p_email));
@@ -802,7 +858,7 @@ begin
   if p_on then insert into teachers (email) values (e) on conflict do nothing;
   else
     if e = lower(auth.jwt() ->> 'email') then return jsonb_build_object('error', 'self'); end if;
-    delete from teachers where email = e and not is_admin;
+    perform wipe_teacher(e);
   end if;
   return jsonb_build_object('ok', true, 'code', (select code from teachers where email = e));
 end $$;
@@ -1072,7 +1128,7 @@ end $$;
 drop trigger if exists lessons_admin_collab on lessons;
 create trigger lessons_admin_collab after insert on lessons for each row execute function lessons_admin_collab();
 
--- 교사가 빠지면(빼기·자격 해제·학생 삭제) 수업 전체를 그대로 두고 주인만 개발자로 넘긴다. 폴더는 없이 보인다
+-- 교사가 빠지면(자격 해제·학생 삭제) 수업 전체를 그대로 두고 주인만 개발자로 넘긴다. 폴더는 없이 보인다. 회원탈퇴·빼기는 수업을 먼저 지우므로(wipe_teacher) 넘길 것이 없다
 create or replace function teachers_hand_over() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare gone uuid; dev uuid; dev_email text;

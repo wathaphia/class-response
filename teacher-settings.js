@@ -627,6 +627,19 @@ async function removeSlideFiles(l) {
   if (names.length) await home.store.remove(names.map((n) => home.folder + n));
 }
 
+// 회원탈퇴 직전: 그 교사의 슬라이드 그림을 지운다(탈퇴하면 저장소 권한이 없어진다). 못 지워도 탈퇴는 막지 않는다
+async function removeTeacherSlides(email) {
+  const { data } = await sb.rpc("teacher_slides", { p_email: email });
+  for (const dir of data || []) {
+    const home = slideHome({ slide_dir: dir });
+    if (!home) continue;
+    try {
+      const names = await home.store.list(home.folder);
+      if (names.length) await home.store.remove(names.map((n) => home.folder + n));
+    } catch { /* 남은 파일은 저장소에만 남는다 */ }
+  }
+}
+
 // ---------- CSV ----------
 function downloadCSV(acts, fileName) {
   acts = acts.filter((a) => a.kind !== "sim");

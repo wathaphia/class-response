@@ -76,6 +76,8 @@ let editing = null;       // 만들기 탭에서 고치는 중인 활동(사본)
 let main = null;
 let me = null;            // 로그인한 교사(auth user)
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// 가입: 이메일 인증을 먼저 받으려고 계정을 임시 비밀번호로 만들고, 「가입하기」 때 입력한 비밀번호로 바꾼다. 메모리에만 있다(다시 보내도 Supabase 는 처음 비밀번호를 유지하므로 한 값만 쓴다)
+const tempPw = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
 let passwordChange = false;     // 프로필의 「비밀번호 재설정」을 눌러 변경 칸을 열었음(현재 비밀번호도 묻는다)
 let passwordRecovery = false;   // 비밀번호 재설정 메일의 링크로 들어옴: 로그인된 채로 「프로필」의 새 비밀번호 칸을 연다
 let booted = false;              // init 을 끝까지 마쳤는지(탭을 그릴 수 있는지)
@@ -112,7 +114,7 @@ async function init(fresh) {
     if (fresh !== true) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다. 개발자에게 문의해 주세요.");
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
       h("h1", {}, "교사로 등록되지 않은 계정입니다"),
-      h("p", {}, (me.email || "") + " 이메일이 teachers 표에 없습니다. 개발자에게 문의해 주세요. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
+      h("p", {}, (me.email || "") + " 계정은 아직 교사로 쓸 수 없습니다. 승격된 학생이라면 개발자가 가입 요청을 승인한 뒤 다시 로그인해 주세요."),
       error ? h("p", { class: "error" }, error.message) : null,
       h("button", { class: "ghost", type: "button", async onclick() { await sb.auth.signOut(); location.reload(); } }, "로그아웃"))));
   }
@@ -230,20 +232,18 @@ function showLogin(signup) {
       return;
     }
   };
+  const syncVerify = () => { if (!verified) verify.disabled = !EMAIL_RE.test(email.value.trim()); };   // 형식이 완성되면 눌린다
   const verify = signup ? h("button", {
-    class: "ghost", type: "button",
+    class: "ghost", type: "button", disabled: true,
     async onclick() {
       const address = email.value.trim();
       if (promoted && (!classNo.value.trim() || !name.value.trim())) { msg.textContent = "학번과 이름을 넣어 주세요."; (classNo.value.trim() ? name : classNo).focus(); return; }
-      if (!address || pw.value.length < 6) { msg.textContent = "이메일과 비밀번호(6자 이상)를 넣고 다시 눌러 주세요."; (address ? pw : email).focus(); return; }
-      if (pw.value !== pwAgain.value) { msg.textContent = "비밀번호를 두 칸에 똑같이 넣고 다시 눌러 주세요."; pwAgain.focus(); return; }
-      if (!EMAIL_RE.test(address)) { centerNote("이메일 형식이 올바르지 않습니다"); email.focus(); return; }
       verify.disabled = true;
       if (promoted) {
         msg.textContent = "승격된 학생인지 확인하는 중…";
         const { data: r, error: rpcError } = await sb.rpc("request_teacher_signup", { p_class_no: classNo.value, p_name: name.value, p_email: address });
         if (rpcError || r.error) {
-          verify.disabled = false;
+          syncVerify();
           const why = { pending: "이미 다른 이메일로 가입 요청이 들어가 있습니다. 개발자에게 알려 주세요", no_match: "학번 또는 이름을 다시 확인해 주세요", bad_email: "이메일 형식이 올바르지 않습니다", email_taken: "그 이메일은 다른 선생님이 씁니다" };
           const text = rpcError ? "가입 요청을 보내지 못했습니다" : why[r.error] || r.error;
           centerNote(text);
@@ -252,8 +252,8 @@ function showLogin(signup) {
         }
       }
       msg.textContent = "인증 메일을 보내는 중…";
-      const { data, error } = await sb.auth.signUp({ email: address, password: pw.value, options: { emailRedirectTo: here } });
-      verify.disabled = false;
+      const { data, error } = await sb.auth.signUp({ email: address, password: tempPw, options: { emailRedirectTo: here } });
+      syncVerify();
       if (error) { msg.textContent = "인증 메일을 보내지 못했습니다: " + error.message; return; }
       // 이미 인증까지 마친 이메일이면 Supabase 는 오류 없이 메일을 보내지 않는다(identities 가 빈 목록)
       if (!data.user?.identities?.length) { msg.textContent = ""; centerNote("이미 가입된 이메일입니다. 로그인해 주세요."); return; }
@@ -269,15 +269,16 @@ function showLogin(signup) {
     pwAgain.addEventListener("input", checkPw);
     // 메일을 보낸 뒤 이메일을 고치면 인증을 처음부터
     email.addEventListener("input", () => {
-      if (!sentTo || email.value.trim() === sentTo) return;
-      sentTo = "";
-      watchRun++;
-      verified = false;
-      verify.textContent = "이메일 인증";
-      verify.disabled = false;
-      verify.classList.remove("done");
-      sentHint.classList.remove("on");
-      syncJoin();
+      if (sentTo && email.value.trim() !== sentTo) {
+        sentTo = "";
+        watchRun++;
+        verified = false;
+        verify.textContent = "이메일 인증";
+        verify.classList.remove("done");
+        sentHint.classList.remove("on");
+        syncJoin();
+      }
+      syncVerify();
     });
   }
   const resetIn = h("input", { type: "email", autocomplete: "username", placeholder: "가입한 이메일" });
@@ -304,12 +305,34 @@ function showLogin(signup) {
         e.preventDefault();
         msg.textContent = "로그인 중…";
         setRememberLogin("teacher", remember.querySelector("input").checked);   // 세션을 어디에 둘지 로그인 전에 정한다
-        const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
-        if (!error) return init(signup ? "signup" : true);
+        const address = email.value.trim();
+        let { error } = await sb.auth.signInWithPassword({ email: address, password: signup ? tempPw : pw.value });
+        if (signup && !error) {
+          const set = await sb.auth.updateUser({ password: pw.value });
+          if (set.error) {
+            await sb.auth.signOut({ scope: "local" }).catch(() => {});
+            msg.textContent = "비밀번호를 정하지 못했습니다: " + set.error.message;
+            return;
+          }
+        } else if (signup && /invalid/i.test(error.message)) {
+          ({ error } = await sb.auth.signInWithPassword({ email: address, password: pw.value }));   // 전에 비밀번호까지 정한 계정
+        }
+        if (!error) {
+          // 로그인 칸: 탈퇴·제외되어 교사가 아니고 승인을 기다리지도 않으면 가입한 적 없는 계정과 같은 문구
+          if (!signup) {
+            const { data: ok, error: notSure } = await sb.rpc("is_teacher");
+            if (!notSure && !ok && (await sb.rpc("has_teacher_request")).data === false) {
+              await sb.auth.signOut({ scope: "local" }).catch(() => {});
+              msg.textContent = "로그인하지 못했습니다: Invalid login credentials";
+              return;
+            }
+          }
+          return init(signup ? "signup" : true);
+        }
         msg.textContent = signup && /confirm/i.test(error.message)
           ? "아직 이메일 인증을 마치지 않았습니다. 메일함의 인증 링크를 먼저 눌러 주세요."
           : signup && /invalid/i.test(error.message)
-            ? "「이메일 인증」을 누를 때 넣은 비밀번호와 같아야 합니다. 그 비밀번호를 넣어 주세요."
+            ? "이 이메일은 전에 인증을 시작한 계정입니다. 「로그인」 칸의 「비밀번호 재설정」으로 비밀번호를 정해 주세요."
             : (signup ? "가입하지 못했습니다: " : "로그인하지 못했습니다: ") + error.message;
       },
     }, ask, studentBox,
