@@ -126,7 +126,7 @@ function slidesCard() {
   const file = h("input", { type: "file", accept: ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg", multiple: true });
   const bar = h("progress", { max: 1, value: 0, hidden: true });
   const status = h("p", { class: "msg" });
-  const btn = h("button", { class: "primary", type: "button" }, lesson.slide_count ? "다시 올리기 (기존 슬라이드를 바꿈)" : "올리기");
+  const btn = h("button", { class: "primary", type: "button" }, lesson.slide_count && !isPptx(lesson) ? "맨 뒤에 이어 붙이기" : "올리기");
   const upload = async () => {
     if (!file.files.length) { status.textContent = "PPTX, PDF 또는 그림 파일을 먼저 고르세요."; return; }
     if (btn.disabled) return;
@@ -138,6 +138,7 @@ function slidesCard() {
         bar.value = done;
         status.textContent = what + " " + done + " / " + total;
       });
+      if (n == null) { btn.disabled = false; bar.hidden = true; return; }   // 바꾸기 확인에서 취소
       flash("슬라이드 " + n + "장을 올렸습니다.");
       await loadLessons(lesson.id);
     } catch (e) {
@@ -248,10 +249,10 @@ function slidesCard() {
       upload();
     } },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
-    h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
+    h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. 그림은 여러 장을 한 번에 고를 수 있습니다. 슬라이드가 이미 있으면 PDF·그림은 맨 뒤에 이어 붙습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
     h("div", { class: "row" }, file, btn), h("p", { class: "muted small drop-hint" }, "또는 파일을 이 칸에 끌어다 놓으세요."), bar, status,
     anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
-    ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. 쪽을 바꾸려면 PowerPoint에서 고친 뒤 「다시 올리기」하세요.") : null);
+    ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. PPTX 자료는 이어 붙일 수 없어서, 파일을 올리면 지금 자료가 새 파일로 바뀝니다.") : null);
   return { mainCard, allCard, fxCard: lesson.slide_count && !ppt ? fxBox : null };
 }
 
@@ -457,7 +458,7 @@ async function deleteSlide(target, status) {
   const folder = home.folder;
   const base = lesson.slide_dir.split("?")[0];
   if (folder !== slideFolder(lesson) || sharedSlides(lesson)) {
-    return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n이 수업에서 슬라이드 파일을 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
+    return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n복제해 온 수업이면 이 수업에서 슬라이드를 이어 붙일 때 이 수업만의 슬라이드로 복사됩니다.");
   }
   if (targets.length) {
     if (!confirm(targets.length + "장의 슬라이드를 지울까요? 남은 슬라이드와 질문 쪽 번호를 맞춥니다.")) return;
@@ -539,7 +540,7 @@ async function reorderSlides(order, status) {
   if (slideBusy || order.every((n, k) => n === k + 1)) return;
   const home = slideHome(lesson);
   if (!home || isPptx(lesson) || home.folder !== slideFolder(lesson) || sharedSlides(lesson)) {
-    alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 순서를 바꿀 수 없습니다.\n이 수업에서 슬라이드 파일을 「다시 올리기」하면 이 수업만의 슬라이드가 됩니다.");
+    alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 순서를 바꿀 수 없습니다.\n복제해 온 수업이면 이 수업에서 슬라이드를 이어 붙일 때 이 수업만의 슬라이드로 복사됩니다.");
     return drawSettings();
   }
   slideBusy = true;
@@ -596,9 +597,15 @@ async function uploadSlides(files, progress) {
   const pptx = files.filter((f) => /\.pptx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   if (pptx.length) {
     if (pptx.length !== 1 || files.length !== 1) throw new Error("PPTX는 한 번에 하나만 올릴 수 있습니다.");
+    if (L.slide_count && !confirm("PPTX 파일은 이어 붙일 수 없어서 지금 슬라이드를 이 파일로 바꿉니다. 계속할까요?")) return null;
     return uploadPptx(pptx[0], progress, L);
   }
+  // 그림 슬라이드가 이미 있으면 맨 뒤에 이어 붙인다. PPTX 자료(또는 위치를 모르는 자료)만 새 파일로 바꾼다
+  const home = slideHome(L);
+  const append = L.slide_count && !isPptx(L) && home;
+  if (L.slide_count && !append && !confirm("지금 자료에는 이어 붙일 수 없어서 슬라이드를 새 파일로 바꿉니다. 계속할까요?")) return null;
   const images = await toSlideImages(files, progress);
+  if (append) return appendSlides(L, home, images, progress);
   const folder = slideFolder(L);
   const old = { home: slideHome(L), shared: sharedSlides(L) };
   const store = await newSlideStore();
@@ -613,6 +620,39 @@ async function uploadSlides(files, progress) {
   if (error) throw error;
   // 전보다 쪽 수가 줄었으면 남은 그림과 예전 원본 PPTX를 지운다
   await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return !!m && +m[1] <= images.length; });
+  return images.length;
+}
+
+// 이어 붙이기: 새 그림을 지금 마지막 번호 다음부터 올린다(지금 쪽·질문 쪽 번호는 그대로).
+// 복제해 온 그림(다른 수업 폴더)이면 지금 그림을 먼저 이 수업 폴더로 복사해 원래 수업은 건드리지 않는다.
+async function appendSlides(L, home, images, progress) {
+  const folder = slideFolder(L);
+  const query = L.slide_dir.split("?")[1] || "";
+  const small = /(^|&)sm=1(&|$)/.test(query);
+  let st = home.store;
+  if (home.folder !== folder) {
+    st = await newSlideStore();
+    const names = Array.from({ length: L.slide_count }, (_, i) => i + 1).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+    for (const [i, name] of names.entries()) {
+      progress(i, names.length, "지금 슬라이드 복사하는 중");
+      const r = await fetch(home.store.base + home.folder + name + (query ? "?" + query : ""));
+      if (!r.ok) throw new Error(name + " 응답 " + r.status);
+      await st.put(folder + name, await r.blob(), "image/jpeg");
+    }
+  }
+  const start = L.slide_count;
+  for (const [i, pair] of images.entries()) {
+    progress(i, images.length, "올리는 중");
+    await st.put(folder + (start + i + 1) + ".jpg", pair.big, "image/jpeg");
+    await st.put(folder + (start + i + 1) + "s.jpg", pair.small, "image/jpeg");
+  }
+  progress(images.length, images.length, "올리는 중");
+  // 단계 그림 수업이면 새 그림은 단계가 하나뿐인 슬라이드("0")로 덧붙인다
+  const steps = slideSteps(L);
+  const anim = steps ? steps.map((n) => Math.min(n - 1, 35).toString(36)).join("") + "0".repeat(images.length) : "";
+  const dir = withFx(st.base + folder + "{n}.jpg?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(L));
+  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: start + images.length }).eq("id", L.id);
+  if (error) throw error;
   return images.length;
 }
 
