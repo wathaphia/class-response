@@ -222,7 +222,9 @@ async function drawManage() {
           h("div", { class: "folder-add" }, newName, h("button", { class: "ghost", type: "button", onclick: addFolder }, "+ 폴더 추가")),
           // 새 수업: 지금 수업을 비우고 「슬라이드 편집」의 만들기 칸으로 간다
           h("button", { class: "primary new-lesson", type: "button", async onclick() {
-            newFrom = { id: lesson && lesson.id, tab };   // 「취소」하면 이 수업·탭으로 돌아간다
+            newFrom = { id: lesson && lesson.id, tab, edit: editMode };   // 「취소」하면 이 수업·탭·모드로 돌아간다
+            // 지금 모드에 「슬라이드 편집」이 없으면 편집 모드로 바꾼다(안 바꾸면 draw 가 전체 수업으로 되돌려 깜빡이기만 함)
+            if (!tabShown("settings", editMode ? "edit" : "class")) { editMode = true; localStorage.setItem("cra-edit", "1"); }
             lesson = null; tab = "settings"; localStorage.setItem("cra-tab", tab);
             await loadLesson();
           } }, "+ 수업 추가"))),

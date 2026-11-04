@@ -51,6 +51,7 @@ function drawSettings() {
           newFrom = null;
           lesson = lessons.find((l) => l.id === back.id) || lessons.find(canOpenLesson) || null;
           tab = back.tab && back.tab !== "settings" ? back.tab : "library";
+          if (back.edit != null) { editMode = back.edit; localStorage.setItem("cra-edit", editMode ? "1" : "0"); }
           localStorage.setItem("cra-tab", tab);
           await loadLesson();
         } }, "취소") : null)),

@@ -548,6 +548,13 @@ function slideSrc(lesson, n, small) {
   const k = small && /[?&]sm=1/.test(dir) && dir.includes("{n}.jpg") ? n + "s" : n;
   return encodeURI(dir.includes("{n}") ? dir.split("{n}").join(k) : dir.replace(/\/+$/, "") + "/" + n + ".png");
 }
+// 작은 그림(3s.jpg)이 저장소에 없으면 큰 그림(3.jpg)으로 바꿔 보여 준다(올리기·옮기기가 중간에 멈추면 작은 그림만 빠질 수 있다)
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (img.tagName !== "IMG") return;
+  const big = img.src.replace(/\/(\d+)s\.jpg(\?|$)/, "/$1.jpg$2");
+  if (big !== img.src) img.src = big;
+}, true);
 
 function isPptx(lesson) { return (lesson.slide_dir || "").startsWith("pptx:"); }
 function pptxUrl(lesson, page) {

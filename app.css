@@ -365,6 +365,8 @@ label.act-toggle { display: inline-flex; flex-direction: row; align-items: cente
 .act-slide > img, .act-slide-blank { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .act-slide-blank { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
 .act-slide > span { font-weight: 700; }
+/* 쪽수가 위·아래 어느 슬라이드 것인지 헷갈리지 않게 쪽수 아래에 흐린 선을 긋는다 */
+.act-grid.by-slide > .act-slide { padding-bottom: .5rem; border-bottom: 1px solid var(--line); }
 .act-slide.drop > .act-slide-pic, .act-slide.drop > .act-slide-blank { outline: 3px dashed var(--accent); outline-offset: 2px; }
 .preview-options { margin: .3rem 0 0; padding-left: 1.3rem; }
 .preview-options li.right { color: var(--ok); }
