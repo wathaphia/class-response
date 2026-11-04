@@ -540,8 +540,10 @@ function dragSort(box, opts) {
     const zoom = new Map(list.map((x) => [x, parseFloat(getComputedStyle(x).zoom) || 1]));
     const shift = (x, dx, dy) => { x.style.translate = dx || dy ? dx / zoom.get(x) + "px " + dy / zoom.get(x) + "px" : ""; };
     const rel = (r, b) => ({ x: r.left - b.left, y: r.top - b.top, w: r.width, h: r.height });
+    // 칸들의 기준점: box 자신이 스크롤 상자면 스크롤한 만큼 칸이 움직이므로 그만큼 뺀다
+    const origin = () => { const b = box.getBoundingClientRect(); return { left: b.left - box.scrollLeft, top: b.top - box.scrollTop }; };
     const begin = () => {
-      const b = box.getBoundingClientRect();
+      const b = origin();
       const slots = list.map((x) => rel(x.getBoundingClientRect(), b));
       const units = [];
       list.forEach((x, i) => { const u = unitOf(x); if (units.length && units[units.length - 1].key === u) units[units.length - 1].idx.push(i); else units.push({ key: u, idx: [i] }); });
@@ -566,7 +568,7 @@ function dragSort(box, opts) {
       return at;
     };
     const move = () => {
-      const b = box.getBoundingClientRect();
+      const b = origin();
       const p = { x: last.clientX - b.left, y: last.clientY - b.top };
       const d = { x: p.x - st.start.x, y: p.y - st.start.y };
       st.units[st.s].idx.forEach((i) => shift(list[i], d.x, d.y));
@@ -590,8 +592,15 @@ function dragSort(box, opts) {
       if (!st) return;
       const sc = opts.scroller ? opts.scroller() : null;
       const r = sc ? sc.getBoundingClientRect() : { top: 0, bottom: innerHeight };
-      const v = last.clientY < r.top + 40 ? -10 : last.clientY > r.bottom - 40 ? 10 : 0;
-      if (v) { if (sc) sc.scrollTop += v; else scrollBy(0, v); move(); raf = requestAnimationFrame(edge); }
+      // 가장자리 60px 안(또는 밖)으로 들어갈수록 빨리 스크롤한다
+      const top = Math.max(r.top, 0), bottom = Math.min(r.bottom, innerHeight);
+      const near = last.clientY < top + 60 ? last.clientY - top - 60 : last.clientY > bottom - 60 ? last.clientY - bottom + 60 : 0;
+      const v = Math.sign(near) * Math.min(Math.ceil(Math.abs(near) / 3), 24);
+      const before = sc ? sc.scrollTop : scrollY;
+      if (!v) return;
+      if (sc) sc.scrollTop += v; else scrollBy(0, v);
+      if ((sc ? sc.scrollTop : scrollY) !== before) move();
+      raf = requestAnimationFrame(edge);
     };
     const onMove = (ev) => {
       last = ev;
