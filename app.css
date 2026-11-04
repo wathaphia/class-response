@@ -598,6 +598,8 @@ body.desk-locked { overflow: hidden; }
 .default-save:hover:not(:disabled), .default-save:active:not(:disabled) { transform: none; }
 .folder.drop { outline: 3px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
 .picked-bar { padding: .6rem .8rem; border-radius: 10px; background: #f2f6ff; }
+.picked-bar.none { background: #f3f5f9; }   /* 고른 수업이 없을 때: 단추는 그대로 두고 꺼 둔다 */
+.picked-bar .picked-name { min-width: 16rem; }
 .manage .folder-add { display: flex; flex-wrap: nowrap; align-items: center; gap: .5rem; }
 .manage .folder-add input { width: 16rem; max-width: 52vw; }
 
@@ -793,6 +795,14 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .save-order { min-width: 9.5em; }   /* 저장하기 · 저장됨 · 번호 다시 맞추기 사이에 너비가 변하지 않게 */
 .thumb-preview { background: #f3f5f9; border-radius: 6px; }   /* 그림을 받기 전에도 칸이 보이게 */
 .thumb { cursor: grab; }
+/* 평소엔 누르면 미리보기로 넘기기(파란 테두리), 「삭제할 슬라이드 선택하기」 중에만 선택 칸이 보인다(자리는 늘 차지) */
+.thumbs:not(.picking) .thumb-check { visibility: hidden; }
+.thumbs:not(.picking) .thumb-hitbox:hover { border-color: rgba(36, 86, 214, .45); }
+.thumb.viewing:not(.selected) .thumb-hitbox { border-color: var(--accent); }
+.slide-tools { flex-wrap: nowrap; }
+.slide-tools .bulk-del { width: 13em; white-space: nowrap; flex: none; }
+.slide-tools .cancel-pick, .slide-tools .save-order { flex: none; }
+.slide-tools > .grow { flex: 1 1 0; min-width: 0; }   /* 「삭제할 슬라이드 선택하기」 ↔ 「선택한 슬라이드 삭제 (n)」 너비 고정 */
 .sorting .thumb { cursor: grabbing; }
 /* 끌어서 순서 바꾸기(teacher.js dragSort): 끄는 칸은 마우스를 따라 들려 있고, 자리가 바뀔 칸은 그 자리로 미끄러져 가볍게 들썩인다 */
 .sorting { user-select: none; cursor: grabbing; }

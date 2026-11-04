@@ -394,6 +394,7 @@ async function loadLessons(selectId) {
 
 async function loadLesson() {
   selectedSlides.clear();
+  slidePicking = false;
   activities = [];
   students = [];
   responses = [];

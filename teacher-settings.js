@@ -1,4 +1,4 @@
-// 교사 화면 · 「슬라이드 편집」 탭: 새 수업 만들기·복제·지우기, 슬라이드 올리기(PPTX/PDF → 그림), 슬라이드 저장소(R2 / Supabase), CSV 내보내기.
+// 교사 화면 · 「슬라이드 편집」 탭: 새 수업 만들기, 슬라이드 올리기(PPTX/PDF → 그림), 슬라이드 저장소(R2 / Supabase), CSV 내보내기.
 
 // ---------- 슬라이드 편집 ----------
 let newFrom = null;   // 「+ 수업 추가」를 누르기 전의 수업·탭(만들기 취소용)
@@ -32,33 +32,6 @@ function drawSettings() {
     return;
   }
 
-  async function duplicate() {
-    const { data: copy, error } = await sb.rpc("create_lesson", { p_title: (lesson.title + " (복사)").slice(0, 100), p_kind: lesson.kind });
-    if (error) return alert("복제하지 못했습니다: " + error.message);
-    // 슬라이드 그림은 같은 것을 함께 쓴다(원래 수업을 지워도 다른 수업이 쓰는 그림은 남긴다)
-    await sb.from("lessons").update({ slide_dir: lesson.slide_dir, slide_count: lesson.slide_count }).eq("id", copy.id);
-    if (activities.length) {
-      const r = await sb.from("activities").insert(activities.map((a) => ({
-        lesson_id: copy.id, kind: a.kind, title: a.title, page: a.page, show_answer: a.show_answer, named: a.named, questions: a.questions, sort: a.sort,
-        page_to: a.page_to, html: a.html, sim_full: a.sim_full, sim_place: a.sim_place,
-      })));
-      if (r.error) alert("활동을 복사하지 못했습니다: " + r.error.message);
-    }
-    await loadLessons(copy.id);
-    flash("복제했습니다. 제목을 고쳐 주세요.");
-  }
-
-  async function remove(ev) {
-    const typed = prompt("수업을 지우면 활동, 학생, 응답, 슬라이드가 모두 지워집니다.\n지우려면 수업 코드 「" + lesson.code + "」를 입력하세요.");
-    if ((typed || "").trim().toUpperCase() !== lesson.code) return;
-    const L = lesson, btn = ev && ev.currentTarget;
-    if (btn) btn.disabled = true;
-    const { error } = await sb.from("lessons").delete().eq("id", L.id);
-    if (error) { if (btn) btn.disabled = false; return alert(error.message); }
-    await removeSlideFiles(L).catch(() => {});   // 그림은 수업이 지워진 뒤에(실패해도 수업 삭제는 끝난 것)
-    await loadLessons(null);
-  }
-
   // 왼쪽: 설정·슬라이드 올리기·전환 효과 미리보기 / 오른쪽: 전체 슬라이드와 다중 선택 삭제(함께 보면서 고르게)
   const slides = lesson && lesson.kind !== "survey" ? slidesCard() : null;
   main.replaceChildren(h("div", { class: slides && slides.allCard ? "settings-grid" : "stack narrowish" }, h("div", { class: "stack" },
@@ -81,12 +54,8 @@ function drawSettings() {
           localStorage.setItem("cra-tab", tab);
           await loadLesson();
         } }, "취소") : null)),
-    slides ? slides.mainCard : null,
-    lesson ? h("section", { class: "card stack" },
-      h("h2", {}, "수업 관리"),
-      h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", onclick: duplicate }, "다른 반용으로 복제"),
-        h("button", { class: "ghost danger", type: "button", onclick: remove }, "수업 지우기"))) : null),
+    // 다른 반용 복제·수업 삭제는 「전체 수업」에서 수업을 골라 한다
+    slides ? slides.mainCard : null),
     slides && slides.allCard ? h("div", { class: "settings-slot" }, h("div", { class: "stack settings-right" }, slides.allCard)) : null));
   pinSettingsRight();
 }
@@ -201,8 +170,9 @@ function slidesCard() {
     image.addEventListener("error", () => { const next = retry.shift(); if (next) image.src = next; });
     seen.observe(image);
     const hitbox = h("button", {
-      class: "thumb-hitbox", type: "button", "aria-label": i + "쪽 선택", "aria-pressed": selectedSlides.has(i),
-      onclick() { toggleSlideSelection(i, figure, checkbox, hitbox); },
+      class: "thumb-hitbox", type: "button", "data-rapid": "1", "aria-label": i + "쪽 선택", "aria-pressed": selectedSlides.has(i),
+      // 누르면 왼쪽 미리보기가 이 그림으로 바로 넘어가고, 「삭제할 슬라이드 선택하기」 중이면 고르기도 한다
+      onclick() { pvJump(i); if (slidePicking) toggleSlideSelection(i, figure, checkbox, hitbox); },
     });
     // 선택 칸은 그림 크기에 맞춘다(그림이 아직 없으면 미리보기 칸 전체)
     fitHits.set(image, () => {
@@ -256,7 +226,18 @@ function slidesCard() {
     pvAt = to;
     swapSlide(pv, slideSrc(lesson, to), fxPick.value, dir);
     pvWhere.textContent = slideLabel(lesson, to);
+    paintViewing();
   };
+  // 오른쪽 그림을 누르면 효과 없이 바로 그 그림으로
+  const pvJump = (to) => {
+    if (ppt || !lesson.slide_count) return;
+    pvAt = to;
+    swapSlide(pv, slideSrc(lesson, to), "none", 1);
+    pvWhere.textContent = slideLabel(lesson, to);
+    paintViewing();
+  };
+  // 미리보기에 띄운 그림의 칸 표시
+  const paintViewing = () => [...thumbs.children].forEach((f) => f.classList.toggle("viewing", +f.dataset.i === pvAt));
   const pvPlay = () => {
     const here = pvAt;
     const back = slideNo(lesson, here) > 1 ? pageOfSlide(lesson, slideNo(lesson, here) - 1) : pageOfSlide(lesson, Math.min(2, slideTotal(lesson)));
@@ -279,7 +260,7 @@ function slidesCard() {
       }, 1400);
     },
   }, Object.entries(SLIDE_FX).map(([k, name]) => h("option", { value: k, selected: k === slideFx(lesson) }, name)));
-  if (lesson.slide_count && !ppt) { swapSlide(pv, slideSrc(lesson, 1), "none", 1); pvWhere.textContent = slideLabel(lesson, 1); }
+  if (lesson.slide_count && !ppt) { swapSlide(pv, slideSrc(lesson, 1), "none", 1); pvWhere.textContent = slideLabel(lesson, 1); paintViewing(); }
   const fxBox = h("section", { class: "card stack fx-box" },
     h("div", { class: "row fx-head" }, h("h2", {}, "슬라이드 전환 효과"), fxPick,
       h("span", { class: "muted small grow" }, "쪽을 넘길 때 교사·학생 화면에 함께 적용됩니다.")),
@@ -309,17 +290,38 @@ function slidesCard() {
       [...thumbs.children].forEach((f, k) => renumber.get(f)?.(k + 1));
       pvAt = order.indexOf(pvAt) + 1 || 1;
       pvWhere.textContent = slideLabel(lesson, pvAt);
+      paintViewing();
       slideWork(work, "");
       paintSave();
     } };
+  // 「삭제할 슬라이드 선택하기」를 누르면 고르기 상태: 단추가 「선택한 슬라이드 삭제 (n)」로 바뀌고 옆에 「취소」가 보인다.
+  // 두 단추는 늘 자리를 차지하고(취소는 visibility 로 숨김) 너비가 고정이라 다른 단추가 밀리지 않는다
+  const bulk = h("button", { class: "danger bulk-del", type: "button", onclick() {
+    if (!slidePicking) { slidePicking = true; paintPick(); return; }
+    if (selectedSlides.size) deleteSlide([...selectedSlides].sort((a, b) => a - b), work);
+  } });
+  const cancelPick = h("button", { class: "ghost cancel-pick", type: "button", onclick() {
+    slidePicking = false;
+    [...thumbs.children].forEach((f) => f.classList.remove("selected"));
+    thumbs.querySelectorAll(".thumb-check input").forEach((c) => { c.checked = false; });
+    thumbs.querySelectorAll(".thumb-hitbox").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    selectedSlides.clear();
+    paintPick();
+  } }, "취소");
+  const paintPick = () => {
+    thumbs.classList.toggle("picking", slidePicking);
+    cancelPick.style.visibility = slidePicking ? "" : "hidden";
+    paintBulk(bulk);
+  };
   const allCard = lesson.slide_count && !ppt ? h("section", { class: "card stack all-slides" },
     h("h2", {}, "전체 슬라이드 " + lesson.slide_count + "장"),
     h("div", { class: "row slide-tools" },
-      h("button", { class: "danger", type: "button", disabled: !selectedSlides.size, onclick() { deleteSlide([...selectedSlides].sort((a, b) => a - b), work); } }, "선택한 슬라이드 삭제 (" + selectedSlides.size + ")"),
+      bulk, cancelPick,
       h("span", { class: "muted small grow" }, "끌어서 순서를 바꾼 뒤 저장하세요."),
       saveBtn),
     work.bar, work.status,
     thumbs) : null;
+  paintPick();
   // 끌어서 슬라이드 순서 바꾸기(dragSort): 애니메이션 단계 그림은 한 슬라이드의 단계를 묶어서 함께 옮긴다.
   // 놓으면 칸을 새 순서로 늘어놓기만 하고, 「저장하기」를 누를 때 저장소의 그림 이름을 바꾼다
   if (allCard) dragSort(thumbs, {
@@ -524,6 +526,7 @@ async function cleanSlideFolder(old, store, folder, keep) {
 // k 가 없으면(번호 다시 맞추기) 아무것도 지우지 않고 번호만 맞춘다.
 let slideBusy = false;
 const selectedSlides = new Set();
+let slidePicking = false;   // 「삭제할 슬라이드 선택하기」를 눌러 지울 슬라이드를 고르는 중
 let slideOrder = null;   // 끌어서 바꾸고 아직 저장하지 않은 순서 { id, dir, order: 새 순서의 예전 그림 번호들 }
 addEventListener("beforeunload", (ev) => { if (slideOrder) ev.preventDefault(); });
 
@@ -540,11 +543,14 @@ function setSlideSelection(page, selected, figure, checkbox, hitbox) {
   figure.classList.toggle("selected", selected);
   checkbox.checked = selected;
   hitbox.setAttribute("aria-pressed", String(selected));
-  const bulk = document.querySelector(".slide-tools .danger");
-  if (bulk) {
-    bulk.disabled = !selectedSlides.size;
-    bulk.textContent = "선택한 슬라이드 삭제 (" + selectedSlides.size + ")";
-  }
+  paintBulk();
+}
+
+// 여러 장 삭제 단추: 평소엔 「삭제할 슬라이드 선택하기」, 고르는 중엔 「선택한 슬라이드 삭제 (n)」(고른 것이 없으면 꺼짐)
+function paintBulk(bulk = document.querySelector(".slide-tools .bulk-del")) {
+  if (!bulk) return;
+  bulk.disabled = slidePicking && !selectedSlides.size;
+  bulk.textContent = slidePicking ? "선택한 슬라이드 삭제 (" + selectedSlides.size + ")" : "삭제할 슬라이드 선택하기";
 }
 
 function toggleSlideSelection(page, figure, checkbox, hitbox) {
@@ -627,6 +633,7 @@ async function deleteSlide(target, ui) {
     const u = await sb.from("lessons").update({ slide_dir: left ? dir : "", slide_count: left, page: Math.min(Math.max(pageNow, 1), Math.max(left, 1)) }).eq("id", lesson.id);
     if (u.error) throw u.error;
     selectedSlides.clear();
+    slidePicking = false;
     flash(targets.length ? targets.length + "장의 슬라이드를 지웠습니다." : "슬라이드 번호를 맞췄습니다 (" + left + "장).");
     slideBusy = false;
     await loadLessons(lesson.id);

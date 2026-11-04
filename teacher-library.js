@@ -11,6 +11,16 @@ let defaultPick = null;
 // 다른 선생님 수업의 내 화면 순서(수업 id 목록, undefined 면 아직 안 읽음). 수업 주인의 순서(lessons.sort)는 건드리지 않는다
 let othersOrder;
 
+// 수업을 고른 뒤 카드·단추가 아닌 빈 곳을 누르면 고르기를 풀어 준다
+document.addEventListener("click", (e) => {
+  if (tab !== "library" || !pickedId || !main) return;
+  const t = e.target;
+  if (!(t instanceof Element) || !main.contains(t)) return;
+  if (t.closest(".lesson-card, .picked-bar, button, input, select, textarea, a, label, [role=button]")) return;
+  pickedId = null;
+  drawManage();
+});
+
 async function saveOthersOrder() {
   return sb.from("others_lesson_order").upsert({ teacher: me.id, lesson_ids: othersOrder });
 }
@@ -218,14 +228,19 @@ async function drawManage() {
           } }, "+ 수업 추가"))),
       h("p", { class: "muted small" }, "수업 카드를 끌어 폴더에 넣거나 순서를 바꿀 수 있습니다. 다른 선생님 수업은 그 묶음 안에서 순서만 바꿀 수 있고, 내 화면에만 적용됩니다. 카드를 눌러 고른 뒤 「불러오기」(또는 두 번 누르기)를 하면 그 수업이 지금 수업이 됩니다. 화면은 그대로이고, 다른 탭에서 바로 그 수업을 씁니다."),
       error ? h("p", { class: "error" }, "폴더 기능을 쓰려면 Supabase에서 새 setup.sql을 실행해야 합니다.") : null,
-      p ? h("div", { class: "row wrap picked-bar" },
-        h("strong", {}, "고른 수업: " + p.title + " (" + p.code + ")"),
-        p.id === lesson?.id
+      // 고른 수업 칸: 고르기 전에도 같은 자리·같은 단추를 꺼 둔 채로 보여 준다(고를 때 아래가 밀리지 않게)
+      h("div", { class: "stack picked-bar" + (p ? "" : " none") },
+        p ? h("strong", { class: "picked-name" }, "고른 수업: " + p.title + " (" + p.code + ")")
+          : h("strong", { class: "picked-name muted" }, "고른 수업: 아직 고르지 않았습니다 · 아래 수업 카드를 눌러 고르세요"),
+        h("div", { class: "row wrap" },
+        p && p.id === lesson?.id
           ? h("button", { class: "primary", type: "button", disabled: true }, "불러오기 완료")
-          : h("button", { class: "primary", type: "button", onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
-        h("button", { class: "ghost", type: "button", onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+          : h("button", { class: "primary", type: "button", disabled: !p, onclick(e) { loadPicked(e.currentTarget); } }, "불러오기"),
+        h("button", { class: "ghost", type: "button", disabled: !p, onclick() { exportSlidesPdf(p, msg); } }, "슬라이드 PDF 받기"),
+        // 다른 반용으로 복제: 슬라이드·애니메이션·활동을 그대로 새 수업 코드의 수업으로(학생·응답은 비어 있음)
+        h("button", { class: "ghost copy-lesson", type: "button", disabled: !p || !canOpenLesson(p), onclick(e) { duplicateLesson(p, e.currentTarget, msg); } }, "다른 반용으로 복제하기"),
         // 수업 삭제: 주인 또는 개발자만(공동 작업자는 못 지운다)
-        mine(p) || viewAll ? h("button", { class: "ghost danger delete-lesson", type: "button", async onclick(ev) {
+        h("button", { class: "ghost danger delete-lesson", type: "button", disabled: !p || !(mine(p) || viewAll), async onclick(ev) {
           if (!mine(p) && observer) return centerNote("개발자 고유의 권한입니다");
           const typed = prompt("「" + p.title + "」 수업을 지우면 활동, 학생, 응답, 슬라이드가 모두 지워집니다.\n지우려면 수업 코드 「" + p.code + "」를 입력하세요.");
           if ((typed || "").trim().toUpperCase() !== p.code) return;
@@ -236,12 +251,60 @@ async function drawManage() {
           pickedId = null;
           await loadLessons(lesson && lesson.id !== p.id ? lesson.id : null);
           flash("「" + p.title + "」 수업을 지웠습니다.");
-        } }, "수업 삭제") : null,
-        moveSel ? h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"), moveSel) : null)
-        : h("p", { class: "muted small" }, "수업을 하나 고르면 「불러오기」와 「슬라이드 PDF 받기」 버튼이 나옵니다."),
+        } }, "수업 삭제"),
+        h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"),
+          moveSel || h("select", { "aria-label": "옮길 폴더", disabled: true }, h("option", {}, p ? "다른 선생님 수업" : "—"))))),
       msg),
     groups.map(folderBox),
     others.length ? folderBox({ id: OTHERS, name: admin ? "다른 선생님 수업(개발자 권한 · 공유받은 것 포함)" : observer ? "다른 선생님 수업(불러오면 내 사본으로 열림)" : "공유받은 수업" }) : null));
+}
+
+// 다른 반용으로 복제: 새 수업 코드로 수업을 만들고 슬라이드 그림(애니메이션 단계·전환 효과 포함)을 새 수업 폴더로 복사, 활동(추가한 자료)을 옮겨 담는다.
+// 학생·응답·공유 상태는 옮기지 않는다. 그림을 따로 두므로 두 수업의 슬라이드를 서로 상관없이 고칠 수 있다
+let duplicating = false;
+async function duplicateLesson(src, btn, msg) {
+  if (duplicating) return;
+  if (!confirm("「" + src.title + "」 수업을 다른 반용으로 복제할까요?\n슬라이드·애니메이션·추가한 자료가 그대로 복사되고, 새 수업 코드가 만들어집니다. 학생과 응답은 복사되지 않습니다.")) return;
+  duplicating = true;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "복제하는 중…";
+  let copy = null;
+  try {
+    const acts = await sb.from("activities").select("*").eq("lesson_id", src.id);
+    if (acts.error) throw acts.error;
+    const made = await sb.rpc("create_lesson", { p_title: (src.title + " (복사)").slice(0, 100), p_kind: src.kind });
+    if (made.error) throw made.error;
+    copy = made.data;
+    if (src.slide_count) await copySlideFiles(src, copy, (i, n) => { btn.textContent = "슬라이드 복사 중 " + i + " / " + n; });
+    if (acts.data.length) {
+      const r = await sb.from("activities").insert(acts.data.map((a) => ({
+        lesson_id: copy.id, kind: a.kind, title: a.title, page: a.page, show_answer: a.show_answer, named: a.named, questions: a.questions, sort: a.sort,
+        page_to: a.page_to, html: a.html, sim_full: a.sim_full, sim_place: a.sim_place,
+      })));
+      if (r.error) throw r.error;
+    }
+    // 내 수업이면 같은 폴더에 넣는다
+    if (src.owner === me.id && src.folder_id) await sb.from("lessons").update({ folder_id: src.folder_id }).eq("id", copy.id);
+    pickedId = copy.id;
+    await loadLessons(lesson ? lesson.id : copy.id);   // 지금 수업은 그대로(복제본은 「불러오기」로 연다)
+    flash("「" + copy.title + "」(" + copy.code + ")로 복제했습니다.");
+  } catch (e) {
+    // 도중에 멈추면 반쯤 만든 복제본을 지운다
+    if (copy) {
+      await sb.from("lessons").delete().eq("id", copy.id);
+      try {
+        const store = await newSlideStore(), folder = slideFolder(copy);
+        const names = await store.list(folder);
+        if (names.length) await store.remove(names.map((n) => folder + n));
+      } catch {}
+    }
+    btn.disabled = false;
+    btn.textContent = label;
+    msg.textContent = "복제하지 못했습니다: " + (e.message || e);
+  } finally {
+    duplicating = false;
+  }
 }
 
 // 관찰자가 공동 작업자가 아닌 수업을 불러오면 원본 대신 내 사본을 연다. 사본은 한 사람당 OBSERVER_COPIES 개까지이고 넘치면 오래된 것부터 지운다.
