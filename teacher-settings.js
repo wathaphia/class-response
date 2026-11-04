@@ -189,13 +189,15 @@ function slidesCard() {
   }), { root: thumbs, rootMargin: "300px 0px" });
   const fitHits = new Map();
   const hitWatch = new ResizeObserver((es) => es.forEach((e) => fitHits.get(e.target)?.()));
-  const figs = [];
-  for (let i = 1; i <= lesson.slide_count; i++) {
+  const figs = [], renumber = new Map();
+  for (let n = 1; n <= lesson.slide_count; n++) {
+    let i = n;   // 순서를 저장하면 다시 그리지 않고 renumber 로 이 번호만 바꾼다
     const preview = h("div", { class: "thumb-preview" });
     const image = h("img", { class: "thumb-photo", "data-src": slideSrc(lesson, i, true), alt: i + "쪽" });
     // 작은 그림을 못 받으면 큰 그림으로, 그것도 안 되면 캐시를 피해 한 번 더
-    const big = slideSrc(lesson, i);
-    const retry = [big, big + (big.includes("?") ? "&" : "?") + "r=" + Date.now()];
+    let retry;
+    const setRetry = () => { const big = slideSrc(lesson, i); retry = [big, big + (big.includes("?") ? "&" : "?") + "r=" + Date.now()]; };
+    setRetry();
     image.addEventListener("error", () => { const next = retry.shift(); if (next) image.src = next; });
     seen.observe(image);
     const hitbox = h("button", {
@@ -216,12 +218,27 @@ function slidesCard() {
       type: "checkbox", checked: selectedSlides.has(i), "aria-label": i + "쪽 선택",
       onchange() { setSlideSelection(i, checkbox.checked, figure, checkbox, hitbox); },
     });
+    const name = h("span", {}, slideSteps(lesson) ? thumbLabel(i) : i + "쪽");
+    const del = h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], work); } }, "삭제");
     const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : ""), "data-i": i },
       preview,
       h("label", { class: "thumb-check" }, checkbox, "선택"),
-      h("figcaption", {}, h("span", {}, slideSteps(lesson) ? thumbLabel(i) : i + "쪽"),
-        h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], work); } }, "삭제")));
+      h("figcaption", {}, name, del));
     figs.push(figure);
+    // 받아 둔 그림은 그대로 두고(이미 맞는 그림) 아직 안 받은 그림만 새 주소로 받게 한다
+    renumber.set(figure, (k) => {
+      setSlideSelection(i, false, figure, checkbox, hitbox);
+      i = k;
+      figure.dataset.i = k;
+      image.alt = k + "쪽";
+      if (!image.getAttribute("src")) image.dataset.src = slideSrc(lesson, k, true);
+      setRetry();
+      hitbox.setAttribute("aria-label", k + "쪽 선택");
+      checkbox.setAttribute("aria-label", k + "쪽 선택");
+      del.setAttribute("aria-label", k + "쪽 삭제");
+      del.disabled = false;
+      name.textContent = slideSteps(lesson) ? thumbLabel(k) : k + "쪽";
+    });
   }
   // 저장하지 않은 순서가 있으면(다른 탭에 다녀온 경우 등) 그 순서로 늘어놓는다
   if (slideOrder && (slideOrder.id !== lesson.id || slideOrder.dir !== lesson.slide_dir)) slideOrder = null;
@@ -286,7 +303,15 @@ function slidesCard() {
   paintSave();
   // 저장·삭제 진행은 이 칸(오른쪽)의 막대와 글로 보여 준다
   const work = { bar: h("progress", { max: 1, value: 0, hidden: true }), status: h("p", { class: "msg" }),
-    broke() { saveBtn.dataset.mode = "fix"; saveBtn.disabled = false; saveBtn.textContent = "번호 다시 맞추기"; } };
+    broke() { saveBtn.dataset.mode = "fix"; saveBtn.disabled = false; saveBtn.textContent = "번호 다시 맞추기"; },
+    // 순서를 저장한 뒤: 화면을 다시 그리지 않고(그림을 다시 받아 깜빡이지 않게) 칸 번호·미리보기 번호만 고친다
+    saved(order) {
+      [...thumbs.children].forEach((f, k) => renumber.get(f)?.(k + 1));
+      pvAt = order.indexOf(pvAt) + 1 || 1;
+      pvWhere.textContent = slideLabel(lesson, pvAt);
+      slideWork(work, "");
+      paintSave();
+    } };
   const allCard = lesson.slide_count && !ppt ? h("section", { class: "card stack all-slides" },
     h("h2", {}, "전체 슬라이드 " + lesson.slide_count + "장"),
     h("div", { class: "row slide-tools" },
@@ -667,17 +692,24 @@ async function reorderSlides(order, ui) {
       if ("page_to" in a) change.page_to = to;
       const u = await sb.from("activities").update(change).eq("id", a.id);
       if (u.error) throw u.error;
+      Object.assign(a, change);
     }
+    activities = sortActivities(activities);
     const anim = steps ? slides.map((s) => Math.min(steps[s - 1] - 1, 35).toString(36)).join("") : "";
     const small = /[?&]sm=1/.test(lesson.slide_dir);
     const dir = withFx(lesson.slide_dir.split("?")[0] + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));
-    const u = await sb.from("lessons").update({ slide_dir: dir, page: order.indexOf(lesson.page) + 1 || 1 }).eq("id", lesson.id);
+    const change = { slide_dir: dir, page: order.indexOf(lesson.page) + 1 || 1 };
+    const u = await sb.from("lessons").update(change).eq("id", lesson.id);
     if (u.error) throw u.error;
-    selectedSlides.clear();
+    // 수업 전체를 다시 불러오면 화면이 통째로 깜빡이므로 이 수업의 값만 바꾸고 칸 번호를 고친다
+    Object.assign(lesson, change);
+    const same = lessons.find((l) => l.id === lesson.id);
+    if (same && same !== lesson) Object.assign(same, change);
     slideOrder = null;
-    flash("슬라이드 순서를 저장했습니다.");
     slideBusy = false;
-    await loadLessons(lesson.id);
+    ui.saved(order);
+    selectedSlides.clear();
+    flash("슬라이드 순서를 저장했습니다.");
   } catch (e) {
     slideBusy = false;
     document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = false; });
