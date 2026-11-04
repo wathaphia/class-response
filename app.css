@@ -780,9 +780,16 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .tab-edit-row input { flex: 1; min-width: 0; min-height: 36px; }
 .tab-grip { color: var(--muted); font-size: 1.1rem; line-height: 1; }
 /* 슬라이드 편집: 파일을 끌어다 놓는 칸, 썸네일 끌어 순서 바꾸기 */
-.slide-drop { transition: border-color .15s, background .15s; }
-.slide-drop.drop { border: 2px dashed var(--accent); background: var(--accent-soft); }
-.drop-hint { margin: 0; }
+.drop-box { display: grid; justify-items: center; gap: .25rem; padding: 1.4rem 1rem; text-align: center; cursor: pointer;
+  border: 2px dashed var(--line); border-radius: 10px; transition: border-color .15s, background .15s, box-shadow .15s; }
+.drop-box:hover, .drop-box:focus-visible { border-color: var(--accent); }
+.drop-box.over { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 4px var(--accent-soft); }
+.drop-box * { pointer-events: none; }   /* 안쪽 글자를 지날 때 dragleave 가 튀지 않게 */
+.upload-list { margin: 0; padding-left: 1.4rem; display: grid; gap: .1rem; font-size: .9rem; }
+.upload-list li > * { vertical-align: middle; }
+.upload-list .link { min-height: 28px; margin-left: .5rem; font-size: .82rem; }
+.save-order { min-width: 9.5em; }   /* 저장하기 · 저장됨 · 번호 다시 맞추기 사이에 너비가 변하지 않게 */
+.thumb-preview { background: #f3f5f9; border-radius: 6px; }   /* 그림을 받기 전에도 칸이 보이게 */
 .thumb { cursor: grab; }
 .sorting .thumb { cursor: grabbing; }
 /* 끌어서 순서 바꾸기(teacher.js dragSort): 끄는 칸은 마우스를 따라 들려 있고, 자리가 바뀔 칸은 그 자리로 미끄러져 가볍게 들썩인다 */
