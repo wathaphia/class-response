@@ -104,7 +104,9 @@ button:active:not(:disabled) { filter: brightness(.86); }
 .tag.ok { color: var(--ok); background: var(--ok-soft); }
 .tag.warn { color: var(--warn); background: var(--warn-soft); }
 .tag.info { color: var(--accent-ink); background: var(--accent-soft); }
-.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: .6rem 1.2rem; border-radius: 999px; z-index: 50; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: .6rem 1.2rem; border-radius: 999px; z-index: 50; animation: toast-fade 1.8s ease both; }
+@keyframes toast-fade { 0% { opacity: 0; } 15%, 75% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
 /* 학생 수업 화면: 넓게. 큰 화면에서는 슬라이드(왼쪽, 따라 내려옴)와 질문(오른쪽)을 나란히 */
 main.lesson { max-width: 1900px; margin: 0 auto; padding: .75rem 12px 3rem; display: grid; gap: 1rem; font-size: 1.06rem; }
