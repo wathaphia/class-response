@@ -32,8 +32,6 @@ function copyButton(text) {
 }
 const starText = (s) => (s ? s.title + " (" + s.code + ")" : "고른 수업 없음");
 
-const dateText = (t) => (t ? new Date(t).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
-
 function paintProfile() {
   const side = main && main.querySelector(".profile-side");
   if (tab !== "profile" || !side) return;

@@ -125,6 +125,7 @@ async function syncUsage(names) {
 
 function drawEtc() {
   paintEtc();
+  if (!profile || profile.error) loadProfile().then(paintEtc, () => {});   // 학생 슬라이드 화질은 프로필(slide_q)에서 읽는다
   etcCheck();
 }
 // 30초마다 시계만 본다(네트워크는 쓰지 않음): 1시간 지난 것이 있으면 자동 동기화, 아니면 버튼의 남은 시간만 고친다
@@ -552,6 +553,24 @@ function githubView() {
 }
 
 // 학생 화면 크게 보기 화질. 다음에 여는 크게 보기부터 적용된다(일괄 미리보기 작은 칸은 그대로)
+// 학생 슬라이드 화질: 내 수업(공동 작업 수업은 주인의 설정)을 보는 학생 모두에게 적용(teachers.slide_q · set_my_slide_q)
+const STUDENT_SLIDE_Q = { mid: { name: "보통", w: 1024, note: "데이터를 아낍니다(휴대폰·느린 와이파이)" }, hi: { name: "높음", w: 1920, note: "글씨가 작은 슬라이드도 또렷합니다" } };
+function slideQualityView() {
+  const now = profile && !profile.error ? profile.slide_q || "hi" : null;
+  if (!now) return h("p", { class: "muted small" }, profile && profile.error ? "불러오지 못했습니다: " + profile.error : "불러오는 중…");
+  return h("div", { class: "stack" },
+    h("div", { class: "quality-pick" }, Object.entries(STUDENT_SLIDE_Q).map(([k, q]) => h("label", { class: "quality-opt" + (k === now ? " on" : "") },
+      h("input", { type: "radio", name: "slide-quality", value: k, checked: k === now, async onchange() {
+        const { error } = await sb.rpc("set_my_slide_q", { p: k });
+        if (error) alert("바꾸지 못했습니다: " + error.message);
+        else profile.slide_q = k;
+        paintEtc();
+      } }),
+      h("span", {}, h("b", {}, q.name + " "), h("span", { class: "muted small" }, "슬라이드 그림 가로 " + q.w + "px")),
+      h("span", { class: "muted small" }, q.note)))),
+    h("p", { class: "muted small" }, "학생 화면에 몇 초 안에 바로 적용됩니다. 학생이 슬라이드를 눌러 크게 볼 때는 늘 높은 화질입니다. 예전에 올려 작은 그림이 없는 수업은 높음으로 보입니다."));
+}
+
 function screenQualityView() {
   const now = screenQuality();
   return h("div", { class: "stack" },
@@ -579,6 +598,7 @@ function paintEtc() {
   };
   usageRisky = [];
   const secs = [
+    section("학생 슬라이드 화질", "학생 화면의 슬라이드 그림 · 내 모든 수업에 저장", slideQualityView),
     section("학생 화면 화질", "학생 화면 크게 보기(한 명씩) · 이 기기에 저장", screenQualityView),
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView, ["db", "worker"]),
     section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView, ["worker"]),
@@ -604,5 +624,5 @@ function paintEtc() {
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    secs[0], summary, ...secs.slice(1)));
+    secs[0], secs[1], summary, ...secs.slice(2)));
 }

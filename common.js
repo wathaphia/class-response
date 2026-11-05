@@ -948,6 +948,8 @@ function codeLetters(text) {
   }).join("").replace(/[^A-Z0-9]/g, "");
 }
 
+const dateText = (t) => (t ? new Date(t).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+
 function openModal(title, body, onClose) {
   const close = () => { box.remove(); if (onClose) onClose(); };
   const box = h("div", { class: "overlay", onclick(e) { if (e.target === box) close(); } },

@@ -322,7 +322,7 @@ function buildShell() {
     // 화면 보기 안내는 위쪽 띠 가운데에 둔다(슬라이드 위에 줄을 차지해 슬라이드가 작아지지 않게)
     h("header", { class: "top" }, h("div", { class: "top-title" }, title, who), screenNotice,
       h("div", { class: "row" },
-        h("button", { class: "link", type: "button", onclick() { history.replaceState(null, "", location.pathname); showCodeOnly(); } }, "다른 수업"),
+        h("button", { class: "link", type: "button", onclick: openBugs }, "버그 제보"),
         h("button", { class: "link", type: "button", onclick() { logout("나갔습니다. 다시 들어오려면 입장하세요."); } }, "나가기"))),
     h("main", { class: "lesson" }, conn, closed, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
@@ -814,6 +814,87 @@ async function handleScreenSignal(message) {
 }
 
 // 슬라이드를 화면 가득 띄운다. 누르거나 Esc로 닫는다. 선생님이 쪽을 넘기면 띄운 그림도 바뀐다.
+// ---------- 버그 제보 ----------
+// 선생님 「버그 제보」 탭과 같은 모양. 학생은 자기 제보만 보고(student_bugs), 선생님은 그 수업 학생의 제보를 본다. 한 학생당 5개까지
+const BUG_MAX = 5;
+function openBugs() {
+  const body = h("div", { class: "stack bugs-page" });
+  let items = null, editId = null;
+  const close = openModal("버그 제보", body);
+  const call = async (fn, args) => {
+    const { data, error } = await sb.rpc(fn, { p_token: token, ...args });
+    if (error) throw new Error(error.message);
+    if (data && data.error === "logged_out") { close(); logout("다른 기기에서 다시 입장했거나 비밀번호가 초기화되었습니다."); throw new Error("logged_out"); }
+    return data || {};
+  };
+  async function load() {
+    try { items = (await call("student_bugs")).items || []; } catch (e) { items = { error: e.message }; }
+    paint();
+  }
+  function paint() {
+    const list = Array.isArray(items) ? items : [];
+    const full = list.length >= BUG_MAX;
+    const msg = h("p", { class: "msg" });
+    const text = h("textarea", { class: "bug-text", rows: 4, maxlength: 4000, placeholder: "무엇을 하다가, 어떤 일이 생겼고, 원래는 어떻게 되어야 하는지 적어 주세요.", disabled: full });
+    const send = h("button", { class: "primary", type: "button", disabled: full, async onclick() {
+      const v = text.value.trim();
+      if (!v) { msg.textContent = "내용을 적어 주세요."; return; }
+      send.disabled = true;
+      msg.textContent = "올리는 중…";
+      try {
+        const r = await call("student_bug_save", { p_id: null, p_body: v, p_lesson: state.lesson.id });
+        if (r.error) throw new Error(r.error === "full" ? "5개까지 쓸 수 있습니다." : r.error);
+      } catch (e) { send.disabled = false; msg.textContent = "올리지 못했습니다: " + e.message; return; }
+      load();
+    } }, "제보하기");
+    const card = (b) => {
+      const copy = h("button", { class: "ghost bug-copy", type: "button", title: "제보 글을 클립보드에 복사", onclick() {
+        navigator.clipboard.writeText(b.body).then(() => { copy.textContent = "복사했습니다"; setTimeout(() => { copy.textContent = "복사"; }, 1500); }, () => alert("복사하지 못했습니다."));
+      } }, "복사");
+      const edited = Date.parse(b.updated_at) - Date.parse(b.created_at) > 2000;
+      const head = h("div", { class: "bug-head" },
+        h("span", { class: "muted small" }, (b.lesson ? b.lesson + " · " : "") + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
+        copy);
+      if (editId === b.id) {
+        const box = h("textarea", { class: "bug-text", rows: 5, maxlength: 4000, value: b.body });
+        const m = h("p", { class: "msg" });
+        return h("article", { class: "card stack bug-card" }, head, box, h("div", { class: "row" },
+          h("button", { class: "primary", type: "button", async onclick(e) {
+            const v = box.value.trim();
+            if (!v) { m.textContent = "내용을 적어 주세요."; return; }
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+              const r = await call("student_bug_save", { p_id: b.id, p_body: v, p_lesson: null });
+              if (r.error) throw new Error(r.error);
+            } catch (err) { btn.disabled = false; m.textContent = "저장하지 못했습니다: " + err.message; return; }
+            editId = null; load();
+          } }, "저장"),
+          h("button", { class: "ghost", type: "button", onclick() { editId = null; paint(); } }, "취소")), m);
+      }
+      return h("article", { class: "card stack bug-card" }, head, h("p", { class: "bug-body" }, b.body),
+        h("div", { class: "row" },
+          h("button", { class: "ghost", type: "button", onclick() { editId = b.id; paint(); } }, "고치기"),
+          h("button", { class: "ghost danger", type: "button", async onclick() {
+            if (!confirm("이 제보를 지울까요?")) return;
+            try { await call("student_bug_delete", { p_id: b.id }); } catch (e) { return alert("지우지 못했습니다: " + e.message); }
+            load();
+          } }, "지우기")));
+    };
+    body.replaceChildren(
+      h("p", { class: "banner" }, "학생의 버그 제보는 나와 선생님만 볼 수 있습니다. 다른 학생에게는 보이지 않습니다."),
+      h("p", { class: "muted small" }, "내가 쓴 제보만 여기에 보입니다. 한 사람당 " + BUG_MAX + "개까지 쓸 수 있고, 고치거나 지우면 다시 쓸 수 있습니다."),
+      h("section", { class: "card stack" },
+        h("div", { class: "row between" }, h("h3", {}, "새 제보"), h("span", { class: "tag " + (full ? "bad" : "info") }, "내 제보 " + list.length + " / " + BUG_MAX)),
+        text, h("div", { class: "row" }, send, full ? h("span", { class: "muted small" }, "5개를 다 썼습니다. 예전 제보를 고치거나 지우면 새로 쓸 수 있습니다.") : null), msg),
+      items && items.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + items.error)
+        : !items ? h("p", { class: "muted small" }, "불러오는 중…")
+        : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다."));
+  }
+  paint();
+  load();
+}
+
 function zoom() {
   if (isPptx(state.lesson)) return openPptxFull(state.lesson, viewing);
   if (shell.stageSim) {
@@ -848,6 +929,7 @@ function go(n) {
 function render(pageChanged) {
   const L = state.lesson;
   const hasSlides = L.slide_count > 0;
+  const small = L.slide_q === "mid";   // 크게 보기(zoom)는 늘 큰 그림
   shell.title.textContent = L.title;
   shell.who.textContent = whoName(state.me);
   shell.closed.hidden = L.open;
@@ -866,12 +948,12 @@ function render(pageChanged) {
       shell.slideBox.querySelector(".pptx-frame")?.remove();
       shell.pptKey = "";
       shell.img.hidden = false;
-      src = slideSrc(L, viewing);   // 학생 화면도 늘 큰 그림(고화질)
+      src = slideSrc(L, viewing, small);   // 화질은 선생님이 기타 관리에서 고른다(보통=작은 그림, 높음=큰 그림)
       const last = shell.lastPage || viewing;
       swapSlide(shell.img, src, slideFx(L), slideNo(L, last) === slideNo(L, viewing) ? (last === viewing ? 1 : 0) : Math.sign(viewing - last));
       shell.lastPage = viewing;
       // 학생은 선생님이 연 쪽까지만 볼 수 있다: 거기에 다음 몇 장을 더해 미리 받아 두면 선생님이 넘길 때 바로 바뀐다
-      preloadSlides(L, viewing, { upto: clampPage(L.page) + 3 });
+      preloadSlides(L, viewing, { small, upto: clampPage(L.page) + 3 });
     }
     const big = src && slideSrc(L, viewing);
     if (shell.zoom && big && shell.zoom.getAttribute("src") !== big) shell.zoom.src = big;

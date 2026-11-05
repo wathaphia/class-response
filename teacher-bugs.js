@@ -6,11 +6,14 @@
 const BUG_MAX = 5;
 let bugs = null;       // 목록(새것부터) 또는 { error }
 let bugEdit = null;    // 고치는 중인 제보 id
+let studentBugs = null;   // 학생 제보(student_bug_reports): 선생님은 내 수업·공유 수업의 것, 개발자는 모두. 지우기는 개발자만
 async function drawBugs() {
   paintBugs();
-  const [{ data, error }] = await Promise.all([
+  const [{ data, error }, sbugs] = await Promise.all([
     sb.from("bug_reports").select("*").order("created_at", { ascending: false }),
+    sb.from("student_bug_reports").select("*, lessons(title, code)").order("created_at", { ascending: false }),
     profile && !profile.error ? null : loadProfile()]);
+  studentBugs = sbugs.error ? { error: /student_bug_reports/.test(sbugs.error.message) ? "Supabase에 student_bug_reports 표가 없습니다(setup.sql 적용 필요)." : sbugs.error.message } : sbugs.data;
   bugs = error ? { error: /bug_reports/.test(error.message) ? "Supabase에 bug_reports 표가 없습니다(setup.sql 적용 필요)." : error.message } : data;
   paintBugs();
 }
@@ -65,6 +68,25 @@ function paintBugs() {
         }) }, "지우기"),
         b.author !== me.id ? h("span", { class: "tag warn" }, "개발자 권한") : null) : null);
   };
+  const sList = Array.isArray(studentBugs) ? studentBugs : [];
+  const studentCard = (b) => {
+    const copy = h("button", { class: "ghost bug-copy", type: "button", title: "제보 글을 클립보드에 복사", onclick() {
+      navigator.clipboard.writeText(b.body).then(() => { copy.textContent = "복사했습니다"; setTimeout(() => { copy.textContent = "복사"; }, 1500); }, () => alert("복사하지 못했습니다."));
+    } }, "복사");
+    const edited = Date.parse(b.updated_at) - Date.parse(b.created_at) > 2000;
+    return h("article", { class: "card stack bug-card" },
+      h("div", { class: "bug-head" },
+        h("span", { class: "muted small" }, "학생 " + b.author_label + (b.lessons ? " · " + b.lessons.title + " (" + b.lessons.code + ")" : "") + " · " + dateText(b.created_at) + (edited ? " · 고침 " + dateText(b.updated_at) : "")),
+        copy),
+      h("p", { class: "bug-body" }, b.body),
+      admin || isObserver() ? h("div", { class: "row" },
+        h("button", { class: "ghost danger", type: "button", onclick: devOnly(async () => {
+          if (!confirm("이 학생 제보를 지울까요?")) return;
+          const { error } = await sb.from("student_bug_reports").delete().eq("id", b.id);
+          if (error) return alert("지우지 못했습니다: " + error.message);
+          drawBugs();
+        }) }, "지우기"), h("span", { class: "tag warn" }, "개발자 권한")) : null);
+  };
   main.replaceChildren(h("div", { class: "stack bugs-page" },
     h("div", {}, h("h2", {}, "버그 제보"),
       h("p", { class: "muted small" }, "선생님 누구나 쓰고 모두 볼 수 있습니다. 고치기·지우기는 쓴 사람과 개발자만 할 수 있고, 한 사람당 " + BUG_MAX + "개까지 쓸 수 있습니다.")),
@@ -73,5 +95,10 @@ function paintBugs() {
       text, h("div", { class: "row" }, send, mine >= BUG_MAX ? h("span", { class: "muted small" }, "5개를 다 썼습니다. 예전 제보를 고치거나 지우면 새로 쓸 수 있습니다.") : null), msg),
     bugs && bugs.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + bugs.error)
       : !bugs ? h("p", { class: "muted small" }, "불러오는 중…")
-      : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다.")));
+      : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다."),
+    h("div", {}, h("h2", {}, "학생 제보"),
+      h("p", { class: "muted small" }, "학생 화면의 「버그 제보」로 들어온 글입니다. 쓴 학생과 선생님만 볼 수 있습니다(선생님은 내 수업·공유받은 수업의 학생 제보, 개발자는 모두). 지우기는 개발자만 할 수 있습니다.")),
+    studentBugs && studentBugs.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + studentBugs.error)
+      : !studentBugs ? h("p", { class: "muted small" }, "불러오는 중…")
+      : sList.length ? sList.map(studentCard) : h("p", { class: "muted small" }, "아직 학생 제보가 없습니다.")));
 }
