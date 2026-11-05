@@ -51,7 +51,7 @@ function pageCell(a) {
   if (a.page == null || !lesson.slide_count) return h("strong", { class: "act-page" }, whereText(a));
   const num = (v, label, set) => {
     const el = h("input", { type: "text", inputmode: "numeric", maxlength: 3, class: "act-num", value: v, "aria-label": label,
-      onkeydown(ev) { if (ev.key === "Enter") el.blur(); else if (ev.key === "Escape") { el.value = v; el.blur(); } },
+      onkeydown(ev) { if (imeBusy(ev)) return; if (ev.key === "Enter") el.blur(); else if (ev.key === "Escape") { el.value = v; el.blur(); } },
       onchange() { const n = parseInt(el.value, 10); if (n >= 1 && n !== v) set(n); else el.value = v; } });
     return el;
   };
@@ -460,7 +460,7 @@ function simEditor() {
     e.html = await f.text();
     code.value = e.html;
     size.textContent = sizeText();
-    if (!e.title.trim()) { e.title = f.name.replace(/\.html?$/i, ""); title.value = e.title; }
+    if (!e.title.trim()) { e.title = f.name.normalize("NFC").replace(/\.html?$/i, ""); title.value = e.title; }
     msg.textContent = "";
     syncSave();
   } });

@@ -108,6 +108,14 @@ const KIND_NAME = { slide: "질문", survey: "질문", quiz: "퀴즈", sim: "시
 const TYPE_NAME = { choice: "하나 고르기", multi: "여러 개 고르기", short: "짧은 글", long: "긴 글" };
 
 // 화면 요소 만들기. 학생이 쓴 글은 늘 글자(텍스트)로만 넣는다(innerHTML을 쓰지 않음).
+// 한글을 조합하는 중의 키(맥은 글자를 확정하는 Enter 도 keydown 으로 온다: Chrome 은 isComposing, Safari 는 keyCode 229)
+const imeBusy = (e) => e.isComposing || e.keyCode === 229;
+// 슬라이드 넘기기 키: ← → 와 발표용 리모컨(PageUp·PageDown). Cmd·Ctrl·Alt 를 함께 누른 것(맥 Cmd+← 는 뒤로 가기)은 넘기지 않는다
+function slideKey(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || imeBusy(e)) return 0;
+  return e.key === "ArrowRight" || e.key === "PageDown" ? 1 : e.key === "ArrowLeft" || e.key === "PageUp" ? -1 : 0;
+}
+
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -203,9 +211,40 @@ function swapSlide(img, src, fx, dir) {
     img.dispatchEvent(new CustomEvent("slideswap", { detail: prev ? cls : "" }));   // 얹은 시뮬레이션이 같은 순간 같은 효과로 바뀐다(renderSimLayer)
   };
   if (!img.getAttribute("src")) return show();
-  const pre = new Image();
-  pre.src = src;
+  const pre = slideCache.get(src) || new Image();
+  if (!pre.getAttribute("src")) pre.src = src;
   (pre.decode ? pre.decode() : Promise.resolve()).catch(() => {}).then(show);
+}
+
+// 수업의 슬라이드 그림을 처음에 모두 받아 둔다: 넘길 때 그 쪽 그림을 그제야 받지 않아 바로 바뀐다(swapSlide 가 꺼내 씀).
+// Image 를 붙잡아 두어야 Safari 가 받던 것을 버리지 않고 메모리에 남긴다. 지금 쪽부터 끝까지, 그다음 앞쪽을 3장씩 받는다.
+// upto: 거기까지만 받는다(학생은 선생님이 연 쪽까지만 볼 수 있으므로). 수업·그림 주소가 바뀌면 처음부터 다시 받는다.
+const slideCache = new Map();   // 그림 주소 → Image
+let slideQueue = [], slideLoading = 0, slideCacheKey = "";
+function preloadSlides(lesson, at, { small = false, upto } = {}) {
+  if (!lesson || !(lesson.slide_count > 0) || isPptx(lesson)) return;
+  const key = lesson.slide_dir + (small ? "|s" : "");
+  if (key !== slideCacheKey) { slideCache.clear(); slideCacheKey = key; }
+  const last = Math.min(lesson.slide_count, upto || lesson.slide_count);
+  const order = [];
+  for (let n = Math.max(at, 1); n <= last; n++) order.push(n);
+  for (let n = Math.min(at, last + 1) - 1; n >= 1; n--) order.push(n);
+  slideQueue = order.map((n) => slideSrc(lesson, n, small)).filter((s) => !slideCache.has(s));
+  // 바로 다음 두 장은 그림 풀기(decode)까지 해 두어 바꾸는 순간에도 멈칫하지 않게
+  for (let n = at + 1; n <= Math.min(at + 2, last); n++) slideCache.get(slideSrc(lesson, n, small))?.decode?.().catch(() => {});
+  pumpSlides();
+}
+function pumpSlides() {
+  while (slideLoading < 3 && slideQueue.length) {
+    const src = slideQueue.shift();
+    if (slideCache.has(src)) continue;
+    const img = new Image();
+    slideCache.set(src, img);
+    slideLoading++;
+    img.onload = () => { slideLoading--; pumpSlides(); };
+    img.onerror = () => { slideLoading--; slideCache.delete(src); pumpSlides(); };   // 다음에 다시 시도(작은 그림이 빠졌으면 화면 쪽에서 큰 그림으로 바꿈)
+    img.src = src;
+  }
 }
 
 // 단계 그림과 함께 올린 원본 PPTX(같은 폴더의 deck.pptx) 주소
@@ -526,10 +565,31 @@ function closeFloatingSim() {
   floatingSim = null;
 }
 
+// 전체 화면: macOS Safari 16.3 이하는 webkit 이름만 있고 Promise 를 돌려주지 않는다
+const fullEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+function goFull(el) {
+  const f = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!f) return Promise.reject(new Error("전체 화면을 쓸 수 없습니다"));
+  try { return Promise.resolve(f.call(el)); } catch (e) { return Promise.reject(e); }
+}
+function exitFull() {
+  if (!fullEl()) return;
+  try { Promise.resolve((document.exitFullscreen || document.webkitExitFullscreen).call(document)).catch(() => {}); } catch { /* 이미 나감 */ }
+}
+// 전체 화면에서 나올 때(Esc·초록 단추) 부르기. 돌려준 함수로 끊는다
+function onFullExit(fn) {
+  const left = () => { if (!fullEl()) fn(); };
+  document.addEventListener("fullscreenchange", left);
+  document.addEventListener("webkitfullscreenchange", left);
+  return () => { document.removeEventListener("fullscreenchange", left); document.removeEventListener("webkitfullscreenchange", left); };
+}
+
 // 시뮬레이션을 화면 가득 띄운다. 닫기 버튼이나 Esc로 닫는다.
 // autoplay: 바로 실행하고 재생/일시정지 버튼을 두지 않는다(편집기의 「미리보기」)
 function openSimFull(title, html, { autoplay = false } = {}) {
-  const close = () => { box.remove(); document.removeEventListener("keydown", esc); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
+  let unfull = () => {};
+  // 맥은 전체 화면에서 Esc 를 브라우저가 먼저 써서 keydown 이 오지 않으므로, 전체 화면에서 나오면 함께 닫는다
+  const close = () => { box.remove(); document.removeEventListener("keydown", esc); unfull(); exitFull(); };
   const esc = (e) => { if (e.key === "Escape") close(); };
   const frame = simFrame(autoplay ? html : withSimPause(html), title);
   const box = h("div", { class: "sim-full" },
@@ -538,7 +598,7 @@ function openSimFull(title, html, { autoplay = false } = {}) {
     frame);
   document.addEventListener("keydown", esc);
   document.body.append(box);
-  if (box.requestFullscreen) box.requestFullscreen().catch(() => {});
+  goFull(box).then(() => { if (box.isConnected) unfull = onFullExit(close); }, () => {});
 }
 
 // small: 학생 기기·썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.

@@ -420,14 +420,14 @@ function supabaseView() {
   const ep = egressProjection(m);
   // 무료 프로젝트는 7일 동안 요청이 없으면 잠든다: 최근 7일 요청 기록 중 마지막으로 요청이 있었던 날로 센다
   const lastDay = s && s.apiCounts && [...s.apiCounts].reverse().find((x) => x.total_rest_requests + x.total_auth_requests + x.total_storage_requests + x.total_realtime_requests > 0);
-  const idle = lastDay ? Math.max(0, Math.floor((at - Date.parse(lastDay.timestamp + "Z")) / 86400000)) : null;
+  const idle = lastDay ? Math.max(0, Math.floor((at - Date.parse(String(lastDay.timestamp).replace(" ", "T").replace(/Z?$/, "Z"))) / 86400000)) : null;
   const egressSide = s ? () => egressView(m, ep, s.egressMonth) : null;
   const tablesSide = d.tables ? () => [usageBlock("표별 크기",
     usageTable(["표", "줄 수", "크기"], d.tables.map((t) => [t.name, Number(t.rows).toLocaleString(), usageAmount(t.bytes, "bytes")]))),
     h("p", { class: "small" }, "학생 " + d.students + "명 · 수업 " + d.lessons + "개 · 응답 " + d.responses + "개")] : null;
   const requestsSide = s && s.apiCounts ? () => usageBlock("최근 7일 요청 수(하루 = 한국 시간 " + DAY9 + ")",
     usageTable(["날짜", "데이터", "파일", "로그인", "실시간"], [...s.apiCounts].reverse().map((x) => [
-      new Date(x.timestamp + "Z").toLocaleDateString("ko-KR", { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }),
+      new Date(String(x.timestamp).replace(" ", "T").replace(/Z?$/, "Z")).toLocaleDateString("ko-KR", { timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short" }),
       x.total_rest_requests.toLocaleString(), x.total_storage_requests.toLocaleString(), x.total_auth_requests.toLocaleString(), x.total_realtime_requests.toLocaleString()]))) : null;
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적", side: tablesSide },

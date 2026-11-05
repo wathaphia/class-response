@@ -91,7 +91,7 @@ function enterLesson(newCode) {
 // 이미 입장한 기기: 수업 코드만 넣으면 된다
 function closeZoom() {
   document.querySelectorAll(".slide-zoom").forEach((x) => x.remove());
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  exitFull();
 }
 
 function showCodeOnly(notice) {
@@ -504,6 +504,12 @@ async function startDesk() {
     });
   } catch (e) {
     if (e.name !== "NotAllowedError") alert("전체 화면 공유를 시작하지 못했습니다: " + e.message);
+    else if (/system/i.test(e.message || "") || /Mac/.test(navigator.platform)) {
+      deskMsg = /Mac/.test(navigator.platform)
+        ? " 공유 창이 뜨지 않았다면 Mac의 「시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 기록(화면 기록)」에서 이 브라우저를 켠 뒤 브라우저를 다시 열어 주세요."
+        : " 기기 설정에서 이 브라우저의 화면 기록을 허용해 주세요.";
+      renderScreenNotice();
+    }
     return;
   }
   const track = stream.getVideoTracks()[0];
@@ -790,19 +796,19 @@ function zoom() {
   if (shell.zoom) return;
   const big = h("img", { src: slideSrc(state.lesson, viewing), alt: shell.img.alt });   // 크게 볼 때만 큰 그림(1280px)을 받는다
   const box = h("div", { class: "slide-zoom", onclick: close }, big, h("p", {}, "눌러서 닫기 · 휴대폰은 가로로 돌리면 더 크게 보입니다"));
+  let unfull = () => {};
   function close() {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    unfull();
+    exitFull();
     box.remove();
     document.removeEventListener("keydown", esc);
-    document.removeEventListener("fullscreenchange", left);
     if (shell) shell.zoom = null;
   }
   const esc = (e) => { if (e.key === "Escape") close(); };
-  const left = () => { if (!document.fullscreenElement) close(); };
   document.addEventListener("keydown", esc);
   document.body.append(box);
   shell.zoom = big;
-  if (box.requestFullscreen) box.requestFullscreen().then(() => document.addEventListener("fullscreenchange", left)).catch(() => {});
+  goFull(box).then(() => { if (box.isConnected) unfull = onFullExit(close); }, () => {});
 }
 
 function go(n) {
@@ -837,6 +843,8 @@ function render(pageChanged) {
       const last = shell.lastPage || viewing;
       swapSlide(shell.img, src, slideFx(L), slideNo(L, last) === slideNo(L, viewing) ? (last === viewing ? 1 : 0) : Math.sign(viewing - last));
       shell.lastPage = viewing;
+      // 학생은 선생님이 연 쪽까지만 볼 수 있다: 거기에 다음 몇 장을 더해 미리 받아 두면 선생님이 넘길 때 바로 바뀐다
+      preloadSlides(L, viewing, { small: true, upto: clampPage(L.page) + 3 });
     }
     const big = src && slideSrc(L, viewing);
     if (shell.zoom && big && shell.zoom.getAttribute("src") !== big) shell.zoom.src = big;

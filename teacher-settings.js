@@ -114,8 +114,9 @@ function slidesCard() {
     btn.textContent = btnName + (queue.length ? " (" + queue.length + "개)" : "");
   };
   const add = (files) => {
-    const ok = files.filter(isSlideFile).sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
-    status.textContent = ok.length < files.length ? "PPTX·PDF·PNG·JPG가 아닌 파일 " + (files.length - ok.length) + "개는 뺐습니다." : "";
+    const ok = files.filter(isSlideFile).sort((a, b) => a.name.normalize("NFC").localeCompare(b.name.normalize("NFC"), "ko", { numeric: true }));
+    const key = files.some((f) => /\.key$/i.test(f.name)) ? " Keynote 파일은 Keynote에서 「파일 → 내보내기 → PDF」(또는 PowerPoint)로 바꿔 올리세요." : "";
+    status.textContent = ok.length < files.length ? "PPTX·PDF·PNG·JPG가 아닌 파일 " + (files.length - ok.length) + "개는 뺐습니다." + key : "";
     queue.push(...ok);
     paintQueue();
   };
@@ -401,7 +402,9 @@ async function slidePair(canvas) {
   const ctx = c.getContext("2d");
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(canvas, 0, 0, c.width, c.height);
-  return { big: await canvasToJpeg(canvas), small: await canvasToJpeg(c) };
+  const pair = { big: await canvasToJpeg(canvas), small: await canvasToJpeg(c) };
+  canvas.width = canvas.height = c.width = c.height = 0;
+  return pair;
 }
 
 // 파일들을 받은 순서대로 쪽별 JPG 묶음({ big, small })으로 바꾼다(PDF는 쪽마다, 그림은 한 장씩). 모두 합쳐 200쪽까지
@@ -429,6 +432,7 @@ async function toSlideImages(files, progress) {
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        page.cleanup();
         out.push(await slidePair(canvas));
       }
       continue;
@@ -441,6 +445,7 @@ async function toSlideImages(files, progress) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close?.();
     out.push(await slidePair(canvas));
   }
   return out;
