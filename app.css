@@ -298,9 +298,9 @@ main.lesson .slide { cursor: zoom-in; }
 .act-head h3 { margin: 0; overflow-wrap: anywhere; }
 .act-head button { align-self: flex-start; }
 .act-id { display: grid; grid-template-columns: auto minmax(0, 1fr); border: 1px solid #e3e3e3; border-radius: 8px; }
-.act-page { display: flex; align-items: center; justify-content: center; padding: .4rem .7rem; font-size: 1.5rem; font-weight: 800; white-space: nowrap; border-right: 1px solid #e3e3e3; }
+.act-page { display: flex; align-items: center; justify-content: center; padding: .4rem .35rem; font-size: 1.5rem; font-weight: 800; white-space: nowrap; border-right: 1px solid #e3e3e3; }
 /* 쪽 칸: [시작 ~ 끝 쪽] 한 덩어리(한 쪽짜리도 시작 = 끝). 두 숫자는 눌러서 바로 고칠 수 있다 */
-.act-page.range { gap: .1rem; padding: .4rem .45rem; }
+.act-page.range { gap: .1rem; padding: .4rem .25rem; }
 .act-tilde { font-weight: 700; color: var(--muted); }
 input[type=text].act-num { width: 1.9em; min-height: 0; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; text-align: center; font: inherit; color: inherit; cursor: text; }
 input[type=text].act-num:hover { border-color: var(--field); }
@@ -311,9 +311,9 @@ input[type=text].act-num:focus { background: #fff; }
 .act-name { min-width: 0; display: flex; flex-direction: column; }
 .act-name > p { margin: 0; padding: .3rem .6rem; border-bottom: 1px solid #e3e3e3; }
 .act-name > h3 { padding: .3rem .6rem; }
-/* 오른쪽 단추: 수정, 그 아래 같은 크기로 재생(시뮬레이션) */
+/* 오른쪽 단추: 수정, 그 아래 같은 크기로 재생(시뮬레이션). 좁게 두어 종류·제목 칸을 넓힌다 */
 .act-btns { display: flex; flex-direction: column; align-items: stretch; gap: .4rem; }
-.act-btns > button { align-self: stretch; min-width: 7.5em; }
+.act-btns > button { align-self: stretch; min-width: 3.75em; padding-left: .3rem; padding-right: .3rem; white-space: nowrap; }
 .act-body { min-width: 0; }
 /* 넓은 화면: 만들기 탭을 창 높이에 맞추고(높이는 teacher.js의 pinBuild), 활동은 2×2 네 칸씩 보이며 목록 안에서 스크롤 */
 @media (min-width: 1100px) {

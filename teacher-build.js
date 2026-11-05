@@ -15,7 +15,7 @@ function buildSimFrame(a) {
     const f = simFrame(withSimPause(a.html || ""), a.title);
     s = { key, box: simScaled(f), playing: false };
     // 작은 슬라이드·크게 본 슬라이드 위의 같은 시뮬레이션도 이 버튼을 따라 돌고 멈춘다
-    s.play = simPlayButton(f, (on) => { s.playing = on; document.querySelectorAll('.act-slide .sim-over[data-sim="' + a.id + '"], .slide-view .sim-over[data-sim="' + a.id + '"]').forEach(simOverPause); });
+    s.play = simPlayButton(f, (on) => { s.playing = on; document.querySelectorAll('.act-slide .sim-over[data-sim="' + a.id + '"], .slide-view .sim-over[data-sim="' + a.id + '"]').forEach(simOverPause); }, { short: true });
     buildSimFrames.set(a.id, s);
   }
   return s;
@@ -56,6 +56,10 @@ function pageCell(a) {
     return el;
   };
   const end = a.page_to > a.page ? a.page_to : a.page;
+  // 한 쪽짜리는 [n쪽]만. 여러 쪽으로 늘리려면 「수정」의 끝 쪽 칸을 쓴다
+  if (end === a.page) return h("div", { class: "act-page range" },
+    num(a.page, "쪽", (n) => changeLayout(() => setPages(a, n, n))),
+    h("span", { class: "act-unit" }, "쪽"));
   return h("div", { class: "act-page range" },
     // 시작을 끝보다 뒤로 고치면 한 쪽짜리로, 끝을 시작보다 앞으로 고치면 둘을 맞바꾼다
     num(a.page, "시작 쪽", (n) => changeLayout(() => setPages(a, n, n <= end ? end : n))),

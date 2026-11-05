@@ -361,12 +361,14 @@ function withSimPause(html) {
 }
 
 // 재생/일시정지 버튼 하나. 시뮬레이션을 새로 불러오면 다시 멈춘 상태(▶ 재생)로 돌아간다.
-function simPlayButton(frame, onSet) {
+// short: 기호만(▶/⏸) 보이는 좁은 버튼(만들기 탭의 활동 칸)
+function simPlayButton(frame, onSet, { short = false } = {}) {
   let playing = false;
   const b = h("button", { class: "ghost sim-play", type: "button", onclick() { set(!playing); } });
   function set(on) {
     playing = on;
-    b.textContent = on ? "⏸ 일시정지" : "▶ 재생";
+    b.textContent = short ? (on ? "⏸" : "▶") : on ? "⏸ 일시정지" : "▶ 재생";
+    if (short) b.title = on ? "일시정지" : "재생";
     b.setAttribute("aria-pressed", String(on));
     frame.contentWindow?.postMessage({ craPause: !on }, "*");
     onSet?.(on);
