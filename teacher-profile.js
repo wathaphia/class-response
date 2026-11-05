@@ -338,7 +338,7 @@ function teachersCard(p) {
   // 「취소」·Esc·줄 밖 빈 곳을 누르면 입력란을 닫고 처음 모습(「추가」만)으로 돌아간다.
   const newEmail = h("input", { type: "email", class: "add-email", placeholder: "새 선생님 이메일", "aria-label": "새 선생님 이메일", hidden: true,
     onkeydown(e) {
-      if (e.key === "Enter") { e.preventDefault(); addBtn.click(); }
+      if (e.key === "Enter" && !imeBusy(e)) { e.preventDefault(); addBtn.click(); }
       if (e.key === "Escape") closeAdd();
     } });
   const cancelBtn = h("button", { class: "link", type: "button", hidden: true, onclick() { closeAdd(); } }, "취소");

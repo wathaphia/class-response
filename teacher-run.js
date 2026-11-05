@@ -90,7 +90,7 @@ function refreshRun() {
     run.prev.disabled = L.page <= 1;
     run.next.disabled = L.page >= L.slide_count;
     run.deckBtn.hidden = !deckUrl(L);
-    if (L.page < L.slide_count) new Image().src = slideSrc(L, L.page + 1);
+    preloadSlides(L, L.page);
   }
   run.openText.replaceChildren(h("strong", {}, L.open ? "제출 받는 중" : "제출 닫힘"),
     h("span", { class: "muted small" }, " · 입장 " + students.length + "명"));
@@ -205,9 +205,8 @@ function openPresent() {
   d.addEventListener("contextmenu", (e) => e.preventDefault());
   // 창을 눌러 초점이 넘어가도 키보드 ← → 로는 교사 화면처럼 넘길 수 있다
   d.addEventListener("keydown", (e) => {
-    if (!lesson) return;
-    if (e.key === "ArrowRight") setPage(lesson.page + 1);
-    if (e.key === "ArrowLeft") setPage(lesson.page - 1);
+    const k = lesson && slideKey(e);
+    if (k) { e.preventDefault(); setPage(lesson.page + k); }
   });
   present = { w, img, stage, simStage, simLayer, note, simKey: "", pptKey: "" };
   // 비추개가 보내는 영상 연결 답을 교사 쪽 시뮬레이션에 넘긴다(같은 창을 다시 쓰면 바꿔 끼운다)

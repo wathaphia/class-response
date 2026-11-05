@@ -209,7 +209,7 @@ main.lesson .slide { cursor: zoom-in; }
 .lesson-box { display: flex; align-items: stretch; min-width: 0; max-width: min(18rem, 100%); border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .lesson-box:focus-within { border-color: var(--accent); }
 .lesson-code { display: flex; align-items: center; padding: 0 .7rem; border-right: 1px solid var(--line); border-radius: 10px 0 0 10px; background: var(--accent-soft);
-  color: var(--accent); font-weight: 700; letter-spacing: .05em; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; user-select: all; }
+  color: var(--accent); font-weight: 700; letter-spacing: .05em; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; -webkit-user-select: all; user-select: all; }
 .teacher .lesson-box .lesson-title { flex: 1 1 7rem; min-width: 5rem; width: 0; min-height: 40px; padding: .3rem .6rem; border: 0; border-radius: 0 10px 10px 0; background: none; font-weight: 700; }
 .teacher .lesson-box .lesson-title:focus { outline: none; background: var(--accent-soft); }
 @media (min-width: 600px) { .teacher .top-title { flex-wrap: nowrap; } }
@@ -231,8 +231,8 @@ main.lesson .slide { cursor: zoom-in; }
 /* 「설정」 아래 줄 탭: 머리말 전체 너비로 한 줄 더 */
 .teacher .top > .sub-tabs { flex: 1 0 100%; grid-column: 1 / -1; align-items: center; padding-top: .45rem; border-top: 1px solid var(--line); }
 /* 탭 꾸미기: 탭 두 줄만 살아 있고 나머지는 흐리게, 누를 수 없게 */
-#app.tab-editing .top-title, #app.tab-editing .top-actions, #app.tab-editing > main { opacity: .35; filter: grayscale(1) blur(1.5px); pointer-events: none; user-select: none; }
-.tab.cust { cursor: grab; touch-action: none; user-select: none; border: 1px dashed var(--accent); border-radius: 10px; padding-block: .2rem; }
+#app.tab-editing .top-title, #app.tab-editing .top-actions, #app.tab-editing > main { opacity: .35; filter: grayscale(1) blur(1.5px); pointer-events: none; -webkit-user-select: none; user-select: none; }
+.tab.cust { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; border: 1px dashed var(--accent); border-radius: 10px; padding-block: .2rem; }
 .tab.cust::after { display: none; }
 .tab-label { min-width: 1.5rem; padding: .1rem .25rem; border-radius: 6px; cursor: text; outline: none; }
 .tab-label:focus { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
@@ -567,7 +567,7 @@ body.desk-locked { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .sim-over[class*="fx-"] { animation: none; } }
 .sim-over .sim-frame { min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: transparent; }
 .sim-over.editable:hover, .sim-over.moving { outline: 2px dashed rgba(37, 99, 235, .7); }
-.sim-grip { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; padding: 0 .6rem; background: rgba(37, 99, 235, .92); color: #fff; font-size: .8rem; cursor: move; opacity: 0; touch-action: none; user-select: none; }
+.sim-grip { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; padding: 0 .6rem; background: rgba(37, 99, 235, .92); color: #fff; font-size: .8rem; cursor: move; opacity: 0; touch-action: none; -webkit-user-select: none; user-select: none; }
 .sim-resize { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; background: rgba(37, 99, 235, .92); border-radius: 4px 0 0 0; cursor: nwse-resize; opacity: 0; touch-action: none; }
 .sim-over.editable:hover .sim-grip, .sim-over.editable:hover .sim-resize, .sim-over.moving .sim-grip, .sim-over.moving .sim-resize { opacity: 1; }
 .sim-layer.dragging .sim-frame { pointer-events: none; }
@@ -581,7 +581,7 @@ body.desk-locked { overflow: hidden; }
 
 /* 전체 수업 관리: 폴더별 수업 카드(끌어서 옮기기) */
 .lesson-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; min-height: 3.5rem; padding: .4rem; border-radius: 10px; }
-.lesson-card { display: grid; gap: .25rem; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: grab; user-select: none; }
+.lesson-card { display: grid; gap: .25rem; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: grab; -webkit-user-select: none; user-select: none; }
 .lesson-card:hover { border-color: #9db4e8; }
 .lesson-card.picked { border-color: var(--accent, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 .lesson-card .tag { justify-self: start; }
@@ -807,7 +807,7 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .slide-tools > .grow { flex: 1 1 0; min-width: 0; }   /* 「삭제할 슬라이드 선택하기」 ↔ 「선택한 슬라이드 삭제 (n)」 너비 고정 */
 .sorting .thumb { cursor: grabbing; }
 /* 끌어서 순서 바꾸기(teacher.js dragSort): 끄는 칸은 마우스를 따라 들려 있고, 자리가 바뀔 칸은 그 자리로 미끄러져 가볍게 들썩인다 */
-.sorting { user-select: none; cursor: grabbing; }
+.sorting { -webkit-user-select: none; user-select: none; cursor: grabbing; }
 .sort-item { transition: translate .22s cubic-bezier(.2, .8, .2, 1); }
 .sort-item.sort-lift { transition: none; position: relative; z-index: 30; pointer-events: none; background: var(--card); box-shadow: 0 12px 28px rgba(0, 0, 0, .22); opacity: .92; scale: 1.03; }
 /* 자리가 바뀔 칸: 천천히 크게 위아래로 흔들리고, 떠오를 때 그림자가 짙어진다 */

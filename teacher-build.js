@@ -51,7 +51,7 @@ function pageCell(a) {
   if (a.page == null || !lesson.slide_count) return h("strong", { class: "act-page" }, whereText(a));
   const max = Math.max(slideTotal(lesson), 1);
   const num = h("input", { type: "text", inputmode: "numeric", maxlength: 3, class: "act-num", value: a.page, "aria-label": "쪽 번호",
-    onkeydown(ev) { if (ev.key === "Enter") num.blur(); else if (ev.key === "Escape") { num.value = a.page; num.blur(); } },
+    onkeydown(ev) { if (imeBusy(ev)) return; if (ev.key === "Enter") num.blur(); else if (ev.key === "Escape") { num.value = a.page; num.blur(); } },
     onchange() { const n = parseInt(num.value, 10); if (n >= 1) movePage(a, n); else num.value = a.page; } });
   const step = (d) => h("button", { type: "button", class: "act-step", "aria-label": d > 0 ? "한 쪽 뒤로" : "한 쪽 앞으로",
     disabled: d > 0 ? a.page >= max : a.page <= 1, onclick() { movePage(a, a.page + d); } }, d > 0 ? "▲" : "▼");
@@ -289,7 +289,7 @@ function simEditor() {
     e.html = await f.text();
     code.value = e.html;
     size.textContent = sizeText();
-    if (!e.title.trim()) { e.title = f.name.replace(/\.html?$/i, ""); title.value = e.title; }
+    if (!e.title.trim()) { e.title = f.name.normalize("NFC").replace(/\.html?$/i, ""); title.value = e.title; }
     msg.textContent = "";
     syncSave();
   } });

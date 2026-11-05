@@ -148,7 +148,7 @@ async function drawManage() {
       onkeydown(e) { if (e.key === "Enter") { pickedId = l.id; drawManage(); } },
     },
       h("strong", {}, (l.kind === "survey" ? "[설문] " : "") + l.title),
-      h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString()),
+      h("span", { class: "muted small" }, l.code + " · " + (l.slide_count ? slideTotal(l) + "쪽" : "슬라이드 없음") + " · " + new Date(l.created_at).toLocaleDateString("ko-KR")),
       l.id === lesson?.id ? h("span", { class: "tag ok" }, "지금 수업") : null,
       mine(l) ? null : h("span", { class: "tag info" }, canOpenLesson(l) ? "공유받음" : "다른 선생님"),
       l.observer_copy ? h("span", { class: "tag warn observer-copy" }, "관찰자 수정본") : null,
@@ -193,7 +193,7 @@ async function drawManage() {
     if (r.error) { msg.textContent = "폴더를 만들지 못했습니다: " + r.error.message; return; }
     drawManage();
   };
-  newName.addEventListener("keydown", (e) => { if (e.key === "Enter") addFolder(); });
+  newName.addEventListener("keydown", (e) => { if (e.key === "Enter" && !imeBusy(e)) addFolder(); });
 
   const p = picked();
   const moveSel = p && mine(p) ? h("select", { "aria-label": "옮길 폴더", async onchange() { await moveLesson(p.id, moveSel.value || null, null); } },
