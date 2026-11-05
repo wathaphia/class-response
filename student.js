@@ -855,12 +855,13 @@ function render(pageChanged) {
       shell.slideBox.querySelector(".pptx-frame")?.remove();
       shell.pptKey = "";
       shell.img.hidden = false;
-      src = slideSrc(L, viewing, true);
+      const small = slideQ(L) !== "hi";   // 선생님이 「전체 수업」에서 고른 학생 화면 화질
+      src = slideSrc(L, viewing, small);
       const last = shell.lastPage || viewing;
       swapSlide(shell.img, src, slideFx(L), slideNo(L, last) === slideNo(L, viewing) ? (last === viewing ? 1 : 0) : Math.sign(viewing - last));
       shell.lastPage = viewing;
       // 학생은 선생님이 연 쪽까지만 볼 수 있다: 거기에 다음 몇 장을 더해 미리 받아 두면 선생님이 넘길 때 바로 바뀐다
-      preloadSlides(L, viewing, { small: true, upto: clampPage(L.page) + 3 });
+      preloadSlides(L, viewing, { small, upto: clampPage(L.page) + 3 });
     }
     const big = src && slideSrc(L, viewing);
     if (shell.zoom && big && shell.zoom.getAttribute("src") !== big) shell.zoom.src = big;

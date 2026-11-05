@@ -183,6 +183,16 @@ function withFx(dir, fx) {
   const base = dir.replace(/([?&])fx=\w+&?/, "$1").replace(/[?&]$/, "");
   return fx === "fade" || !base ? base : base + (base.includes("?") ? "&" : "?") + "fx=" + fx;
 }
+// 학생 화면 슬라이드 화질: slide_dir 끝의 q=hi 면 학생도 큰 그림(새로 올린 것은 1920px), 없으면 작은 그림(1024px). 「전체 수업」에서 고른다.
+// 「슬라이드 PDF 받기」는 이 값과 상관없이 늘 원본 PDF·큰 그림으로 만든다.
+const SLIDE_Q = { mid: "보통 (가로 1024px, 데이터 적음)", hi: "높음 (큰 그림, 최대 1920px)" };
+function slideQ(lesson) {
+  return /[?&]q=hi(&|$)/.test(lesson.slide_dir || "") ? "hi" : "mid";
+}
+function withQ(dir, q) {
+  const base = dir.replace(/([?&])q=\w+&?/, "$1").replace(/[?&]$/, "");
+  return q !== "hi" || !base ? base : base + (base.includes("?") ? "&" : "?") + "q=hi";
+}
 // 슬라이드 그림을 바꾸며 전환 효과를 준다. dir: 1 앞으로, -1 뒤로, 0 같은 슬라이드 안의 애니메이션 단계
 // 새 그림을 먼저 받아 둔 뒤 바꿔서, 효과 도중에 예전 그림이 비치지 않게 한다.
 function swapSlide(img, src, fx, dir) {
@@ -720,7 +730,7 @@ async function exportSlidesPdf(l, msg) {
         vector++;
         continue;
       }
-      const r = await fetch(slideSrc(l, pg));
+      const r = await fetch(slideSrc(l, pg));   // 학생 화면 화질과 상관없이 늘 큰 그림
       const blob = r.ok ? await r.blob() : null;
       if (!blob || !/^image\//.test(blob.type)) { miss.push(slideNo(l, pg)); continue; }
       const bytes = await blob.arrayBuffer();
