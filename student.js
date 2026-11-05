@@ -319,16 +319,27 @@ function buildShell() {
     h("p", { class: "muted small" }, "다음 쪽은 선생님이 넘기면 자동으로 열립니다. ", pdfMsg));
   const list = h("div", { class: "stack" });
   app.replaceChildren(
-    h("header", { class: "top" }, h("div", { class: "top-title" }, title, who),
+    // 화면 보기 안내는 위쪽 띠 가운데에 둔다(슬라이드 위에 줄을 차지해 슬라이드가 작아지지 않게)
+    h("header", { class: "top" }, h("div", { class: "top-title" }, title, who), screenNotice,
       h("div", { class: "row" },
         h("button", { class: "link", type: "button", onclick() { history.replaceState(null, "", location.pathname); showCodeOnly(); } }, "다른 수업"),
         h("button", { class: "link", type: "button", onclick() { logout("나갔습니다. 다시 들어오려면 입장하세요."); } }, "나가기"))),
-    h("main", { class: "lesson" }, conn, closed, screenNotice, slideBox, list));
+    h("main", { class: "lesson" }, conn, closed, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
   const empty = h("p", { class: "muted center" });
   shell = { img, simStage, simLayer, prev, next, where, back, closed, conn, title, who, screenNotice, slideBox, list, anytimeHead, empty, stageSim: null, stageKey: "", pptKey: "" };
   renderScreenNotice();
 }
+
+// 키보드 ←/→ 로 슬라이드 넘기기(글을 쓰는 중이거나 다른 창이 떠 있을 때는 그대로 둔다)
+document.addEventListener("keydown", (e) => {
+  if (!shell || !state.lesson || e.altKey || e.ctrlKey || e.metaKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+  if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable], iframe")) return;
+  if (shell.slideBox.hidden || !state.lesson.slide_count) return;
+  e.preventDefault();
+  go(viewing + (e.key === "ArrowRight" ? 1 : -1));
+  if (shell.zoom) shell.zoom.src = slideSrc(state.lesson, viewing);
+});
 
 function ensureScreenChannel() {
   // 채널 이름은 수업 코드로 만든다(예전 setup.sql 은 수업 id·학생 id를 보내 주지 않음)
@@ -429,7 +440,7 @@ function renderScreenNotice() {
   shell.screenNotice.hidden = !text;
   shell.screenNotice.classList.toggle("live", mirrorOn);
   shell.screenNotice.classList.toggle("ask", !!(mirrorOn && deskBtn));   // 선생님이 보는데 전체 화면 공유가 꺼져 있음
-  shell.screenNotice.replaceChildren(...(text ? [h("span", {}, text), h("span", { class: "row" }, buttons)] : []));
+  shell.screenNotice.replaceChildren(...(text ? [h("span", { class: "note-text", title: text }, text), h("span", { class: "row" }, buttons)] : []));
   renderDeskGate(choice === "yes" && !!deskBtn, choice !== "yes" && shareAsked);
   trackPresence();
 }
