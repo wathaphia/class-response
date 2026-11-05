@@ -322,7 +322,7 @@ function buildShell() {
     // 화면 보기 안내는 위쪽 띠 가운데에 둔다(슬라이드 위에 줄을 차지해 슬라이드가 작아지지 않게)
     h("header", { class: "top" }, h("div", { class: "top-title" }, title, who), screenNotice,
       h("div", { class: "row" },
-        h("button", { class: "link", type: "button", onclick: openBugs }, "버그 제보"),
+        h("button", { class: "tab bug-tab", type: "button", onclick: openBugs }, tabIconEl(BUG_ICON), "버그 제보"),
         h("button", { class: "link", type: "button", onclick() { logout("나갔습니다. 다시 들어오려면 입장하세요."); } }, "나가기"))),
     h("main", { class: "lesson" }, conn, closed, slideBox, list));
   const anytimeHead = h("h2", { class: "section-head" }, "언제든 할 수 있는 활동");
