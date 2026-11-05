@@ -371,9 +371,12 @@ async function exportSlidesPdf(l, msg) {
     const JsPdf = await loadJsPdf();
     const pages = pdfPages(l);
     let doc = null;
+    const miss = [];   // 저장소에 그림이 없는 쪽(지우기·순서 저장이 중간에 멈춘 수업)은 빼고 만든다
     for (const [i, pg] of pages.entries()) {
       msg.textContent = "PDF 만드는 중 " + (i + 1) + " / " + pages.length;
-      const blob = await (await fetch(slideSrc(l, pg))).blob();
+      const r = await fetch(slideSrc(l, pg));
+      const blob = r.ok ? await r.blob() : null;
+      if (!blob || !/^image\//.test(blob.type)) { miss.push(slideNo(l, pg)); continue; }
       const bmp = await createImageBitmap(blob);
       const w = bmp.width, hh = bmp.height;
       const url = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(blob); });
@@ -382,8 +385,9 @@ async function exportSlidesPdf(l, msg) {
       else doc.addPage([w, hh], orient);
       doc.addImage(url, /png/i.test(blob.type) ? "PNG" : "JPEG", 0, 0, w, hh);
     }
+    if (!doc) throw new Error("슬라이드 그림을 하나도 받지 못했습니다");
     doc.save((l.title || l.code).replace(/[\\/:*?"<>|]/g, "_") + "_슬라이드.pdf");
-    msg.textContent = "PDF를 받았습니다 (" + pages.length + "쪽).";
+    msg.textContent = "PDF를 받았습니다 (" + (pages.length - miss.length) + "쪽)." + (miss.length ? " " + miss.join(", ") + "번 슬라이드는 그림이 저장소에 없어 뺐습니다. 슬라이드 편집의 「번호 다시 맞추기」로 번호를 바로잡거나 다시 올려 주세요." : "");
   } catch (e) {
     msg.textContent = "PDF를 만들지 못했습니다: " + (e.message || e);
   }

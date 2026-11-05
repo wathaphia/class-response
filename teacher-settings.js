@@ -549,7 +549,8 @@ document.addEventListener("keydown", (e) => {
 });
 let slidePicking = false;   // 「삭제할 슬라이드 선택하기」를 눌러 지울 슬라이드를 고르는 중
 let slideOrder = null;   // 끌어서 바꾸고 아직 저장하지 않은 순서 { id, dir, order: 새 순서의 예전 그림 번호들 }
-addEventListener("beforeunload", (ev) => { if (slideOrder) ev.preventDefault(); });
+// 끌어 바꾼 순서를 저장하지 않았거나, 지우기·순서 저장 중(중간에 끊기면 그림 번호에 빈 곳이 생긴다)이면 떠나기 전에 묻는다
+addEventListener("beforeunload", (ev) => { if (slideOrder || slideBusy) ev.preventDefault(); });
 
 // 오른쪽 「전체 슬라이드」 칸의 진행 막대와 안내 글(total 이 없으면 막대를 숨긴다)
 function slideWork(ui, text, done, total) {
