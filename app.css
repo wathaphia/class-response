@@ -748,6 +748,10 @@ td.grid-cell > span { white-space: nowrap; }
 .profile-row dd { margin: 0; overflow-wrap: anywhere; }
 .teacher-id { display: inline-flex; align-items: baseline; gap: .6rem; }
 .teacher-id strong { font-size: 1.35rem; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.student-link { flex-wrap: wrap; overflow-wrap: anywhere; }
+.star-link a { overflow-wrap: anywhere; }
+.teachers-table .star-cell { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.code-confirm { font-size: 1.3rem; letter-spacing: .15em; text-transform: uppercase; max-width: 16rem; }
 .collab-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
 .chip.collab { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink); }
 .chip.collab .link { min-height: 0; padding: 0 .2rem; }

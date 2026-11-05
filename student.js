@@ -69,8 +69,11 @@ if (!sb) notConfigured(app);
 else start();
 
 async function start() {
-  // 주소에 ?c= 가 없으면 개발자가 고른 학생용 기본 수업 코드를 먼저 쓴다
-  const picked = params.get("c") ? null : await sb.rpc("default_lesson_code").then((r) => r.data, () => null);
+  // 주소에 ?c= 가 없으면 별로 고른 수업 코드를 먼저 쓴다: 선생님 링크(…/아이디 → 404.html 이 ?t=아이디 로 바꿔 줌)는 그 선생님 것, 아니면 개발자가 고른 학생용 기본 수업
+  const link = params.get("t");
+  const picked = params.get("c") ? null
+    : await (link ? sb.rpc("teacher_lesson_code", { p_link: link }) : sb.rpc("default_lesson_code")).then((r) => r.data, () => null);
+  if (link) history.replaceState(null, "", new URL(encodeURIComponent(link), location.href).href);   // 주소창은 짧은 선생님 링크로 되돌린다
   code = (params.get("c") || picked || ls.get("cra-last-code") || "").trim();
   // 예전 판은 수업마다 열쇠를 따로 저장했다: 있으면 그대로 옮겨 쓴다
   token = keep.getItem(TOKEN_KEY) || (code ? keep.getItem("cra-token:" + code.toLowerCase()) : null);
@@ -794,7 +797,7 @@ function zoom() {
     return loadSim(a).then((html) => openSimFull(a.title, withSimAgent(html)), (e) => alert("시뮬레이션을 불러오지 못했습니다. " + (e.message || "")));
   }
   if (shell.zoom) return;
-  const big = h("img", { src: slideSrc(state.lesson, viewing), alt: shell.img.alt });   // 크게 볼 때만 큰 그림(1280px)을 받는다
+  const big = h("img", { src: slideSrc(state.lesson, viewing), alt: shell.img.alt });   // 크게 볼 때만 큰 그림을 받는다
   const box = h("div", { class: "slide-zoom", onclick: close }, big, h("p", {}, "눌러서 닫기 · 휴대폰은 가로로 돌리면 더 크게 보입니다"));
   let unfull = () => {};
   function close() {

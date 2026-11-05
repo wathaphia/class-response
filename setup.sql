@@ -167,6 +167,7 @@ language plpgsql set search_path = public as $$
 begin
   new.email := lower(new.email);
   if new.code is null then new.code := new_teacher_code(); end if;
+  if new.link is null then new.link := new_teacher_link(new.email); end if;   -- 아래 「선생님별 학생용 링크」
   return new;
 end $$;
 drop trigger if exists teachers_code on teachers;
@@ -745,6 +746,9 @@ begin
   if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
   return jsonb_build_object(
     'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at,
+    -- 학생용 링크 아이디와 별 수업(개발자는 학생용 기본 수업)
+    'link', t.link, 'star', (select jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title) from lessons l
+      where l.id = case when t.is_admin then (select lesson_id from student_default where id = 1) else t.star_lesson end),
     -- 공동 작업자로 고를 수 있는 다른 선생님
     'colleagues', coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'account', u.id is not null) order by x.email)
       from teachers x left join auth.users u on lower(u.email) = x.email
@@ -761,7 +765,9 @@ begin
       from lesson_collaborators c join lessons l on l.id = c.lesson_id left join auth.users u on u.id = l.owner
       where c.email = me), '[]'::jsonb),
     'teachers', case when t.is_admin or t.is_observer then coalesce((select jsonb_agg(jsonb_build_object('email', x.email, 'code', x.code, 'admin', x.is_admin,
-        'observer', x.is_observer, 'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'lessons', (select count(*) from lessons l where l.owner = u.id),
+        'observer', x.is_observer, 'since', x.created_at, 'last_sign_in', u.last_sign_in_at, 'link', x.link,
+        'star', (select jsonb_build_object('code', l.code, 'title', l.title) from lessons l
+          where l.id = case when x.is_admin then (select lesson_id from student_default where id = 1) else x.star_lesson end), 'lessons', (select count(*) from lessons l where l.owner = u.id),
         'reset_used', (select count(*) from reset_log r where r.email = x.email and not r.waived and r.at >= date_trunc('day', now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul')) order by x.created_at)
       from teachers x left join auth.users u on lower(u.email) = x.email), '[]'::jsonb) end,
     -- (개발자) 승인 대기 중인 가입 요청(아래 teacher_requests)
@@ -1053,6 +1059,57 @@ begin
 end $$;
 revoke execute on function set_default_lesson(uuid) from public, anon;
 grant execute on function set_default_lesson(uuid) to authenticated;
+
+-- 선생님별 학생용 링크(2026-11-05): 주소 끝에 선생님 아이디(이메일 @ 앞, 영문 소문자·숫자)를 붙인 학생용 주소(…/class-response/아이디).
+-- 그 주소로 들어온 학생에게는 그 선생님이 「전체 수업」에서 별로 고른 수업(star_lesson) 코드가 미리 들어간다.
+-- 아이디는 선생님 줄에 붙어 있어 계정이 있는 동안 바뀌지 않고, 회원탈퇴·빼기로 줄이 지워지면 다른 사람이 쓸 수 있다.
+-- 개발자의 학생용 링크는 예전 주소 그대로(아이디 없이)이고 별 수업은 student_default 다.
+alter table teachers add column if not exists link text;
+alter table teachers add column if not exists star_lesson uuid references lessons(id) on delete set null;
+create unique index if not exists teachers_link_key on teachers (link);
+create or replace function new_teacher_link(e text) returns text
+language plpgsql volatile set search_path = public as $$
+declare
+  base text := left(regexp_replace(lower(split_part(e, '@', 1)), '[^a-z0-9]', '', 'g'), 24);
+  c text;
+  n int := 1;
+begin
+  if base = '' then base := 't'; end if;
+  c := base;
+  -- 사이트의 파일·폴더 이름(teacher → teacher.html 등)과 겹치지 않게
+  while c in ('index', 'teacher', 'student', 'vendor', 'app', 'common', 'config', 'setup', 'readme', 'license', 'patch', 's')
+    or exists (select 1 from teachers where link = c) loop
+    n := n + 1; c := base || n;
+  end loop;
+  return c;
+end $$;
+revoke all on function new_teacher_link(text) from public, anon, authenticated;
+do $$ declare r record; begin
+  for r in select email from teachers where link is null order by created_at loop
+    update teachers set link = new_teacher_link(r.email) where email = r.email;
+  end loop;
+end $$;
+
+-- 학생 화면: 링크 아이디 → 그 선생님의 별 수업 코드(없으면 null)
+create or replace function teacher_lesson_code(p_link text) returns text
+language sql stable security definer set search_path = public as $$
+  select case when t.is_admin then (select l.code from student_default d join lessons l on l.id = d.lesson_id where d.id = 1)
+    else (select l.code from lessons l where l.id = t.star_lesson) end
+  from teachers t where t.link = lower(trim(p_link))
+$$;
+grant execute on function teacher_lesson_code(text) to anon, authenticated;
+
+-- 내 별 수업 고르기(null 이면 해제): 내가 손댈 수 있는 수업만. 개발자는 학생용 기본 수업(student_default)을 바꾼다
+create or replace function set_my_star(p_lesson uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_teacher() then raise exception 'teacher only'; end if;
+  if p_lesson is not null and not can_lesson(p_lesson) then raise exception '내 수업이나 공유받은 수업만 고를 수 있습니다'; end if;
+  if is_admin() then perform set_default_lesson(p_lesson); return; end if;
+  update teachers set star_lesson = p_lesson where email = verified_email();
+end $$;
+revoke execute on function set_my_star(uuid) from public, anon;
+grant execute on function set_my_star(uuid) to authenticated;
 
 -- ---------- 관찰자(2026-10-30) ----------
 -- 보기: 다른 선생님의 수업(존재·제목·첫 슬라이드)·학생 명단·공동 작업자·기본 수업. 활동·응답은 못 본다. 쓰기 정책은 그대로라 자기 것만 고친다.

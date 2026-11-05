@@ -25,7 +25,8 @@
 | `teacher-build.js` | 「자료 추가」, 시뮬레이션 편집기, 작성기 | sim-over |
 | `teacher-students.js` | 「학생 관리」, 화면 크게 보기 | promote, live-* |
 | `teacher-settings.js` | 「슬라이드 편집」, 올리기, CSV | manage |
-| `student.js` | 학생 입장, 폴링, 카드, 화면 공유 | live-* |
+| `student.js` | 학생 입장, 폴링, 카드, 화면 공유, 선생님 링크(`?t=`) | live-* |
+| `404.html` | 선생님별 학생용 링크 `…/아이디` → `index.html?t=아이디` | |
 | `app.css` | 모든 모양 | |
 | `setup.sql` | 표·보안 규칙·RPC. `supabase-sql.ps1` 로 적용 | |
 

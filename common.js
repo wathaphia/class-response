@@ -604,7 +604,7 @@ function openSimFull(title, html, { autoplay = false } = {}) {
 }
 
 // small: 학생 기기·썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.
-// 교사 화면(TV)과 학생의 「크게 보기」는 큰 그림(1280px)을 쓴다.
+// 교사 화면(TV)과 학생의 「크게 보기」는 큰 그림(새로 올린 것은 1920px)을 쓴다.
 function slideSrc(lesson, n, small) {
   const dir = lesson.slide_dir.trim();
   const k = small && /[?&]sm=1/.test(dir) && dir.includes("{n}.jpg") ? n + "s" : n;
@@ -719,6 +719,19 @@ function summaryView(questions, docs, opts) {
       answered.length ? answered.map((d) => h("p", { class: "note" }, d.name ? h("strong", {}, d.name + " · ") : null, answerText(d.answers[q.id])))
         : h("p", { class: "muted small" }, opts.empty || "아직 응답이 없습니다."));
   });
+}
+
+// 수업 코드 칸: 한글 자판으로 친 글자를 같은 자리의 영문으로 바꾸고 대문자·숫자만 남긴다(「ㅏㅔ」→「KP」, 「갸」→「RI」)
+const KEY_OF_JAMO = { ㄱ: "R", ㄲ: "R", ㄴ: "S", ㄷ: "E", ㄸ: "E", ㄹ: "F", ㅁ: "A", ㅂ: "Q", ㅃ: "Q", ㅅ: "T", ㅆ: "T", ㅇ: "D", ㅈ: "W", ㅉ: "W", ㅊ: "C", ㅋ: "Z", ㅌ: "X", ㅍ: "V", ㅎ: "G",
+  ㅏ: "K", ㅐ: "O", ㅑ: "I", ㅒ: "O", ㅓ: "J", ㅔ: "P", ㅕ: "U", ㅖ: "P", ㅗ: "H", ㅘ: "HK", ㅙ: "HO", ㅚ: "HL", ㅛ: "Y", ㅜ: "N", ㅝ: "NJ", ㅞ: "NP", ㅟ: "NL", ㅠ: "B", ㅡ: "M", ㅢ: "ML", ㅣ: "L",
+  ㄳ: "RT", ㄵ: "SW", ㄶ: "SG", ㄺ: "FR", ㄻ: "FA", ㄼ: "FQ", ㄽ: "FT", ㄾ: "FX", ㄿ: "FV", ㅀ: "FG", ㅄ: "QT" };
+function codeLetters(text) {
+  const LEAD = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ", VOWEL = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ", TAIL = " ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
+  return [...String(text || "")].map((ch) => {
+    const n = ch.charCodeAt(0) - 0xac00;
+    if (n >= 0 && n < 11172) return [LEAD[Math.floor(n / 588)], VOWEL[Math.floor((n % 588) / 28)], TAIL[n % 28]].map((j) => KEY_OF_JAMO[j] || "").join("");
+    return KEY_OF_JAMO[ch] || ch.toUpperCase();
+  }).join("").replace(/[^A-Z0-9]/g, "");
 }
 
 function openModal(title, body, onClose) {
