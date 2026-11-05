@@ -394,6 +394,7 @@ async function loadLessons(selectId) {
 }
 
 async function loadLesson() {
+  if (typeof leaveLayout === "function") leaveLayout();   // 「자료 추가」에서 옮겨 두고 저장하지 않은 것(teacher-build.js)
   selectedSlides.clear();
   slidePicking = false;
   activities = [];
@@ -577,8 +578,13 @@ function dragSort(box, opts) {
       const p = { x: last.clientX - b.left, y: last.clientY - b.top };
       const d = { x: p.x - st.start.x, y: p.y - st.start.y };
       st.units[st.s].idx.forEach((i) => shift(list[i], d.x, d.y));
-      const o = opts.over && opts.over(last);
-      if (overEl !== o) { overEl && overEl.classList.remove("drop"); overEl = o || null; overEl && overEl.classList.add("drop"); }
+      const o = opts.over && opts.over(last, el);
+      if (overEl !== o) {
+        overEl && overEl.classList.remove("drop");
+        overEl = o || null;
+        overEl && overEl.classList.add("drop");
+        opts.hover && opts.hover(overEl, el);   // 놓일 자리 미리 보기(벗어나면 null)
+      }
       if (o) { st.order = st.units.map((_, i) => i); layout(st.order); return; }
       const c = { x: st.grab.x + d.x, y: st.grab.y + d.y };
       let best = 0, bd = Infinity;
@@ -631,6 +637,7 @@ function dragSort(box, opts) {
       const eat = (e) => { e.stopPropagation(); e.preventDefault(); };
       box.addEventListener("click", eat, true);
       setTimeout(() => box.removeEventListener("click", eat, true), 0);
+      if (overEl && opts.hover) opts.hover(null, el);
       if (overEl) { overEl.classList.remove("drop"); finish(); opts.dropOver(overEl, el); return; }
       // 끌던 칸을 빈자리로 미끄러뜨린 뒤 새 순서를 알린다
       const at = layout(st.order);
@@ -663,6 +670,7 @@ function draw() {
   const open = [...mainTabs.filter((k) => tabShown(k, mode)), ...subTabs];
   if (!open.includes(tab)) tab = open[0] || "profile";
   if (!lesson && !NO_LESSON_TABS.includes(tab)) tab = mainTabs.includes("settings") && tabShown("settings", mode) ? "settings" : "library";
+  if (tab !== "build" && typeof leaveLayout === "function") leaveLayout();
   main = h("main", { class: "wide" });
   main.inert = !!tabEdit;
   app.classList.toggle("tab-editing", !!tabEdit);
