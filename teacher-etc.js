@@ -1,7 +1,7 @@
-// 교사 화면 · 「기타 관리」 탭: Supabase·Cloudflare·GitHub 무료 한도 대비 사용량 원 그래프·표, 동기화 규칙·비용.
+// 교사 화면 · 「자원 관리」 탭(키 etc): Supabase·Cloudflare·GitHub 무료 한도 대비 사용량 원 그래프·표, 동기화 규칙·비용.
 // 받는 곳: Supabase resource_usage(), Worker /usage(class-tools/cf-worker), GitHub API. 시각은 모두 한국 시간.
 
-// ---------- 기타 관리 ----------
+// ---------- 자원 관리 ----------
 // 이 웹앱이 쓰는 바깥 서비스(Supabase · Cloudflare · GitHub)의 무료 한도에 견준 사용량을 원 띠 그래프와 표로 보여 준다.
 // 받는 곳은 셋: Supabase 함수 resource_usage(DB 안 숫자), Worker /usage(Supabase 관리 API·Cloudflare 숫자), GitHub 공개 API.
 // 모든 숫자는 세 출처(DB·Worker·GitHub)를 한꺼번에 받는 syncUsage 하나로만 새로 받는다. 탭을 열어 두면 30초마다 살펴
@@ -9,7 +9,7 @@
 // 「동기화」는 10분에 한 번(받지 못한 출처가 있으면 1분 뒤부터) 누를 수 있다. 꾸밈은 teacher-etc.css.
 const GITHUB_REPO = "wathaphia/class-response";
 const MB = 1024 * 1024, GB = 1024 * MB;
-// 기타 관리의 시각·날짜·달은 모두 한국 시간(UTC+9). kstIso(t)는 그 시각의 한국 벽시계를 ISO 꼴로(끝의 Z는 무시)
+// 자원 관리의 시각·날짜·달은 모두 한국 시간(UTC+9). kstIso(t)는 그 시각의 한국 벽시계를 ISO 꼴로(끝의 Z는 무시)
 const KST_MS = 9 * 3600000, TZ = "Asia/Seoul";
 const kstIso = (t = Date.now()) => new Date(+t + KST_MS).toISOString();
 const kstMonthStart = (t = Date.now(), add = 0) => { const d = new Date(+t + KST_MS); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + add, 1) - KST_MS; };
@@ -93,7 +93,7 @@ async function fetchUsage(k, net) {
 }
 
 const lastSync = () => Math.max(0, ...Object.values(usage).map((u) => u.at || 0));
-// 하나라도 1시간이 지났으면 모두 다시 받는다: 기타 관리의 모든 숫자는 같은 동기화 시각(lastSync) 기준이다
+// 하나라도 1시간이 지났으면 모두 다시 받는다: 자원 관리의 모든 숫자는 같은 동기화 시각(lastSync) 기준이다
 // 그렇지 않아도 받지 못한 곳이 있으면 1분 뒤 그 곳만 다시 받는다. tried = 마지막으로 받아 보려 한 시각(실패했으면 failedAt)
 const tried = (u) => Math.max(u.at || 0, u.failedAt || 0);
 const failedSources = () => ["db", "worker"].filter((k) => usage[k] && usage[k].error);
@@ -125,7 +125,6 @@ async function syncUsage(names) {
 
 function drawEtc() {
   paintEtc();
-  if (!profile || profile.error) loadProfile().then(paintEtc, () => {});   // 학생 슬라이드 화질은 프로필(slide_q)에서 읽는다
   etcCheck();
 }
 // 30초마다 시계만 본다(네트워크는 쓰지 않음): 1시간 지난 것이 있으면 자동 동기화, 아니면 버튼의 남은 시간만 고친다
@@ -480,7 +479,7 @@ function cloudflareView() {
     { label: "KV 읽기", used: a && a.kvReadsToday, limit: 100000, period: day9, hint: daily, missing },
     { label: "KV 쓰기", used: a && a.kvWritesToday, limit: 1000, period: day9, hint: daily + " · 중계 접속 1장마다 2번", missing },
     { label: "KV 삭제", used: a && a.kvDeletesToday, limit: 1000, period: day9, missing: a && a.kvDeletesToday == null ? "Worker 새로 배포 필요" : missing, hint: daily },
-    { label: "KV 목록", used: a && a.kvListsToday, limit: 1000, period: day9, missing: a && a.kvListsToday == null ? "Worker 새로 배포 필요" : missing, hint: daily + " · 기타 관리 동기화 1번마다 1번" },
+    { label: "KV 목록", used: a && a.kvListsToday, limit: 1000, period: day9, missing: a && a.kvListsToday == null ? "Worker 새로 배포 필요" : missing, hint: daily + " · 자원 관리 동기화 1번마다 1번" },
     { label: "KV 저장", used: a && a.kvBytes, limit: GB, fmt: "bytes", period: "누적", missing: a && a.kvBytes == null ? (a.kvListsToday == null ? "Worker 새로 배포 필요" : "아직 집계 없음") : missing,
       hint: a && a.kvKeys != null ? a.kvKeys.toLocaleString() + "개 키 · 하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" : "하루 한 번 집계(한국 오전 9시에 날짜 바뀜)" },
   ];
@@ -552,38 +551,6 @@ function githubView() {
   ];
 }
 
-// 학생 화면 크게 보기 화질. 다음에 여는 크게 보기부터 적용된다(일괄 미리보기 작은 칸은 그대로)
-// 학생 슬라이드 화질: 내 수업(공동 작업 수업은 주인의 설정)을 보는 학생 모두에게 적용(teachers.slide_q · set_my_slide_q)
-const STUDENT_SLIDE_Q = { mid: { name: "보통", w: 1024, note: "데이터를 아낍니다(휴대폰·느린 와이파이)" }, hi: { name: "높음", w: 1920, note: "글씨가 작은 슬라이드도 또렷합니다" } };
-function slideQualityView() {
-  const now = profile && !profile.error ? profile.slide_q || "hi" : null;
-  if (!now) return h("p", { class: "muted small" }, profile && profile.error ? "불러오지 못했습니다: " + profile.error : "불러오는 중…");
-  return h("div", { class: "stack" },
-    h("div", { class: "quality-pick" }, Object.entries(STUDENT_SLIDE_Q).map(([k, q]) => h("label", { class: "quality-opt" + (k === now ? " on" : "") },
-      h("input", { type: "radio", name: "slide-quality", value: k, checked: k === now, async onchange() {
-        const { error } = await sb.rpc("set_my_slide_q", { p: k });
-        if (error) alert("바꾸지 못했습니다: " + error.message);
-        else profile.slide_q = k;
-        paintEtc();
-      } }),
-      h("span", {}, h("b", {}, q.name + " "), h("span", { class: "muted small" }, "슬라이드 그림 가로 " + q.w + "px")),
-      h("span", { class: "muted small" }, q.note)))),
-    h("p", { class: "muted small" }, "학생 화면에 몇 초 안에 바로 적용됩니다. 학생이 슬라이드를 눌러 크게 볼 때는 늘 높은 화질입니다. 예전에 올려 작은 그림이 없는 수업은 높음으로 보입니다."));
-}
-
-function screenQualityView() {
-  const now = screenQuality();
-  return h("div", { class: "stack" },
-    h("div", { class: "quality-pick" }, Object.entries(SCREEN_QUALITY).map(([k, q]) => h("label", { class: "quality-opt" + (k === now ? " on" : "") },
-      h("input", { type: "radio", name: "screen-quality", value: k, checked: k === now, onchange() {
-        try { localStorage.setItem(SCREEN_QUALITY_KEY, k); } catch {}
-        paintEtc();
-      } }),
-      h("span", {}, h("b", {}, q.name + " "), h("span", { class: "muted small" }, "전체 화면 " + q.h + "p · " + q.fps + " FPS · 최대 " + (q.br / 1e6) + " Mbps · 시뮬레이션 그림 가로 " + q.simW)),
-      h("span", { class: "muted small" }, "학생 1명 1시간 최대 약 " + q.gb + "GB · " + q.note)))),
-    h("p", { class: "muted small" }, "영상이 중계 서버로 이어지면 Cloudflare TURN(월 1,000GB)에서, 영상이 안 될 때 보내는 그림은 Supabase 전송량(월 5GB)에서 빠집니다. 화면이 거의 안 바뀌면 실제 사용량은 최대치보다 훨씬 적습니다. 다음에 여는 크게 보기부터 적용됩니다."));
-}
-
 function paintEtc() {
   if (tab !== "etc" || !main) return;
   const last = lastSync();
@@ -598,8 +565,6 @@ function paintEtc() {
   };
   usageRisky = [];
   const secs = [
-    section("학생 슬라이드 화질", "학생 화면의 슬라이드 그림 · 내 모든 수업에 저장", slideQualityView),
-    section("학생 화면 화질", "학생 화면 크게 보기(한 명씩) · 이 기기에 저장", screenQualityView),
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView, ["db", "worker"]),
     section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView, ["worker"]),
     section("GitHub", "사이트 · 자동 실행", githubView, ["github"]),
@@ -619,10 +584,10 @@ function paintEtc() {
   } },
     h("div", { class: "row between" },
       h("div", {},
-        h("h2", {}, "기타 관리"),
+        h("h2", {}, "자원 관리"),
         h("p", { class: "muted small" }, "이 웹앱이 쓰는 바깥 서비스의 무료 한도 대비 사용량 · 파랑 아주 여유(지금 속도면 초기화까지 10% 미만 사용 예상), 초록 여유, 주황 주의(60% 이상), 빨강 위험(85% 이상) · 원을 누르면 자세히")),
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    secs[0], secs[1], summary, ...secs.slice(2)));
+    summary, ...secs));
 }

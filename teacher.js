@@ -1,6 +1,6 @@
 // 교사 화면(버전 2): 로그인(로그인 · 가입하기) → 수업 고르기 → 위 줄 탭 [접속 QR] [수업 진행] [학생 관리] [자료 추가] [슬라이드 편집] [버그 제보] (「수업용 화면 띄우기」 창은 「수업 진행」 아래 줄)
 // 오른쪽 위 「수업 모드/편집 모드」 스위치(지금 모드 이름만)로 모드를 바꾸면 그 모드에 보이게 정한 탭만 나온다(SHOW_DEFAULT, 탭 꾸미기에서 바꿈).
-// 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] (+ 개발자만 [전체 선생님 및 학생] [기타 관리] [패치 노트]).
+// 「설정」 단추를 누르면 아래 줄 탭 [프로필] [전체 수업] [그래픽] (+ 개발자만 [전체 선생님 및 학생] [자원 관리] [패치 노트]).
 // 탭 이름·순서·두 줄 자리·모드별 보이기는 프로필의 「탭 꾸미기」(startTabEdit: 탭 이름 바로 고치기, 끌어 옮기기)에서 바꾸고 교사 계정(user_metadata.tabs)에 저장한다.
 // 수업 진행·학생 관리 탭은 3초마다 응답을 다시 읽어 온다.
 //
@@ -8,7 +8,8 @@
 //   teacher.js          공유 상태 · 시작 · 로그인 · 데이터 읽기/쓰기 · 탭 틀(이 파일)
 //   teacher-library.js  전체 수업(수업 삭제 포함) · 슬라이드 PDF
 //   teacher-profile.js  프로필 · 전체 수업 틀 · (개발자) 전체 선생님 및 학생(선생님 관리 · 공동 작업자 · 모든 학생)
-//   teacher-etc.js      기타 관리(사용량)
+//   teacher-etc.js      자원 관리(사용량)
+//   teacher-graphic.js  그래픽(학생 슬라이드 · 학생 모니터링 화질)
 //   teacher-patch.js    패치 노트(시기별 타임라인 · 날짜별 상자, 기록은 patch-notes.js)
 //   teacher-bugs.js     버그 제보
 //   teacher-run.js      수업 진행 · 실시간 접속 표시
@@ -29,12 +30,12 @@ let editMode = localStorage.getItem("cra-edit") === "1";   // 수업 모드 / �
 // 탭 두 줄: 위 줄(main) + 「설정」을 누르면 나오는 아래 줄(sub). 개발자 전용 탭(ADMIN_TABS)은 다른 선생님에게는 아예 없다.
 // 탭 꾸미기: { main: [키…], sub: [키…], names: { 키: 이름 }, show: { 키: { class, edit } } }. 교사 계정(user_metadata.tabs)에 저장한다
 const TAB_DEFAULTS = [["join", "접속 QR"], ["run", "수업 진행"], ["students", "학생 관리"], ["build", "자료 추가"], ["settings", "슬라이드 편집"], ["bugs", "버그 제보"],
-  ["profile", "프로필"], ["library", "전체 수업"], ["people", "전체 선생님 및 학생"], ["etc", "기타 관리"], ["patch", "패치 노트"]];
+  ["profile", "프로필"], ["library", "전체 수업"], ["people", "전체 선생님 및 학생"], ["graphic", "그래픽"], ["etc", "자원 관리"], ["patch", "패치 노트"]];
 const MAIN_TABS = ["join", "run", "students", "build", "settings", "bugs"];
-const SUB_TABS = ["profile", "library", "people", "etc", "patch"];
+const SUB_TABS = ["profile", "library", "graphic", "people", "etc", "patch"];
 const ADMIN_TABS = ["people", "etc", "patch"];
 const SHOW_DEFAULT = { join: { class: true, edit: false }, build: { class: false, edit: true }, settings: { class: false, edit: true }, bugs: { class: false, edit: true } };
-const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "people", "etc", "patch"];   // 수업을 고르지 않아도 열리는 탭
+const NO_LESSON_TABS = ["settings", "bugs", "profile", "library", "graphic", "people", "etc", "patch"];   // 수업을 고르지 않아도 열리는 탭
 let tabCustom = {};
 const isAdmin = () => !!(profile && profile.admin);
 const isObserver = () => !!(profile && profile.observer);
@@ -524,7 +525,7 @@ const docsOf = (a) => responses.filter((r) => r.activity_id === a.id && studentB
 const whereText = (a) => a.page == null ? "언제든" : a.page_to > a.page ? a.page + "~" + a.page_to + "쪽" : a.page + "쪽";
 
 // ---------- 틀 ----------
-// 탭 기호(선 그림): 접속 QR 네모 칸 · 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 슬라이드 편집 조절기 · 기타 관리 계기판 · 설정 톱니바퀴
+// 탭 기호(선 그림): 접속 QR 네모 칸 · 수업 진행 ▶ · 자료 추가 ＋ · 학생 관리 사람들 · 슬라이드 편집 조절기 · 자원 관리 계기판 · 그래픽 그림 액자 · 설정 톱니바퀴
 const TAB_ICONS = {
   join: '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 20.5h1M20.5 14v1"/>',
   present: '<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/>',
@@ -535,6 +536,7 @@ const TAB_ICONS = {
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   bugs: BUG_ICON,
   etc: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/>',
+  graphic: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M3.5 17.5l5-4.5 4 3.5 3-2.5 5 4"/>',
   patch: '<path d="M7 3.5h7l4.5 4.5v12.5H7z"/><path d="M14 3.5V8h4.5M10 12.5h5.5M10 16h5.5"/>',
   profile: '<circle cx="12" cy="8.5" r="4"/><path d="M4 20.5a8 8 0 0 1 16 0"/>',
   library: '<path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
@@ -697,7 +699,7 @@ function draw() {
   app.classList.toggle("tab-editing", !!tabEdit);
   app.replaceChildren(topBar(), main);
   if (grid && (tab !== "students" || !lesson || lesson.code !== grid.code)) stopGrid();
-  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, library: drawLibrary, people: drawPeople, etc: drawEtc, patch: drawPatch, bugs: drawBugs })[tab]();
+  ({ join: drawJoin, run: drawRun, build: drawBuild, students: drawStudents, settings: drawSettings, profile: drawProfile, library: drawLibrary, people: drawPeople, graphic: drawGraphic, etc: drawEtc, patch: drawPatch, bugs: drawBugs })[tab]();
   schedule();
 }
 
