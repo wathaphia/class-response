@@ -181,6 +181,8 @@ function slidesCard() {
       class: "thumb-hitbox", type: "button", "data-rapid": "1", "aria-label": i + "쪽 선택", "aria-pressed": selectedSlides.has(i),
       // 누르면 왼쪽 미리보기가 이 그림으로 바로 넘어가고, 「삭제할 슬라이드 선택하기」 중이면 고르기도 한다
       onclick() { pvJump(i); if (slidePicking) toggleSlideSelection(i, figure, checkbox, hitbox); },
+      // 두 번 누르면 수업 진행으로 가서 이 슬라이드를 띄운다(고르는 중에는 하지 않는다)
+      async ondblclick() { if (slidePicking) return; await setPage(i); goTab("run"); },
     });
     // 선택 칸은 그림 크기에 맞춘다(그림이 아직 없으면 미리보기 칸 전체)
     fitHits.set(image, () => {
@@ -343,7 +345,9 @@ function slidesCard() {
     paintBulk(bulk);
   };
   const allCard = lesson.slide_count && !ppt ? h("section", { class: "card stack all-slides" },
-    h("h2", {}, "전체 슬라이드 " + lesson.slide_count + "장"),
+    h("div", { class: "row" },
+      h("h2", { class: "grow" }, "전체 슬라이드 " + lesson.slide_count + "장"),
+      h("span", { class: "muted small" }, "두 번 누르면 그 슬라이드로 수업 진행이 열립니다")),
     h("div", { class: "row slide-tools" },
       bulk, cancelPick,
       h("span", { class: "muted small grow" }, "끌어서 순서를 바꾸거나 지운 뒤 한 번에 저장하세요."),
@@ -397,7 +401,7 @@ async function uploadPptx(file, progress, L = lesson) {
   const { error: updateError } = await sb.from("lessons").update({ slide_dir: "pptx:" + store.base + folder + "deck.pptx?v=" + Date.now(), slide_count: pages, page: 1 }).eq("id", L.id);
   if (updateError) throw updateError;
   // 교체 전 PDF/JPG가 남지 않게 이 수업 전용 폴더의 이미지 파일만 정리한다.
-  await cleanSlideFolder(old, store, folder, (n) => !/^\d+s?\.jpg$/.test(n));
+  await cleanSlideFolder(old, store, folder, (n) => !/^\d+(s?\.jpg|\.pdf)$/.test(n));
   progress(1, 1, "올리는 중");
   return pages;
 }
@@ -446,6 +450,7 @@ async function toSlideImages(files, progress) {
   if (total > SLIDE_MAX) throw new Error("모두 " + total + "쪽으로 " + SLIDE_MAX + "쪽이 넘습니다.");
   const what = (k) => (use.length > 1 ? "파일 " + (k + 1) + "/" + use.length + " · " : "") + "그림으로 바꾸는 중";
   const out = [];
+  out.pdfs = [];   // { file, first: 첫 쪽이 out 의 몇 번째인지(0부터), n: 쪽 수 }
   for (const [k, f] of use.entries()) {
     const pdf = docs[k];
     if (pdf) {
@@ -461,6 +466,8 @@ async function toSlideImages(files, progress) {
         page.cleanup();
         out.push(await slidePair(canvas));
       }
+      // 원본 PDF도 함께 올려 「슬라이드 PDF 받기」가 그 쪽을 화질 그대로 쓰게 한다(저장소 한도 50MB를 넘으면 그림만)
+      if (f.size <= 50 * 1024 * 1024) out.pdfs.push({ file: f, first: out.length - pdf.numPages, n: pdf.numPages });
       continue;
     }
     progress(out.length, total, what(k));
@@ -477,7 +484,26 @@ async function toSlideImages(files, progress) {
   return out;
 }
 
-const slideFolder = (l) => me.id + "/" + l.id + "/";
+// 이 수업의 그림 폴더: 이미 이 수업 폴더(누가 올렸든 「교사id/이 수업id/」)가 있으면 그곳, 없으면 내 폴더.
+// 주인·공동작업자·개발자 모두 같은 폴더를 고친다(저장소는 그 수업에 손댈 수 있는 사람에게 쓰기를 허락한다).
+function slideFolder(l) {
+  const home = slideHome(l);
+  return home && home.folder.endsWith("/" + l.id + "/") ? home.folder : me.id + "/" + l.id + "/";
+}
+// 올린 원본 PDF를 그림 파일 번호에 맞춰 k.pdf 로 올리고, 주소의 pdf 목록에 넣을 항목을 돌려준다(start: 첫 그림의 파일 번호 - 1)
+async function putSourcePdfs(store, folder, images, start, progress) {
+  const out = [];
+  for (const p of images.pdfs || []) {
+    progress(images.length, images.length, "원본 PDF 올리는 중");
+    try {
+      await store.put(folder + (start + p.first + 1) + ".pdf", p.file, "application/pdf");
+      out.push({ k: start + p.first + 1, n: p.n });
+    } catch (e) {
+      console.warn("원본 PDF 올리기 실패(그림으로만 받음)", e);
+    }
+  }
+  return out;
+}
 
 // ---------- 슬라이드 저장소 ----------
 // 새로 올리는 그림은 Cloudflare R2(Worker의 /s/)에 둔다: 학생 기기로 내려가는 전송량이 무료다.
@@ -601,15 +627,14 @@ function toggleSlideSelection(page, figure, checkbox, hitbox) {
 
 const SHARED_NOTE = "이 수업에서 복제한 다른 수업이 같은 슬라이드 그림을 함께 쓰고 있어서 지금은 고칠 수 없습니다.\n복제한 수업 쪽에서 슬라이드를 한 번 편집(삭제·순서 바꾸기·이어 붙이기)하면 그 수업만의 슬라이드로 복사되고, 그다음부터 이 수업에서도 고칠 수 있습니다.";
 
-// 그림이 이 수업 폴더(내 id/수업 id/)에 없으면 고치기 전에 이 수업 폴더로 복사하고 주소(slide_dir)를 바꾼다.
-// 공동작업자는 주인 폴더에 그림을 옮겨 넣을 수 없고(저장소 권한), 복제해 온 수업은 원래 수업 그림을 건드리면 안 되기 때문이다.
-// 공동작업자가 옮겨 온 주인 폴더(같은 수업 id)는 함께 쓰는 수업이 없으면 지운다.
+// 그림이 다른 수업의 폴더에 있으면(예전에 「다른 반용으로 복제」해 그림을 함께 쓰는 수업) 고치기 전에 이 수업 폴더로 복사하고 주소(slide_dir)를 바꾼다.
+// 원래 수업의 그림을 건드리면 안 되기 때문이다. 주인·공동작업자는 같은 수업 폴더를 그대로 고치므로 복사하지 않는다.
 async function ownSlideHome(L, home, ui) {
   const folder = slideFolder(L);
   if (home.folder === folder) return home;
   const query = L.slide_dir.split("?")[1] || "";
   const small = /(^|&)sm=1(&|$)/.test(query);
-  const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+  const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"])).concat(slidePdfs(L).map((p) => p.k + ".pdf"));
   const st = await newSlideStore();
   let done = 0, next = 0;
   const copy = async () => {
@@ -617,7 +642,7 @@ async function ownSlideHome(L, home, ui) {
       const name = names[next++];
       const r = await fetch(home.store.base + home.folder + name + (query ? "?" + query : ""));
       if (!r.ok) throw new Error(name + " 응답 " + r.status);
-      await st.put(folder + name, await r.blob(), "image/jpeg");
+      await st.put(folder + name, await r.blob(), /\.pdf$/.test(name) ? "application/pdf" : "image/jpeg");
       slideWork(ui, "이 수업만의 슬라이드로 복사하는 중 " + ++done + " / " + names.length, done, names.length);
     }
   };
@@ -626,25 +651,17 @@ async function ownSlideHome(L, home, ui) {
   const dir = st.base + folder + "{n}.jpg" + (query ? "?" + query : "");
   const { error } = await sb.from("lessons").update({ slide_dir: dir }).eq("id", L.id);
   if (error) throw error;
-  const shared = sharedSlides(L);
   L.slide_dir = dir;
-  if (!shared && home.folder.endsWith("/" + L.id + "/")) {
-    try {
-      const old = await home.store.list(home.folder);
-      if (old.length) await home.store.remove(old.map((n) => home.folder + n));
-    } catch (e) {
-      console.warn("예전 슬라이드 폴더 정리 실패", e);
-    }
-  }
   return { store: st, folder };
 }
 
 // 이 수업 그림들의 저장소 파일 번호(n번째 그림 = 배열의 n-1번째). ord 가 없으면 1, 2, 3 …
 const fileNums = (L) => slideFiles(L) || Array.from({ length: L.slide_count }, (_, i) => i + 1);
-// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·fx(전환 효과)
-function slideDirOf(L, base, { v, small, anim, files }) {
+// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·pdf(원본 PDF)·fx(전환 효과)
+function slideDirOf(L, base, { v, small, anim, files, pdfs }) {
   const ord = files ? ordText(files) : "";
-  return withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : ""), slideFx(L));
+  const pdf = pdfs ? pdfText(pdfs) : "";
+  return withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : "") + (pdf ? "&pdf=" + pdf : ""), slideFx(L));
 }
 // list 에서 x(예전 번호)의 새 자리. 빠졌으면 그 뒤에 남은 것, 없으면 그 앞에 남은 것의 자리
 function nearestKept(list, x, max) {
@@ -683,7 +700,7 @@ async function saveSlides(pages, ui, fix = false) {
       pages = files.map((f, i) => (names.has(f + ".jpg") ? i + 1 : 0)).filter(Boolean);
       const nums = [...names].map((n) => /^(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]);
       const extra = nums.filter((n) => !files.includes(n)).sort((a, b) => a - b);
-      let free = Math.max(0, ...nums, ...files);
+      let free = Math.max(0, ...nums, ...files, ...slidePdfs(lesson).map((p) => p.k + p.n - 1));
       const temps = [...names].map((n) => /^m(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => m[1]);
       for (const t of temps) {
         const to = ++free;
@@ -705,7 +722,11 @@ async function saveSlides(pages, ui, fix = false) {
     const base = lesson.slide_dir.split("?")[0];
     // 그림 이름을 그대로 두므로 v 도 그대로(학생·교사 화면이 받아 둔 그림을 다시 받지 않게)
     const v = (/[?&]v=(\d+)/.exec(lesson.slide_dir) || [])[1] || Date.now();
-    let dir = keep.length ? slideDirOf(lesson, base, { v, small: small && keep.every((f) => names.has(f + "s.jpg")), anim, files: keep }) : "";
+    // 원본 PDF: 남은 그림이 하나도 없는 PDF는 목록에서 빼고 파일도 지운다
+    const pdfs = slidePdfs(lesson);
+    const livePdfs = pdfs.filter(({ k, n }) => keep.some((f) => f >= k && f < k + n));
+    let gonePdfs = pdfs.filter((p) => !livePdfs.includes(p));
+    let dir = keep.length ? slideDirOf(lesson, base, { v, small: small && keep.every((f) => names.has(f + "s.jpg")), anim, files: keep, pdfs: livePdfs }) : "";
     let moved = 0, total = 0;
     if (dir.length > 500) {
       // 순서 목록이 너무 길면: 지울 그림을 먼저 지우고, 옮길 그림을 모두 임시 이름(m번호)으로 옮긴 뒤 1, 2, 3 … 으로 옮긴다
@@ -724,7 +745,9 @@ async function saveSlides(pages, ui, fix = false) {
       };
       await run(moves, (f) => f, (f) => "m" + f);
       await run(moves, (f) => "m" + f, (f, i) => i);
+      // 파일 번호가 바뀌어 원본 PDF와 짝이 맞지 않으므로 원본 PDF는 버린다(그 쪽들은 그림으로 받는다)
       dir = slideDirOf(lesson, base, { v: Date.now(), small: small && keep.every((f) => names.has(f + "s.jpg")), anim });
+      gonePdfs = pdfs;
     }
     for (const a of activities) {
       if (a.page == null) continue;
@@ -754,6 +777,7 @@ async function saveSlides(pages, ui, fix = false) {
       slideWork(ui, gone.length + "장의 그림 파일을 지우는 중…", 0, 1);
       await st.remove(gone.flatMap(both));
     }
+    if (gonePdfs.length) await st.remove(gonePdfs.map((p) => folder + p.k + ".pdf")).catch((e) => console.warn("원본 PDF 정리 실패", e));
     // 수업 전체를 다시 불러오면 화면이 통째로 깜빡이므로, 순서만 바꿨으면 이 수업의 값만 바꾸고 칸 번호를 고친다
     Object.assign(lesson, change);
     const same = lessons.find((l) => l.id === lesson.id);
@@ -803,12 +827,14 @@ async function uploadSlides(files, progress, replace = false) {
     await store.put(folder + (i + 1) + ".jpg", pair.big, "image/jpeg");
     await store.put(folder + (i + 1) + "s.jpg", pair.small, "image/jpeg");
   }
+  const pdfs = await putSourcePdfs(store, folder, images, 0, progress);
   progress(images.length, images.length, "올리는 중");
-  const dir = withFx(store.base + folder + "{n}.jpg?v=" + Date.now() + "&sm=1", slideFx(L));
+  const dir = slideDirOf(L, store.base + folder + "{n}.jpg", { v: Date.now(), small: true, pdfs });
   const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: images.length, page: 1 }).eq("id", L.id);
   if (error) throw error;
-  // 전보다 쪽 수가 줄었으면 남은 그림과 예전 원본 PPTX를 지운다
-  await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return !!m && +m[1] <= images.length; });
+  // 전보다 쪽 수가 줄었으면 남은 그림과 예전 원본 PPTX·PDF를 지운다
+  const keepPdf = new Set(pdfs.map((p) => p.k + ".pdf"));
+  await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return keepPdf.has(n) || (!!m && +m[1] <= images.length); });
   return images.length;
 }
 
@@ -823,16 +849,17 @@ async function appendSlides(L, home, images, progress) {
   let st = home.store;
   if (home.folder !== folder) {
     st = await newSlideStore();
-    const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+    const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"])).concat(slidePdfs(L).map((p) => p.k + ".pdf"));
     for (const [i, name] of names.entries()) {
       progress(i, names.length, "지금 슬라이드 복사하는 중");
       const r = await fetch(home.store.base + home.folder + name + (query ? "?" + query : ""));
       if (!r.ok) throw new Error(name + " 응답 " + r.status);
-      await st.put(folder + name, await r.blob(), "image/jpeg");
+      await st.put(folder + name, await r.blob(), /\.pdf$/.test(name) ? "application/pdf" : "image/jpeg");
     }
   }
-  // 새 그림은 지금 가장 큰 파일 번호 다음부터(순서를 바꾼 수업은 파일 번호가 쪽 번호와 다르다)
-  const files = fileNums(L), start = Math.max(0, ...files);
+  // 새 그림은 지금 가장 큰 파일 번호 다음부터(순서를 바꾼 수업은 파일 번호가 쪽 번호와 다르다).
+  // 원본 PDF가 맡은 번호(그 쪽 그림을 지웠어도)는 건너뛴다: 새 그림이 그 PDF의 쪽으로 잘못 짝지어지지 않게
+  const files = fileNums(L), start = Math.max(0, ...files, ...slidePdfs(L).map((p) => p.k + p.n - 1));
   for (const [i, pair] of images.entries()) {
     progress(i, images.length, "올리는 중");
     await st.put(folder + (start + i + 1) + ".jpg", pair.big, "image/jpeg");
@@ -843,7 +870,8 @@ async function appendSlides(L, home, images, progress) {
   // 단계 그림 수업이면 새 그림은 단계가 하나뿐인 슬라이드("0")로 덧붙인다
   const steps = slideSteps(L);
   const anim = steps ? steps.map((n) => Math.min(n - 1, 35).toString(36)).join("") + "0".repeat(images.length) : "";
-  const dir = slideDirOf(L, st.base + folder + "{n}.jpg", { v: Date.now(), small, anim, files });
+  const pdfs = slidePdfs(L).concat(await putSourcePdfs(st, folder, images, start, progress));
+  const dir = slideDirOf(L, st.base + folder + "{n}.jpg", { v: Date.now(), small, anim, files, pdfs });
   const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: files.length }).eq("id", L.id);
   if (error) throw error;
   return images.length;
@@ -869,7 +897,7 @@ async function copySlideFiles(src, copy, progress) {
     const folder = slideFolder(copy);
     const tail = /(?:\{n\}\.jpg|deck\.pptx)(\?.*)?$/.exec(dir);
     const query = tail[1] || "";
-    const names = isPptx(src) ? ["deck.pptx"] : fileNums(src).flatMap((n) => /[?&]sm=1/.test(dir) ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]);
+    const names = isPptx(src) ? ["deck.pptx"] : fileNums(src).flatMap((n) => /[?&]sm=1/.test(dir) ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]).concat(slidePdfs(src).map((p) => p.k + ".pdf"));
     let done = 0, next = 0;
     const worker = async () => {
       while (next < names.length) {

@@ -39,4 +39,5 @@
 - 학생 표는 열 단위 권한: 교사도 `token`·`pin_hash` 를 못 읽는다(`select` 에 넣지 말 것). 수업 주인(`owner`)은 개발자만 바꾼다.
 - 기타 관리(`teacher-etc.js` `teacher-etc.css`)는 최적화 끝남: 직접 언급이 없으면 전체 최적화·코드 제거 요청에서도 손대지 않는다. 고칠 땐 원·표를 지우지 말고 옮기기만, `etc` 시나리오 꼭 통과. 묶음마다 try/catch(`paintEtc` 의 `section`).
 - 패치 노트: 말하지 않아도 PR마다 병합 전에 `patch-notes.js` 맨 위에 [번호, 날, 글, 성격] 한 줄 + 그날 `PATCH_DAYS` 요약(PR 번호를 받은 뒤 커밋), 시기가 바뀌면 `PATCH_ERAS` 끝 줄도.
+- 슬라이드 폴더는 수업마다 하나(`교사id/수업id/`): 공동 작업자·개발자도 복사 없이 그 폴더를 고친다(저장소 `can_slide_path`, Worker 같은 검사). `slide_dir` 의 `pdf=k-n` = `k.pdf` 원본이 파일 k…k+n-1 쪽 → `exportSlidesPdf`(common.js)가 그 쪽을 원본 그대로 넣는다.
 - 새 교사 탭 파일은 `teacher.html` 불러오기 순서·이 표·`teacher.js` 머리 주석에 함께 적는다.

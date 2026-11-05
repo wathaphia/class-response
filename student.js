@@ -306,10 +306,17 @@ function buildShell() {
   const slideWrap = h("div", { class: "slide-wrap" }, img, simLayer);
   img.addEventListener("load", () => syncSimLayer(simLayer, img));
   new ResizeObserver(() => syncSimLayer(simLayer, img)).observe(img);   // 알림 띠가 생기고 사라져 슬라이드 크기가 바뀔 때도 얹은 시뮬레이션을 맞춘다
+  const pdfMsg = h("span", {});
   const slideBox = h("div", { class: "slide-box" }, slideWrap, simStage,
     h("nav", { class: "pager" }, prev, where, next, back, h("span", { class: "spacer" }),
-      h("button", { class: "ghost", type: "button", onclick: zoom }, "크게 보기")),
-    h("p", { class: "muted small" }, "다음 쪽은 선생님이 넘기면 자동으로 열립니다."));
+      h("button", { class: "ghost", type: "button", onclick: zoom }, "크게 보기"),
+      // 지금 수업 슬라이드 그대로(순서·지운 쪽·덧붙인 쪽 반영) PDF 로 받는다. 원본 PDF 가 있는 쪽은 원본 화질
+      h("button", { class: "ghost", type: "button", onclick(e) {
+        const b = e.currentTarget;
+        b.disabled = true;
+        exportSlidesPdf(state.lesson, pdfMsg).finally(() => { b.disabled = false; });
+      } }, "슬라이드 PDF 받기")),
+    h("p", { class: "muted small" }, "다음 쪽은 선생님이 넘기면 자동으로 열립니다. ", pdfMsg));
   const list = h("div", { class: "stack" });
   app.replaceChildren(
     h("header", { class: "top" }, h("div", { class: "top-title" }, title, who),
