@@ -579,11 +579,11 @@ function paintEtc() {
   };
   usageRisky = [];
   const secs = [
+    section("학생 화면 화질", "학생 화면 크게 보기(한 명씩) · 이 기기에 저장", screenQualityView),
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView, ["db", "worker"]),
     section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView, ["worker"]),
     section("GitHub", "사이트 · 자동 실행", githubView, ["github"]),
-    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView),
-    section("학생 화면 화질", "학생 화면 크게 보기(한 명씩) · 이 기기에 저장", screenQualityView)];
+    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView)];
   histSave();
   // 맨 위 요약: 초기화 전에 다 쓸 수 있는 자원(소진 주의)을 위험한 순서로 복제해 모아 본다
   const risky = usageRisky.sort((a, b) => b.risk - a.risk).map((x) => x.it);
@@ -604,5 +604,5 @@ function paintEtc() {
       h("div", { class: "row" },
         last ? h("span", { class: "muted small" }, "모든 숫자는 마지막 동기화 " + kstClock(last) + " 기준 · 다음 자동 " + kstClock(last + ETC_AUTO_MS, { hour: "2-digit", minute: "2-digit" }) + " (한국 시간)") : null,
         syncButton())),
-    summary, ...secs));
+    secs[0], summary, ...secs.slice(1)));
 }

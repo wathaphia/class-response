@@ -414,11 +414,11 @@ async function loadPdfJs() {
   return window.pdfjsLib;
 }
 
-// 큰 그림(n.jpg)은 교사 화면(TV·프로젝터)과 학생의 「크게 보기」에만 쓴다: 1920px·품질 0.82(2026-11-05, 1280px·0.72는 큰 화면에서 흐렸다)
+// 큰 그림(n.jpg)은 교사 화면(TV·프로젝터)과 학생 화면에 쓴다: 늘 고화질 1920px·품질 0.92(2026-11-05, 1280px·0.72는 큰 화면에서 흐렸다)
 const SLIDE_WIDTH = 1920;
-const SLIDE_QUALITY = 0.82;
+const SLIDE_QUALITY = 0.92;
 
-// 학생 기기·썸네일용 작은 그림(n s.jpg): 휴대폰·태블릿 화면에는 1024px·0.72면 충분하다(학생 수만큼 내려가므로 작게)
+// 썸네일용 작은 그림(n s.jpg): 1024px·0.72
 const SMALL_WIDTH = 1024;
 const SMALL_QUALITY = 0.72;
 
@@ -657,11 +657,11 @@ async function ownSlideHome(L, home, ui) {
 
 // 이 수업 그림들의 저장소 파일 번호(n번째 그림 = 배열의 n-1번째). ord 가 없으면 1, 2, 3 …
 const fileNums = (L) => slideFiles(L) || Array.from({ length: L.slide_count }, (_, i) => i + 1);
-// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·pdf(원본 PDF)·fx(전환 효과)·q(학생 화면 화질)
+// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·pdf(원본 PDF)·fx(전환 효과)
 function slideDirOf(L, base, { v, small, anim, files, pdfs }) {
   const ord = files ? ordText(files) : "";
   const pdf = pdfs ? pdfText(pdfs) : "";
-  return withQ(withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : "") + (pdf ? "&pdf=" + pdf : ""), slideFx(L)), slideQ(L));
+  return withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : "") + (pdf ? "&pdf=" + pdf : ""), slideFx(L));
 }
 // list 에서 x(예전 번호)의 새 자리. 빠졌으면 그 뒤에 남은 것, 없으면 그 앞에 남은 것의 자리
 function nearestKept(list, x, max) {
@@ -724,8 +724,28 @@ async function saveSlides(pages, ui, fix = false) {
     const v = (/[?&]v=(\d+)/.exec(lesson.slide_dir) || [])[1] || Date.now();
     // 원본 PDF: 남은 그림이 하나도 없는 PDF는 목록에서 빼고 파일도 지운다
     const pdfs = slidePdfs(lesson);
-    const livePdfs = pdfs.filter(({ k, n }) => keep.some((f) => f >= k && f < k + n));
-    let gonePdfs = pdfs.filter((p) => !livePdfs.includes(p));
+    const livePdfs = [];
+    let gonePdfs = pdfs.filter(({ k, n }) => !keep.some((f) => f >= k && f < k + n));
+    // 남은 그림이 있는 PDF도 지운 쪽은 바로 빼고 다시 써서 덮어쓴다(지운 슬라이드가 원본 PDF에 남지 않게). 다시 쓰지 못하면 그 PDF는 통째로 지운다
+    for (const p of pdfs.filter((x) => !gonePdfs.includes(x))) {
+      const had = pdfPageList(p, files), left = pdfPageList({ ...p, r: 1 }, keep);
+      if (left.length === had.length) { livePdfs.push(p); continue; }
+      try {
+        slideWork(ui, "원본 PDF에서 지운 쪽을 빼는 중…", 0, 1);
+        const { PDFDocument } = await loadPdfLib();
+        const r = await fetch(st.base + folder + p.k + ".pdf?t=" + Date.now());
+        if (!r.ok) throw new Error("응답 " + r.status);
+        const src = await PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true });
+        if (src.getPageCount() !== had.length) throw new Error("쪽 수가 맞지 않습니다");
+        const doc = await PDFDocument.create();
+        for (const pg of await doc.copyPages(src, left.map((f) => had.indexOf(f)))) doc.addPage(pg);
+        await st.put(folder + p.k + ".pdf", new Blob([await doc.save()], { type: "application/pdf" }), "application/pdf");
+        livePdfs.push({ ...p, r: (p.r || 0) + 1 });
+      } catch (e) {
+        console.warn("원본 PDF 다시 쓰기 실패(통째로 지움)", e);
+        gonePdfs.push(p);
+      }
+    }
     let dir = keep.length ? slideDirOf(lesson, base, { v, small: small && keep.every((f) => names.has(f + "s.jpg")), anim, files: keep, pdfs: livePdfs }) : "";
     let moved = 0, total = 0;
     if (dir.length > 500) {
