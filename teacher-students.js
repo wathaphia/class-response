@@ -257,11 +257,12 @@ async function readRtcStats(watch) {
   for (const r of [watch.desk, ...watch.rtc.values()]) {
     if (!r) continue;
     if (!r.pc || r.pc.connectionState !== "connected") continue;
-    let fps = 0, rtt = 0, jb = 0, relay = false;
+    let fps = 0, rtt = 0, jb = 0, relay = false, size = "";
     const stats = await r.pc.getStats();
     stats.forEach((x) => {
       if (x.type === "inbound-rtp" && x.kind === "video") {
         fps = x.framesPerSecond || 0;
+        if (x.frameWidth) size = " · " + x.frameWidth + "×" + x.frameHeight;
         if (x.jitterBufferEmittedCount) jb = (x.jitterBufferDelay / x.jitterBufferEmittedCount) * 1000;
       }
       // 실제로 쓰는 연결 쌍의 양 끝 중 하나라도 중계 서버면 「중계」(후보 목록에 중계가 있다는 것만으로는 아님)
@@ -270,7 +271,7 @@ async function readRtcStats(watch) {
         relay = [x.localCandidateId, x.remoteCandidateId].some((id) => stats.get(id)?.candidateType === "relay");
       }
     });
-    watch.videoText = (r === watch.desk ? "전체 화면 " : "") + "영상 " + Math.round(fps) + " FPS · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
+    watch.videoText = (r === watch.desk ? "전체 화면 " : "") + "영상 " + Math.round(fps) + " FPS" + size + " · 지연 약 " + Math.round(rtt / 2 + jb) + " ms" + (relay ? " (중계)" : " (직접 연결)");
     watch.simInfo.textContent = watch.videoText;
     return;
   }
@@ -301,7 +302,9 @@ async function showMirror(watch, m) {
     watch.html = m.html;
     doc.body.replaceChildren(...cleanMirror(m.html, doc));
     for (const k of watch.sims.keys()) paintSim(watch, k);   // 새로 생긴 자리에 시뮬레이션 다시 칠하기
+    watch.mirrorTimes = (watch.mirrorTimes || []).concat(Date.now());
   }
+  mirrorStats(watch, m);
   const el = doc.scrollingElement;
   if (el && typeof m.scroll === "number") el.scrollTop = m.scroll * (el.scrollHeight - el.clientHeight);
   watch.frame.style.maxWidth = m.narrow ? "420px" : "";
@@ -311,6 +314,16 @@ async function showMirror(watch, m) {
     desk ? h("span", { class: "mirror-state" + (desk[1] ? " away" : "") }, desk[0]) : null, desk ? " · " : null,
     h("span", { class: "mirror-state" + (m.away ? " away" : "") }, m.away ? "다른 앱이나 탭으로 나가 있음" : "수업 화면을 보고 있음"),
     m.where ? " · " + m.where : "", " · " + new Date().toLocaleTimeString() + " 갱신");
+}
+
+// 영상·시뮬레이션이 없을 때(수업 화면 복사만 올 때) 바뀐 횟수(최근 5초)와 지연을 적는다. 화면 복사는 바뀔 때만 보내므로 FPS가 낮아도 정상이다.
+function mirrorStats(watch, m) {
+  const now = Date.now();
+  watch.mirrorTimes = (watch.mirrorTimes || []).filter((t) => now - t < 5000);
+  if (watch.videoText || [...watch.sims.values()].some((s) => s.times.some((t) => now - t < 2000))) return;
+  const lag = m.t ? now - m.t : null;   // 학생 기기 시계 기준(두 기기 시계가 어긋나면 조금 틀릴 수 있음)
+  watch.simInfo.textContent = "화면 복사 " + (watch.mirrorTimes.length / 5).toFixed(1) + " FPS(바뀔 때만 보냄)"
+    + (lag != null && lag >= 0 && lag < 60000 ? " · 지연 " + Math.round(lag) + " ms" : "");
 }
 
 async function watchStudentScreen(s) {
@@ -344,7 +357,7 @@ async function watchStudentScreen(s) {
     watch.statsTimer = setInterval(() => readRtcStats(watch).catch(() => {}), 1000);
     screenWatchers.set(s.id, watch);
     screenWatchers.set(screenKey(s), watch);   // 예전 setup.sql 이면 학생이 학번·이름으로 답한다
-    await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id, key: screenKey(s) });
+    await sendTeacherScreenSignal({ type: "request", from: "teacher", to: s.id, key: screenKey(s), quality: screenQuality() });
   } catch (e) {
     alert(e.message || e);
   }

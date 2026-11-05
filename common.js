@@ -254,6 +254,19 @@ function deckUrl(lesson) {
 
 // WebRTC 연결 주소 후보. 학교망처럼 직접 연결이 막힌 곳을 위해 config.js 의 TURN_URL(Cloudflare Worker)에서
 // 중계 서버(TURN) 접속 정보를 받는다(로그인한 교사나 수업에 들어온 학생만 받을 수 있음). 없거나 실패하면 무료 STUN만 쓴다.
+// 학생 화면 크게 보기 화질(기타 관리에서 교사가 고른다). h·fps·br: 전체 화면 영상 / simW·simQ: 시뮬레이션 그림 / simFps·br2: 시뮬레이션 영상.
+// gb: 학생 한 명을 한 시간 동안 크게 볼 때 영상이 쓰는 최대 양(중계로 이어지면 TURN 월 1,000GB에서 빠진다). 일괄 미리보기는 따로(LITE) 정한다.
+const SCREEN_QUALITY = {
+  low: { name: "낮음", h: 480, fps: 5, br: 300000, simW: 480, simQ: 0.5, simFps: 15, br2: 400000, gb: 0.14, note: "글자는 겨우 읽힘 · 학생 기기·네트워크 부담 가장 적음" },
+  mid: { name: "보통", h: 720, fps: 8, br: 600000, simW: 640, simQ: 0.6, simFps: 30, br2: 1000000, gb: 0.27, note: "지금까지의 기본값 · 대부분의 수업에 충분" },
+  high: { name: "높음", h: 1080, fps: 10, br: 1500000, simW: 960, simQ: 0.7, simFps: 30, br2: 2000000, gb: 0.68, note: "작은 글씨도 또렷 · 오래된 학생 기기는 버벅일 수 있음" },
+  max: { name: "최고", h: 1080, fps: 15, br: 3000000, simW: 1280, simQ: 0.8, simFps: 30, br2: 3000000, gb: 1.35, note: "움직임까지 부드러움 · 중계 사용량과 학생 기기 부담 가장 큼" },
+};
+const SCREEN_QUALITY_KEY = "cra-screen-quality";
+function screenQuality() {
+  try { const k = localStorage.getItem(SCREEN_QUALITY_KEY); if (SCREEN_QUALITY[k]) return k; } catch {}
+  return "mid";
+}
 const STUN_ONLY = [{ urls: "stun:stun.cloudflare.com:3478" }, { urls: "stun:stun.l.google.com:19302" }];
 let iceCache = null;
 // 시험용: 이 브라우저에서 localStorage 「cra-force-relay」=1 이면 중계 서버만 쓴다(중계 경로가 되는지 확인할 때)
@@ -605,8 +618,38 @@ function openSimFull(title, html, { autoplay = false } = {}) {
 
 // small: 학생 기기·썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.
 // 교사 화면(TV)과 학생의 「크게 보기」는 큰 그림(새로 올린 것은 1920px)을 쓴다.
+// ord: n번째 그림의 저장소 파일 번호 목록(순서를 바꾸거나 지운 수업). 36진수, 「.」로 나누고 「a-b」는 a부터 b까지. 없으면 n번째 = n.jpg
+const slideFilesMemo = new Map();
+function slideFiles(lesson) {
+  const m = /[?&]ord=([0-9a-z.-]+)/.exec(lesson.slide_dir || "");
+  if (!m) return null;
+  if (!slideFilesMemo.has(m[1])) {
+    const out = [];
+    for (const tok of m[1].split(".")) {
+      const [a, b] = tok.split("-").map((x) => parseInt(x, 36));
+      if (!(a > 0)) continue;
+      if (b >= a) for (let i = a; i <= b; i++) out.push(i);
+      else out.push(a);
+    }
+    slideFilesMemo.set(m[1], out);
+  }
+  return slideFilesMemo.get(m[1]);
+}
+// slideFiles 의 반대: 이어지는 번호는 「a-b」로 줄인다. 1, 2, 3 … 그대로면 ""
+function ordText(files) {
+  if (files.every((f, i) => f === i + 1)) return "";
+  const out = [];
+  for (let i = 0; i < files.length; i++) {
+    let j = i;
+    while (j + 1 < files.length && files[j + 1] === files[j] + 1) j++;
+    out.push(j > i ? files[i].toString(36) + "-" + files[j].toString(36) : files[i].toString(36));
+    i = j;
+  }
+  return out.join(".");
+}
 function slideSrc(lesson, n, small) {
   const dir = lesson.slide_dir.trim();
+  if (dir.includes("{n}")) n = (slideFiles(lesson) || [])[n - 1] || n;
   const k = small && /[?&]sm=1/.test(dir) && dir.includes("{n}.jpg") ? n + "s" : n;
   return encodeURI(dir.includes("{n}") ? dir.split("{n}").join(k) : dir.replace(/\/+$/, "") + "/" + n + ".png");
 }

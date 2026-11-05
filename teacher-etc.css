@@ -76,3 +76,8 @@
 .eg-day:hover .eg-bar { fill: var(--accent-ink); }
 .usage-table table { font-size: .88rem; }
 .usage-table th, .usage-table td { padding: .4rem .7rem; white-space: nowrap; }
+/* 학생 화면 화질 고르기 */
+.quality-pick { display: grid; gap: 6px; }
+.quality-opt { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; padding: 6px 10px; border: 1px solid var(--line, #ddd); border-radius: 8px; cursor: pointer; }
+.quality-opt > span:last-child { grid-column: 2; }
+.quality-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }

@@ -47,15 +47,16 @@ const mobileDevice = () => !!navigator.userAgentData?.mobile || /Android|iPhone|
 const canDesk = () => !!navigator.mediaDevices?.getDisplayMedia && !mobileDevice();
 let deskGate = null;                 // 동의한 PC 학생이 전체 화면을 공유하기 전까지 수업 화면을 가리는 막
 let shareAsked = false;              // 선생님이 「공유 요청」을 보냈고 학생이 아직 답하지 않음(동의 안 한 학생에게 묻는 창)
-// 크게 보기: 높이 720·8 FPS·약 600 kbps. 일괄 미리보기(작은 칸 320×180): 높이 180·5 FPS·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
-const DESK = { full: { h: 720, fps: 8, br: 600000 }, lite: { h: 180, fps: 5, br: 70000 } };
+// 크게 보기: 교사가 고른 화질(SCREEN_QUALITY, 기본 보통 = 높이 720·8 FPS·약 600 kbps). 일괄 미리보기(작은 칸 320×180): 높이 180·5 FPS·약 70 kbps(학생 30명 ≈ 시간당 1GB 미만)
+const DESK = { lite: { h: 180, fps: 5, br: 70000 } };
+let quality = SCREEN_QUALITY.mid;    // 교사가 크게 보기를 요청할 때 함께 보낸 화질
 // 실시간 수업 화면: 화면 공유가 없을 때 이 수업 화면(쪽, 쓰고 있는 답)을 복사해 보낸다. 모든 기기·브라우저에서 된다.
 let mirrorOn = false;
 let mirrorTimer = null;
 let mirrorBeat = null;
 let lastMirror = "";                 // 마지막으로 보낸 수업 화면(같으면 다시 보내지 않음)
 const simStarted = new WeakMap();    // 촬영을 시작한 시뮬레이션 칸 → 그때의 srcdoc 길이
-let simQ = 0.6, simW = 640;          // 시뮬레이션 그림 화질·최대 너비(메시지 크기에 따라 자동 조절)
+let simQ = 0.6, simW = 640;          // 시뮬레이션 그림 화질·최대 너비(메시지 크기에 따라 자동 조절, 위로는 quality 까지)
 // 일괄 미리보기(lite): 교사가 여러 학생을 작게 함께 볼 때. 시뮬레이션 영상 10 FPS·높이 240 이하, 그림은 초당 2장·가로 320.
 // 화면 내용은 교사만 듣는 채널로 HTTP 전송한다. 교사 화면이 15초마다 「계속」을 보내지 않으면(창을 닫는 등) 45초 뒤 스스로 멈춘다.
 let mirrorLite = false;
@@ -502,7 +503,7 @@ async function startDesk() {
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { displaySurface: "monitor", height: { max: 1080 }, frameRate: { ideal: 8, max: 10 } }, audio: false,
+      video: { displaySurface: "monitor", height: { max: 1080 }, frameRate: { ideal: 8, max: 15 } }, audio: false,
       monitorTypeSurfaces: "include", selfBrowserSurface: "exclude", surfaceSwitching: "exclude", systemAudio: "exclude",
     });
   } catch (e) {
@@ -570,7 +571,8 @@ async function offerDeskNow() {
   const pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relayFirst(ice) ? "relay" : "all" });
   deskPc = pc;
   const track = deskStream.getVideoTracks()[0];
-  const o = mirrorLite ? DESK.lite : DESK.full;
+  const o = mirrorLite ? DESK.lite : quality;
+  track.applyConstraints({ frameRate: { ideal: o.fps, max: 15 } }).catch(() => {});
   pc.addTransceiver(track, { direction: "sendonly", streams: [deskStream],
     sendEncodings: [{ maxBitrate: o.br, maxFramerate: o.fps, scaleResolutionDownBy: Math.max(1, (track.getSettings().height || o.h) / o.h) }] });
   pc.onicecandidate = (e) => e.candidate && id === deskId && sendScreenSignal({ type: "candidate", from: screenStudentId, to: "teacher", pid: id, candidate: e.candidate.toJSON() });
@@ -611,7 +613,7 @@ function startSimAgents() {
         : { craMirror: "start", every: 200, maxW: simW, q: simQ }, "*");
       // 캔버스가 있으면 영상(WebRTC)으로도 보낸다. 중계 서버 접속 정보는 학생 토큰으로 받는다.
       iceServers({ body: { token, code: state.lesson.code || code } })
-        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: relayFirst(ice), opt: mirrorLite ? LITE.rtc : null }, "*"));
+        .then((ice) => f.contentWindow?.postMessage({ craRtc: "start", ice, relay: relayFirst(ice), opt: mirrorLite ? LITE.rtc : { fps: quality.simFps, br: quality.br2 } }, "*"));
     };
     if (!f.__craLoad) { f.__craLoad = true; f.addEventListener("load", () => { if (mirrorOn && !simHidden(f) && simStarted.has(f)) start(); }); }
     start();
@@ -630,7 +632,7 @@ window.addEventListener("message", async (e) => {
   const size = JSON.stringify(m).length;
   const ack = { craAck: 1 };
   if (size > 150000) { simQ = Math.max(0.3, simQ - 0.1); simW = Math.max(320, Math.round(simW * 0.8)); }
-  else if (size < 50000 && simQ < 0.6) { simQ = Math.min(0.6, simQ + 0.05); simW = Math.min(640, simW + 40); }
+  else if (size < 50000 && (simQ < quality.simQ || simW < quality.simW)) { simQ = Math.min(quality.simQ, simQ + 0.05); simW = Math.min(quality.simW, simW + 40); }
   ack.q = mirrorLite ? Math.min(simQ, LITE.q) : simQ;
   ack.maxW = mirrorLite ? Math.min(simW, LITE.maxW) : simW;
   if (size > 230000) return e.source.postMessage({ ...ack, resend: 1 }, "*");   // 너무 크면 버리고 줄인 크기로 다시
@@ -747,6 +749,10 @@ async function handleScreenSignal(message) {
   if (!message || (message.to !== screenStudentId && message.key !== screenKey(state.me))) return;
   if (message.type === "request") {
     const lite = !!message.lite;
+    if (!lite) {   // 화질을 바꾸면 시뮬레이션 그림도 그 화질에서 다시 맞춘다
+      const q = SCREEN_QUALITY[message.quality] || SCREEN_QUALITY.mid;
+      if (q !== quality) { quality = q; simQ = q.simQ; simW = q.simW; }
+    }
     if (lite) liteEvery = Math.min(5000, Math.max(LITE.every, Number(message.every) || LITE.every));
     if (mirrorOn) {   // 새로 연 교사 창에 전부 다시(크게 보기 ↔ 일괄 미리보기면 방식도 바꾼다)
       mirrorLite = lite;
