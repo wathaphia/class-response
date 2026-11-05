@@ -581,24 +581,61 @@ function toggleSlideSelection(page, figure, checkbox, hitbox) {
   setSlideSelection(page, !selectedSlides.has(page), figure, checkbox, hitbox);
 }
 
+const SHARED_NOTE = "이 수업에서 복제한 다른 수업이 같은 슬라이드 그림을 함께 쓰고 있어서 지금은 고칠 수 없습니다.\n복제한 수업 쪽에서 슬라이드를 한 번 편집(삭제·순서 바꾸기·이어 붙이기)하면 그 수업만의 슬라이드로 복사되고, 그다음부터 이 수업에서도 고칠 수 있습니다.";
+
+// 그림이 이 수업 폴더(내 id/수업 id/)에 없으면 고치기 전에 이 수업 폴더로 복사하고 주소(slide_dir)를 바꾼다.
+// 공동작업자는 주인 폴더에 그림을 옮겨 넣을 수 없고(저장소 권한), 복제해 온 수업은 원래 수업 그림을 건드리면 안 되기 때문이다.
+// 공동작업자가 옮겨 온 주인 폴더(같은 수업 id)는 함께 쓰는 수업이 없으면 지운다.
+async function ownSlideHome(L, home, ui) {
+  const folder = slideFolder(L);
+  if (home.folder === folder) return home;
+  const query = L.slide_dir.split("?")[1] || "";
+  const small = /(^|&)sm=1(&|$)/.test(query);
+  const names = Array.from({ length: L.slide_count }, (_, i) => i + 1).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+  const st = await newSlideStore();
+  let done = 0, next = 0;
+  const copy = async () => {
+    while (next < names.length) {
+      const name = names[next++];
+      const r = await fetch(home.store.base + home.folder + name + (query ? "?" + query : ""));
+      if (!r.ok) throw new Error(name + " 응답 " + r.status);
+      await st.put(folder + name, await r.blob(), "image/jpeg");
+      slideWork(ui, "이 수업만의 슬라이드로 복사하는 중 " + ++done + " / " + names.length, done, names.length);
+    }
+  };
+  slideWork(ui, "이 수업만의 슬라이드로 복사하는 중…", 0, names.length);
+  await Promise.all(Array.from({ length: 4 }, copy));
+  const dir = st.base + folder + "{n}.jpg" + (query ? "?" + query : "");
+  const { error } = await sb.from("lessons").update({ slide_dir: dir }).eq("id", L.id);
+  if (error) throw error;
+  const shared = sharedSlides(L);
+  L.slide_dir = dir;
+  if (!shared && home.folder.endsWith("/" + L.id + "/")) {
+    try {
+      const old = await home.store.list(home.folder);
+      if (old.length) await home.store.remove(old.map((n) => home.folder + n));
+    } catch (e) {
+      console.warn("예전 슬라이드 폴더 정리 실패", e);
+    }
+  }
+  return { store: st, folder };
+}
+
 async function deleteSlide(target, ui) {
   if (slideBusy) return;
   if (target != null && slideOrder) return alert("끌어서 바꾼 순서를 먼저 「저장하기」로 저장해 주세요.");
   const targets = target == null ? [] : [...new Set(Array.isArray(target) ? target : [target])].sort((a, b) => a - b);
   const home = slideHome(lesson);
   if (!home || isPptx(lesson)) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
-  const folder = home.folder;
-  const base = lesson.slide_dir.split("?")[0];
-  if (folder !== slideFolder(lesson) || sharedSlides(lesson)) {
-    return alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 한 쪽만 지울 수 없습니다.\n복제해 온 수업이면 이 수업에서 슬라이드를 이어 붙일 때 이 수업만의 슬라이드로 복사됩니다.");
-  }
+  if (home.folder === slideFolder(lesson) && sharedSlides(lesson)) return alert(SHARED_NOTE);
   if (targets.length) {
     if (!confirm(targets.length + "장의 슬라이드를 지울까요? 남은 슬라이드와 질문 쪽 번호를 맞춥니다.")) return;
   }
   slideBusy = true;
   document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
-  const st = home.store;
   try {
+    const { store: st, folder } = await ownSlideHome(lesson, home, ui);
+    const base = lesson.slide_dir.split("?")[0];
     slideWork(ui, "슬라이드 목록을 확인하는 중…", 0, 1);
     const names = await st.list(folder);
     let nums = names.map((n) => /^(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]).sort((x, y) => x - y);
@@ -677,15 +714,15 @@ async function deleteSlide(target, ui) {
 async function reorderSlides(order, ui) {
   if (slideBusy || order.every((n, k) => n === k + 1)) return;
   const home = slideHome(lesson);
-  if (!home || isPptx(lesson) || home.folder !== slideFolder(lesson) || sharedSlides(lesson)) {
-    alert("이 슬라이드는 복제한 다른 수업과 함께 쓰고 있어서 순서를 바꿀 수 없습니다.\n복제해 온 수업이면 이 수업에서 슬라이드를 이어 붙일 때 이 수업만의 슬라이드로 복사됩니다.");
+  if (!home || isPptx(lesson) || (home.folder === slideFolder(lesson) && sharedSlides(lesson))) {
+    alert(home && !isPptx(lesson) ? SHARED_NOTE : "이 수업의 슬라이드 위치를 알 수 없어서 순서를 바꿀 수 없습니다.");
     slideOrder = null;
     return drawSettings();
   }
   slideBusy = true;
   document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
-  const { store: st, folder } = home;
   try {
+    const { store: st, folder } = await ownSlideHome(lesson, home, ui);
     slideWork(ui, "슬라이드 목록을 확인하는 중…", 0, 1);
     const names = new Set(await st.list(folder));
     // 그림 n(예전 번호)의 큰·작은 그림을 이름 from → to 로 함께 옮긴다
