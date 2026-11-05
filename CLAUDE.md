@@ -18,7 +18,8 @@
 | `teacher.js` | 공유 상태, 로그인·가입·재설정, 탭 틀 | teacher |
 | `teacher-library.js` | 「전체 수업」 폴더·카드, 슬라이드 PDF, 관찰자 사본 | manage |
 | `teacher-profile.js` | 「프로필」, 「전체 선생님 및 학생」 | manage, promote |
-| `teacher-etc.js` | 「기타 관리」 사용량 원·표, 동기화 | etc |
+| `teacher-etc.js` | 「자원 관리」(키 etc) 사용량 원·표, 동기화 | etc |
+| `teacher-graphic.js` | 「그래픽」 학생 슬라이드·학생 모니터링 화질 | student-bugs |
 | `teacher-bugs.js` | 버그 제보 | etc |
 | `teacher-patch.js` | 「패치 노트」 탭, 기록은 `patch-notes.js` | etc |
 | `teacher-run.js` | 「수업 진행」, 수업용 화면 | class, teacher |
@@ -37,7 +38,7 @@
 - 나중에 고치기 쉽게 짠다: 화면 그리기와 서버 요청을 섞지 않고, 둘 이상이 쓰는 것은 `common.js` 로, 저장소 키·RPC 이름은 한 곳에 상수로, 로그인 정보는 `loginStore` 로만.
 - JS/CSS를 바꾸면 `node C:\Users\neptu\class-project\class-tools\bump-version.js <이름> [작업트리]`.
 - 학생 표는 열 단위 권한: 교사도 `token`·`pin_hash` 를 못 읽는다(`select` 에 넣지 말 것). 수업 주인(`owner`)은 개발자만 바꾼다.
-- 기타 관리(`teacher-etc.js` `teacher-etc.css`)는 최적화 끝남: 직접 언급이 없으면 전체 최적화·코드 제거 요청에서도 손대지 않는다. 고칠 땐 원·표를 지우지 말고 옮기기만, `etc` 시나리오 꼭 통과. 묶음마다 try/catch(`paintEtc` 의 `section`).
+- 자원 관리(`teacher-etc.js` `teacher-etc.css`)는 최적화 끝남: 직접 언급이 없으면 전체 최적화·코드 제거 요청에서도 손대지 않는다. 고칠 땐 원·표를 지우지 말고 옮기기만, `etc` 시나리오 꼭 통과. 묶음마다 try/catch(`paintEtc` 의 `section`).
 - 패치 노트: 말하지 않아도 PR마다 병합 전에 `patch-notes.js` 맨 위에 [번호, 날, 글, 성격] 한 줄 + 그날 `PATCH_DAYS` 요약(PR 번호를 받은 뒤 커밋), 시기가 바뀌면 `PATCH_ERAS` 끝 줄도.
 - 슬라이드 폴더는 수업마다 하나(`교사id/수업id/`): 공동 작업자·개발자도 복사 없이 그 폴더를 고친다(저장소 `can_slide_path`, Worker 같은 검사). `slide_dir` 의 `pdf=k-n` = `k.pdf` 원본이 파일 k…k+n-1 쪽 → `exportSlidesPdf`(common.js)가 그 쪽을 원본 그대로 넣는다.
 - 새 교사 탭 파일은 `teacher.html` 불러오기 순서·이 표·`teacher.js` 머리 주석에 함께 적는다.
