@@ -178,12 +178,12 @@ function takeActivities(data, saved = []) {
   activities = sortActivities(list);
 }
 
-// 목록 머리의 [되돌리기] [저장하기]: 늘 보이고, 바꾼 것이 있을 때만 누를 수 있다
+// 목록 머리의 [되돌리기] [저장하기]: 늘 보이고, 바꾼 것이 있을 때만 누를 수 있다. 되돌리기는 연달아 누르므로 불응기(common.js)에서 뺀다
 function layoutBar() {
   const d = layoutDraft && layoutDraft.lesson === lesson.id ? layoutDraft : null;
   const dirty = layoutDirty();
   return h("div", { class: "act-tools" },
-    h("button", { type: "button", class: "ghost act-undo", disabled: !(d && d.undo.length), title: "바꾸기 전으로 되돌립니다(최대 " + LAYOUT_UNDO_MAX + "번).", onclick: undoLayout }, "↶ 되돌리기"),
+    h("button", { type: "button", class: "ghost act-undo", "data-rapid": "", disabled: !(d && d.undo.length), title: "바꾸기 전으로 되돌립니다(최대 " + LAYOUT_UNDO_MAX + "번).", onclick: undoLayout }, "↶ 되돌리기"),
     h("button", { type: "button", class: "act-save " + (dirty ? "primary" : "ghost"), disabled: !dirty, onclick: saveLayout }, dirty ? "저장하기" : "저장됨"));
 }
 
