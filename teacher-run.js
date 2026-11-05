@@ -559,6 +559,7 @@ async function setLesson(change) {
   refreshRun();
   const run = lessonWrite.then(() => sb.from("lessons").update(change).eq("id", L.id));
   lessonWrite = run.catch(() => {});
+  tellTabs({ lesson: change });
   const { error } = await run;
   if (error) fatal(error);
 }
@@ -566,9 +567,42 @@ async function setLesson(change) {
 async function setActivity(a, change) {
   Object.assign(a, change);
   refreshRun();
+  tellTabs({ activity: { id: a.id, change } });
   const { error } = await sb.from("activities").update(change).eq("id", a.id);
   if (error) fatal(error);
 }
+
+// 같은 수업을 연 다른 탭·창(같은 브라우저)에 바꾼 값(쪽·제출 열기·공개 등)을 바로 알린다.
+// 받은 탭은 저장하지 않고 화면만 고치므로, 어느 탭에서 넘기든 모든 탭과 그 탭이 띄운 수업용 화면이 같은 쪽을 보인다.
+let lessonSync = null;
+function syncLessonTabs() {
+  const id = lesson ? lesson.id : null;
+  if (lessonSync && lessonSync.id === id) return lessonSync;
+  if (lessonSync) lessonSync.ch.close();
+  lessonSync = null;
+  if (!id || typeof BroadcastChannel === "undefined") return null;
+  const ch = new BroadcastChannel("cra-lesson-" + id);
+  ch.onmessage = ({ data: m }) => {
+    if (!lesson || lesson.id !== id || !m) return;
+    if (m.lesson) Object.assign(lesson, m.lesson);
+    if (m.activity) { const a = activities.find((x) => x.id === m.activity.id); if (a) Object.assign(a, m.activity.change); }
+    if (run) refreshRun(); else paintPresent();
+  };
+  return (lessonSync = { id, ch });
+}
+function tellTabs(m) {
+  try { const s = syncLessonTabs(); if (s) s.ch.postMessage(m); } catch (e) { /* 알리지 못해도 저장은 그대로 */ }
+}
+setInterval(syncLessonTabs, 1000);   // 수업을 고르거나 바꾸면 그 수업의 통로로 갈아탄다
+// 다른 기기에서 같은 수업을 넘겼을 수 있으니, 이 탭으로 돌아오면 쪽·제출 상태를 한 번 다시 읽는다
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden || !lesson) return;
+  const L = lesson;
+  const { data } = await sb.from("lessons").select("page,open").eq("id", L.id).maybeSingle();
+  if (!data || L !== lesson || (data.page === L.page && data.open === L.open)) return;
+  Object.assign(L, data);
+  if (run) refreshRun(); else paintPresent();
+});
 
 function joinUrl(l) {
   return new URL("index.html?c=" + encodeURIComponent(l.code), location.href).href;

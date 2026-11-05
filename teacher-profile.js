@@ -43,12 +43,12 @@ function paintProfile() {
   const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code), copyButton(p.code)) : "—";
   const link = p ? studentLinkOf(p) : "";
   const linkBox = p ? h("span", { class: "teacher-id student-link" }, h("a", { href: link, target: "_blank", rel: "noopener" }, link), copyButton(link)) : "—";
-  // 재설정 메일의 링크로 들어옴(로그인된 채) 또는 프로필의 「비밀번호 재설정」: 여기서 새 비밀번호를 정한다. 프로필에서 열면 현재 비밀번호도 확인한다
-  const pw0 = passwordChange && !passwordRecovery ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
+  // 프로필의 「비밀번호 재설정」: 여기서 새 비밀번호를 정한다. 현재 비밀번호도 확인한다(메일 링크는 teacher.js 의 showPasswordRecovery)
+  const pw0 = passwordChange ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
   const pw1 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
   const pw2 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
   const pwMsg = h("p", { class: "msg" });
-  const recovery = passwordRecovery || passwordChange ? h("form", {
+  const recovery = passwordChange ? h("form", {
     class: "card stack recovery-card",
     async onsubmit(e) {
       e.preventDefault();
@@ -61,7 +61,7 @@ function paintProfile() {
       }
       const { error } = await sb.auth.updateUser({ password: pw1.value });
       if (error) { pwMsg.textContent = "바꾸지 못했습니다: " + error.message; return; }
-      passwordRecovery = passwordChange = false;
+      passwordChange = false;
       centerNote("새 비밀번호로 바꿨습니다");
       paintProfile();
     },
@@ -69,7 +69,7 @@ function paintProfile() {
     pw0 ? h("label", {}, "현재 비밀번호", pw0) : null, h("label", {}, "새 비밀번호 (6자 이상)", pw1), h("label", {}, "한 번 더", pw2),
     h("div", { class: "row" },
       h("button", { class: "primary", type: "submit" }, "비밀번호 바꾸기"),
-      h("button", { class: "ghost", type: "button", onclick() { passwordRecovery = passwordChange = false; paintProfile(); } }, "취소")), pwMsg) : "";
+      h("button", { class: "ghost", type: "button", onclick() { passwordChange = false; paintProfile(); } }, "취소")), pwMsg) : "";
   if (recovery) requestAnimationFrame(() => { recovery.scrollIntoView({ block: "center" }); (pw0 || pw1).focus(); });
   // 오늘 재설정 메일을 몇 번 썼는지(하루 3번)
   const resetUsed = h("span", { class: "muted small" }, resetQuotaText || "");

@@ -449,7 +449,9 @@ function supabaseView() {
   return [
     usageRings("Supabase", items),
     s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
-      + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다.") : null,
+      + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다."
+      + (s.egressError ? " 마지막 실패(" + shortTime(s.egressError.at) + "): " + s.egressError.message
+        + (/ 40[13]$/.test(s.egressError.message) ? " → Worker의 Supabase 관리 토큰이 만료·취소됐습니다. 새 토큰을 supabase.xml에 저장하고 PC에서 class-tools\\usage-setup.ps1 을 다시 실행하세요." : "") : "")) : null,
     s && s.health ? h("div", { class: "usage-tags start" }, h("span", { class: "small" }, "서비스 상태"),
       s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (SB_HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
     h("p", { class: "muted small" }, "표(전송량 한눈에·누가 받았나·종류별, 최근 7일 요청 수, 표별 크기)는 「전송량」·「일시정지까지」·「데이터베이스」 원을 누르면 오른쪽에 보입니다."),
@@ -549,6 +551,20 @@ function githubView() {
   ];
 }
 
+// 학생 화면 크게 보기 화질. 다음에 여는 크게 보기부터 적용된다(일괄 미리보기 작은 칸은 그대로)
+function screenQualityView() {
+  const now = screenQuality();
+  return h("div", { class: "stack" },
+    h("div", { class: "quality-pick" }, Object.entries(SCREEN_QUALITY).map(([k, q]) => h("label", { class: "quality-opt" + (k === now ? " on" : "") },
+      h("input", { type: "radio", name: "screen-quality", value: k, checked: k === now, onchange() {
+        try { localStorage.setItem(SCREEN_QUALITY_KEY, k); } catch {}
+        paintEtc();
+      } }),
+      h("span", {}, h("b", {}, q.name + " "), h("span", { class: "muted small" }, "전체 화면 " + q.h + "p · " + q.fps + " FPS · 최대 " + (q.br / 1e6) + " Mbps · 시뮬레이션 그림 가로 " + q.simW)),
+      h("span", { class: "muted small" }, "학생 1명 1시간 최대 약 " + q.gb + "GB · " + q.note)))),
+    h("p", { class: "muted small" }, "영상이 중계 서버로 이어지면 Cloudflare TURN(월 1,000GB)에서, 영상이 안 될 때 보내는 그림은 Supabase 전송량(월 5GB)에서 빠집니다. 화면이 거의 안 바뀌면 실제 사용량은 최대치보다 훨씬 적습니다. 다음에 여는 크게 보기부터 적용됩니다."));
+}
+
 function paintEtc() {
   if (tab !== "etc" || !main) return;
   const last = lastSync();
@@ -566,7 +582,8 @@ function paintEtc() {
     section("Supabase", "데이터베이스 · 파일 · 전송량 · 로그인", supabaseView, ["db", "worker"]),
     section("Cloudflare", "중계 서버(TURN) · Worker · R2 슬라이드 저장소 · KV", cloudflareView, ["worker"]),
     section("GitHub", "사이트 · 자동 실행", githubView, ["github"]),
-    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView)];
+    section("동기화 비용", "이 탭이 사용량을 받느라 쓰는 무료 한도", syncCostView),
+    section("학생 화면 화질", "학생 화면 크게 보기(한 명씩) · 이 기기에 저장", screenQualityView)];
   histSave();
   // 맨 위 요약: 초기화 전에 다 쓸 수 있는 자원(소진 주의)을 위험한 순서로 복제해 모아 본다
   const risky = usageRisky.sort((a, b) => b.risk - a.risk).map((x) => x.it);

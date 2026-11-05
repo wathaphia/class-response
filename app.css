@@ -749,6 +749,7 @@ td.grid-cell > span { white-space: nowrap; }
 .teacher-id { display: inline-flex; align-items: baseline; gap: .6rem; }
 .teacher-id strong { font-size: 1.35rem; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
 .student-link { flex-wrap: wrap; overflow-wrap: anywhere; }
+.student-link a, .link-cell a, .student-link a:visited, .link-cell a:visited { color: var(--accent); }
 .star-link a { overflow-wrap: anywhere; }
 .teachers-table .star-cell { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
 .code-confirm { font-size: 1.3rem; letter-spacing: .15em; text-transform: uppercase; max-width: 16rem; }

@@ -197,7 +197,7 @@ function slidesCard() {
       onchange() { setSlideSelection(i, checkbox.checked, figure, checkbox, hitbox); },
     });
     const name = h("span", {}, slideSteps(lesson) ? thumbLabel(i) : i + "쪽");
-    const del = h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { deleteSlide([i], work); } }, "삭제");
+    const del = h("button", { class: "link danger", type: "button", "aria-label": i + "쪽 삭제", onclick() { cutSlides([i]); } }, "삭제");
     const figure = h("figure", { class: "thumb" + (selectedSlides.has(i) ? " selected" : ""), "data-i": i },
       preview,
       h("label", { class: "thumb-check" }, checkbox, "선택"),
@@ -282,13 +282,33 @@ function slidesCard() {
     h("p", { class: "muted small" }, "미리보기는 이 화면에서만 움직이고 수업 쪽과 학생 화면은 바뀌지 않습니다."));
   // 오른쪽 위 단추: 끌어서 바꾼 순서가 있으면 「저장하기」, 없으면 「저장됨」. 저장·삭제가 중간에 멈추면 「번호 다시 맞추기」
   const saveBtn = h("button", { class: "primary save-order", type: "button", onclick() {
-    if (saveBtn.dataset.mode === "fix") { slideOrder = null; deleteSlide(null, work); }
-    else if (slideOrder) reorderSlides(slideOrder.order, work);
+    if (saveBtn.dataset.mode === "fix") { slideOrder = null; saveSlides(null, work, true); }
+    else if (slideOrder) saveSlides(slideOrder.order, work);
   } });
+  // 저장하지 않은 순서·지우기를 모두 버리고 저장된 상태로
+  const undoBtn = h("button", { class: "ghost undo-order", type: "button", onclick() { slideOrder = null; drawSettings(); } }, "되돌리기");
   const paintSave = () => {
+    const cut = slideOrder ? lesson.slide_count - slideOrder.order.length : 0;
     saveBtn.dataset.mode = "";
     saveBtn.disabled = !slideOrder;
-    saveBtn.textContent = slideOrder ? "저장하기" : "저장됨";
+    saveBtn.textContent = slideOrder ? "저장하기" + (cut ? " (" + cut + "장 지움)" : "") : "저장됨";
+    undoBtn.hidden = !slideOrder;
+  };
+  // 지우기는 칸만 빼 두고(저장 전) 「저장하기」를 누를 때 순서와 함께 한 번에 저장한다
+  const keepOrder = () => {
+    const o = [...thumbs.children].map((f) => +f.dataset.i);
+    slideOrder = o.length === lesson.slide_count && o.every((n, k) => n === k + 1) ? null : { id: lesson.id, dir: lesson.slide_dir, order: o };
+    paintSave();
+  };
+  const cutSlides = (nums) => {
+    for (const f of [...thumbs.children]) if (nums.includes(+f.dataset.i)) f.remove();
+    [...thumbs.children].forEach((f) => f.classList.remove("selected"));
+    thumbs.querySelectorAll(".thumb-check input").forEach((c) => { c.checked = false; });
+    thumbs.querySelectorAll(".thumb-hitbox").forEach((x) => x.setAttribute("aria-pressed", "false"));
+    selectedSlides.clear();
+    slidePicking = false;
+    paintPick();
+    keepOrder();
   };
   paintSave();
   // 저장·삭제 진행은 이 칸(오른쪽)의 막대와 글로 보여 준다
@@ -307,7 +327,7 @@ function slidesCard() {
   // 두 단추는 늘 자리를 차지하고(취소는 visibility 로 숨김) 너비가 고정이라 다른 단추가 밀리지 않는다
   const bulk = h("button", { class: "danger bulk-del", type: "button", onclick() {
     if (!slidePicking) { slidePicking = true; paintPick(); return; }
-    if (selectedSlides.size) deleteSlide([...selectedSlides].sort((a, b) => a - b), work);
+    if (selectedSlides.size) cutSlides([...selectedSlides]);
   } });
   const cancelPick = h("button", { class: "ghost cancel-pick", type: "button", onclick() {
     slidePicking = false;
@@ -326,21 +346,19 @@ function slidesCard() {
     h("h2", {}, "전체 슬라이드 " + lesson.slide_count + "장"),
     h("div", { class: "row slide-tools" },
       bulk, cancelPick,
-      h("span", { class: "muted small grow" }, "끌어서 순서를 바꾼 뒤 저장하세요."),
-      saveBtn),
+      h("span", { class: "muted small grow" }, "끌어서 순서를 바꾸거나 지운 뒤 한 번에 저장하세요."),
+      undoBtn, saveBtn),
     work.bar, work.status,
     thumbs) : null;
   paintPick();
   // 끌어서 슬라이드 순서 바꾸기(dragSort): 애니메이션 단계 그림은 한 슬라이드의 단계를 묶어서 함께 옮긴다.
-  // 놓으면 칸을 새 순서로 늘어놓기만 하고, 「저장하기」를 누를 때 저장소의 그림 이름을 바꾼다
+  // 놓으면 칸을 새 순서로 늘어놓기만 하고, 「저장하기」를 누를 때 그림 순서 목록(ord)을 저장한다
   if (allCard) dragSort(thumbs, {
     items: () => [...thumbs.children],
     unit: anim ? (f) => slideNo(lesson, +f.dataset.i) : undefined,
     onDrop(order) {
       thumbs.append(...order);
-      const o = order.map((f) => +f.dataset.i);
-      slideOrder = o.every((n, k) => n === k + 1) ? null : { id: lesson.id, dir: lesson.slide_dir, order: o };
-      paintSave();
+      keepOrder();
     },
     scroller: () => thumbs,
   });
@@ -549,7 +567,7 @@ document.addEventListener("keydown", (e) => {
   if (k) { e.preventDefault(); slideEditStep(k); }
 });
 let slidePicking = false;   // 「삭제할 슬라이드 선택하기」를 눌러 지울 슬라이드를 고르는 중
-let slideOrder = null;   // 끌어서 바꾸고 아직 저장하지 않은 순서 { id, dir, order: 새 순서의 예전 그림 번호들 }
+let slideOrder = null;   // 끌어서 바꾸거나 지우고 아직 저장하지 않은 순서 { id, dir, order: 새 순서의 예전 그림 번호들(지운 그림은 빠짐) }
 // 끌어 바꾼 순서를 저장하지 않았거나, 지우기·순서 저장 중(중간에 끊기면 그림 번호에 빈 곳이 생긴다)이면 떠나기 전에 묻는다
 addEventListener("beforeunload", (ev) => { if (slideOrder || slideBusy) ev.preventDefault(); });
 
@@ -591,7 +609,7 @@ async function ownSlideHome(L, home, ui) {
   if (home.folder === folder) return home;
   const query = L.slide_dir.split("?")[1] || "";
   const small = /(^|&)sm=1(&|$)/.test(query);
-  const names = Array.from({ length: L.slide_count }, (_, i) => i + 1).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+  const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
   const st = await newSlideStore();
   let done = 0, next = 0;
   const copy = async () => {
@@ -621,139 +639,97 @@ async function ownSlideHome(L, home, ui) {
   return { store: st, folder };
 }
 
-async function deleteSlide(target, ui) {
-  if (slideBusy) return;
-  if (target != null && slideOrder) return alert("끌어서 바꾼 순서를 먼저 「저장하기」로 저장해 주세요.");
-  const targets = target == null ? [] : [...new Set(Array.isArray(target) ? target : [target])].sort((a, b) => a - b);
-  const home = slideHome(lesson);
-  if (!home || isPptx(lesson)) return alert("이 수업의 슬라이드 위치를 알 수 없습니다. 슬라이드를 다시 올려 주세요.");
-  if (home.folder === slideFolder(lesson) && sharedSlides(lesson)) return alert(SHARED_NOTE);
-  if (targets.length) {
-    if (!confirm(targets.length + "장의 슬라이드를 지울까요? 남은 슬라이드와 질문 쪽 번호를 맞춥니다.")) return;
-  }
-  slideBusy = true;
-  document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
-  try {
-    const { store: st, folder } = await ownSlideHome(lesson, home, ui);
-    const base = lesson.slide_dir.split("?")[0];
-    slideWork(ui, "슬라이드 목록을 확인하는 중…", 0, 1);
-    const names = await st.list(folder);
-    let nums = names.map((n) => /^(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]).sort((x, y) => x - y);
-    // 작은 그림(3s.jpg)도 큰 그림과 함께 지우고 옮긴다
-    const smalls = new Set(names.map((n) => /^(\d+)s\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]));
-    // 순서 저장이 중간에 멈춰 남은 임시 그림(m3.jpg)은 번호 다시 맞추기에서 맨 뒤 번호로 되살린다
-    const temps = targets.length ? [] : names.map((n) => /^m(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]);
-    if (targets.length) {
-      const missing = targets.filter((n) => !nums.includes(n));
-      if (missing.length) throw new Error(missing.join(", ") + "쪽 그림이 이미 없습니다. 「번호 다시 맞추기」를 눌러 주세요.");
-      slideWork(ui, targets.length + "장의 슬라이드를 지우는 중…", 0, 1);
-      await st.remove(targets.flatMap((n) => [folder + n + ".jpg", ...(smalls.has(n) ? [folder + n + "s.jpg"] : [])]));
-      for (const n of targets) smalls.delete(n);
-      nums = nums.filter((x) => !targets.includes(x));
-    }
-    const small = /[?&]sm=1/.test(lesson.slide_dir) && nums.every((n) => smalls.has(n)) && temps.every((t) => names.includes("m" + t + "s.jpg"));
-    // 남은 그림을 1, 2, 3 … 으로 당긴다(작은 번호부터 옮기므로 옮길 자리는 늘 비어 있다)
-    const pulls = [...nums.map((num, i) => [String(num), i + 1, smalls.has(num)]).filter(([num, to]) => +num !== to),
-      ...temps.map((t, i) => ["m" + t, nums.length + i + 1, names.includes("m" + t + "s.jpg")])];
-    for (const [i, [from, to, sm]] of pulls.entries()) {
-      slideWork(ui, "슬라이드 번호를 맞추는 중 " + (i + 1) + " / " + pulls.length, i, pulls.length);
-      await Promise.all([st.move(folder + from + ".jpg", folder + to + ".jpg"), sm && st.move(folder + from + "s.jpg", folder + to + "s.jpg")]);
-    }
-    const left = nums.length + temps.length;
-    // 단계 그림 수업: 남은 그림으로 슬라이드마다 단계 수를 다시 센다. 단계가 모두 지워진 슬라이드는 빠지고,
-    // 질문의 쪽 번호(= 슬라이드 번호)는 빠진 슬라이드만큼 당긴다.
-    const steps = slideSteps(lesson);
-    let anim = "", gone = targets, total = left;
-    if (steps) {
-      const owner = steps.flatMap((n, s) => Array(n).fill(s + 1));   // 그림 번호 → 슬라이드 번호
-      if (nums.every((n) => n <= owner.length)) {
-        const keep = steps.map(() => 0);
-        for (const n of nums) keep[owner[n - 1] - 1]++;
-        gone = keep.map((k, s) => (k ? 0 : s + 1)).filter(Boolean);
-        anim = keep.filter(Boolean).map((k) => Math.min(k - 1, 35).toString(36)).join("") + "0".repeat(temps.length);
-        total = anim.length;
-      }
-    }
-    if (targets.length) {
-      const shift = (pg) => (pg == null ? pg : pg - gone.filter((n) => n < pg).length);
-      for (const a of activities) {
-        if (a.page == null) continue;
-        const page = Math.min(shift(a.page), Math.max(total, 1));
-        let to = a.page_to > a.page ? Math.min(shift(a.page_to), Math.max(total, 1)) : a.page_to ?? null;
-        if (to != null && to <= page) to = null;
-        if (page === a.page && to === (a.page_to ?? null)) continue;
-        const change = { page };
-        if ("page_to" in a) change.page_to = to;
-        const u = await sb.from("activities").update(change).eq("id", a.id);
-        if (u.error) throw u.error;
-      }
-    }
-    const pageNow = lesson.page - targets.filter((n) => n < lesson.page).length;
-    // 이름이 바뀐 그림을 브라우저가 예전 것으로 보이지 않게. 원본 PPTX(deck)는 더 이상 쪽이 맞지 않으므로 뺀다
-    const dir = withFx(base + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));
-    const u = await sb.from("lessons").update({ slide_dir: left ? dir : "", slide_count: left, page: Math.min(Math.max(pageNow, 1), Math.max(left, 1)) }).eq("id", lesson.id);
-    if (u.error) throw u.error;
-    selectedSlides.clear();
-    slidePicking = false;
-    flash(targets.length ? targets.length + "장의 슬라이드를 지웠습니다." : "슬라이드 번호를 맞췄습니다 (" + left + "장).");
-    slideBusy = false;
-    await loadLessons(lesson.id);
-  } catch (e) {
-    slideBusy = false;
-    document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = false; });
-    slideWork(ui, "멈췄습니다: " + (e.message || e) + " · 「번호 다시 맞추기」를 누르면 남은 그림으로 번호를 다시 맞춥니다.");
-    ui.broke();
-    alert(ui.status.textContent);
-  }
+// 이 수업 그림들의 저장소 파일 번호(n번째 그림 = 배열의 n-1번째). ord 가 없으면 1, 2, 3 …
+const fileNums = (L) => slideFiles(L) || Array.from({ length: L.slide_count }, (_, i) => i + 1);
+// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·fx(전환 효과)
+function slideDirOf(L, base, { v, small, anim, files }) {
+  const ord = files ? ordText(files) : "";
+  return withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : ""), slideFx(L));
+}
+// list 에서 x(예전 번호)의 새 자리. 빠졌으면 그 뒤에 남은 것, 없으면 그 앞에 남은 것의 자리
+function nearestKept(list, x, max) {
+  for (let t = x; t <= max; t++) { const i = list.indexOf(t); if (i >= 0) return i + 1; }
+  for (let t = x - 1; t >= 1; t--) { const i = list.indexOf(t); if (i >= 0) return i + 1; }
+  return 1;
 }
 
-// 슬라이드 순서 바꾸기: order 는 새 순서의 예전 그림 번호들. 질문의 쪽 번호·지금 쪽·애니메이션 단계 수(anim)도 새 순서에 맞춘다.
-// 그림 이름(1.jpg …)이 곧 순서라서(학생 화면이 쪽 번호로 바로 그림 주소를 만든다) 이름을 바꿔 저장한다.
-// 새 순서를 고리(cycle: 3→1, 1→2, 2→3 처럼 서로 자리를 물려받는 묶음)로 나누면 고리마다 임시 이름(m번호) 하나만 거쳐
-// 고리 길이 + 1 번 옮기면 된다(옮길 그림마다 두 번 옮기던 것의 약 절반). 고리끼리는 겹치지 않으니 함께 옮긴다.
-async function reorderSlides(order, ui) {
-  if (slideBusy || order.every((n, k) => n === k + 1)) return;
+// 슬라이드 순서·지우기 저장(「저장하기」 한 번): pages 는 새 순서의 예전 그림 번호들(지운 그림은 빠짐).
+// 그림 파일은 옮기지 않고 주소의 ord(그림 번호 → 파일 번호)만 고친 뒤 지운 그림 파일만 지운다. 이름이 그대로라 받아 둔 그림도 그대로 쓴다.
+// 질문의 쪽 번호·지금 쪽·애니메이션 단계 수(anim)도 새 순서에 맞춘다. ord 가 주소 길이 한도(500자)를 넘으면 예전처럼 파일 이름을 1, 2, 3 … 으로 바꾼다.
+// fix: 「번호 다시 맞추기」(저장이 중간에 멈춘 뒤 저장소에 남은 파일로 목록을 다시 만든다)
+async function saveSlides(pages, ui, fix = false) {
+  if (slideBusy) return;
   const home = slideHome(lesson);
   if (!home || isPptx(lesson) || (home.folder === slideFolder(lesson) && sharedSlides(lesson))) {
-    alert(home && !isPptx(lesson) ? SHARED_NOTE : "이 수업의 슬라이드 위치를 알 수 없어서 순서를 바꿀 수 없습니다.");
+    alert(home && !isPptx(lesson) ? SHARED_NOTE : "이 수업의 슬라이드 위치를 알 수 없어서 고칠 수 없습니다.");
     slideOrder = null;
     return drawSettings();
   }
+  const cut = fix ? 0 : lesson.slide_count - pages.length;
+  if (cut && !confirm(cut + "장의 슬라이드를 지웁니다. 지운 슬라이드는 되돌릴 수 없습니다. 저장할까요?")) return;
   slideBusy = true;
   document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = true; });
   try {
     const { store: st, folder } = await ownSlideHome(lesson, home, ui);
     slideWork(ui, "슬라이드 목록을 확인하는 중…", 0, 1);
     const names = new Set(await st.list(folder));
-    // 그림 n(예전 번호)의 큰·작은 그림을 이름 from → to 로 함께 옮긴다
-    const mv = (n, from, to) => Promise.all([n + ".jpg", ...(names.has(n + "s.jpg") ? [n + "s.jpg"] : [])]
-      .map((f) => st.move(folder + f.replace(/^\d+/, from), folder + f.replace(/^\d+/, to))));
-    // 고리: 자리 c[0] 은 c[1] 이, c[1] 은 c[2] 가 … 물려받고 마지막 자리는 임시로 옮겨 둔 c[0] 이 받는다
-    const done = new Set(), cycles = [];
-    order.forEach((old, k) => {
-      if (old === k + 1 || done.has(k + 1)) return;
-      const c = [];
-      for (let at = k + 1; !done.has(at); at = order[at - 1]) { done.add(at); c.push(at); }
-      cycles.push(c);
-    });
-    const total = cycles.reduce((s, c) => s + c.length + 1, 0);
-    let moved = 0;
-    const step = async (n, from, to) => { await mv(n, from, to); moved++; slideWork(ui, "슬라이드 순서를 저장하는 중 " + moved + " / " + total, moved, total); };
-    const runCycle = async (c) => {
-      await step(c[0], c[0], "m" + c[0]);
-      for (let j = 0; j + 1 < c.length; j++) await step(c[j + 1], c[j + 1], c[j]);
-      await step(c[0], "m" + c[0], c[c.length - 1]);
-    };
-    const waiting = cycles.slice();
-    await Promise.all(Array.from({ length: Math.min(4, waiting.length) }, async () => { while (waiting.length) await runCycle(waiting.shift()); }));
-    // 슬라이드 번호(애니메이션 수업은 단계를 묶은 번호)로 바꿔 질문 쪽 번호를 옮긴다
+    const files = fileNums(lesson);
+    const count = files.length;
+    const small = /[?&]sm=1/.test(lesson.slide_dir);
+    const both = (f) => [folder + f + ".jpg", ...(names.has(f + "s.jpg") ? [folder + f + "s.jpg"] : [])];
+    if (fix) {
+      // 파일이 남은 그림만 지금 순서대로 두고, 목록에 없는 번호 파일(이어 붙이다 멈춘 것)과
+      // 예전 방식 순서 저장이 남긴 임시 그림(m3.jpg)은 새 번호를 주어 맨 뒤에 붙인다
+      pages = files.map((f, i) => (names.has(f + ".jpg") ? i + 1 : 0)).filter(Boolean);
+      const nums = [...names].map((n) => /^(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => +m[1]);
+      const extra = nums.filter((n) => !files.includes(n)).sort((a, b) => a - b);
+      let free = Math.max(0, ...nums, ...files);
+      const temps = [...names].map((n) => /^m(\d+)\.jpg$/.exec(n)).filter(Boolean).map((m) => m[1]);
+      for (const t of temps) {
+        const to = ++free;
+        await Promise.all([st.move(folder + "m" + t + ".jpg", folder + to + ".jpg"), names.has("m" + t + "s.jpg") && st.move(folder + "m" + t + "s.jpg", folder + to + "s.jpg")]);
+        if (names.has("m" + t + "s.jpg")) names.add(to + "s.jpg");
+        extra.push(to);
+      }
+      for (const f of extra) { files.push(f); pages.push(files.length); }
+    }
+    // 슬라이드 번호(애니메이션 수업은 단계를 묶은 번호). 맨 뒤에 되살린 그림은 단계가 하나뿐인 슬라이드로 센다
     const steps = slideSteps(lesson);
-    const slides = [...new Set(order.map((n) => slideNo(lesson, n)))];
-    const newSlide = (s) => (s == null ? s : slides.indexOf(s) + 1);
+    const oldTotal = slideTotal(lesson);
+    const slideOf = (p) => (p <= count ? slideNo(lesson, p) : oldTotal + p - count);
+    const slides = [...new Set(pages.map(slideOf))];
+    const anim = steps ? slides.map((s) => Math.min(pages.filter((p) => slideOf(p) === s).length - 1, 35).toString(36)).join("") : "";
+    const newSlide = (s) => (s == null ? s : nearestKept(slides, s, oldTotal));
+    const keep = pages.map((p) => files[p - 1]);
+    const gone = files.filter((f, i) => !pages.includes(i + 1) && names.has(f + ".jpg"));
+    const base = lesson.slide_dir.split("?")[0];
+    // 그림 이름을 그대로 두므로 v 도 그대로(학생·교사 화면이 받아 둔 그림을 다시 받지 않게)
+    const v = (/[?&]v=(\d+)/.exec(lesson.slide_dir) || [])[1] || Date.now();
+    let dir = keep.length ? slideDirOf(lesson, base, { v, small: small && keep.every((f) => names.has(f + "s.jpg")), anim, files: keep }) : "";
+    let moved = 0, total = 0;
+    if (dir.length > 500) {
+      // 순서 목록이 너무 길면: 지울 그림을 먼저 지우고, 옮길 그림을 모두 임시 이름(m번호)으로 옮긴 뒤 1, 2, 3 … 으로 옮긴다
+      if (gone.length) await st.remove(gone.flatMap(both));
+      const moves = keep.map((f, i) => [f, i + 1]).filter(([f, to]) => f !== to);
+      total = moves.length * 2;
+      const run = async (list, from, to) => {
+        const waiting = list.slice();
+        await Promise.all(Array.from({ length: Math.min(4, waiting.length) }, async () => {
+          while (waiting.length) {
+            const [f, i] = waiting.shift();
+            await Promise.all([st.move(folder + from(f, i) + ".jpg", folder + to(f, i) + ".jpg"), names.has(f + "s.jpg") && st.move(folder + from(f, i) + "s.jpg", folder + to(f, i) + "s.jpg")]);
+            slideWork(ui, "슬라이드 순서를 저장하는 중 " + ++moved + " / " + total, moved, total);
+          }
+        }));
+      };
+      await run(moves, (f) => f, (f) => "m" + f);
+      await run(moves, (f) => "m" + f, (f, i) => i);
+      dir = slideDirOf(lesson, base, { v: Date.now(), small: small && keep.every((f) => names.has(f + "s.jpg")), anim });
+    }
     for (const a of activities) {
       if (a.page == null) continue;
-      const page = newSlide(a.page);
-      let to = a.page_to > a.page ? newSlide(a.page_to) : a.page_to ?? null;
+      const page = Math.min(newSlide(a.page), Math.max(slides.length, 1));
+      let to = a.page_to > a.page ? Math.min(newSlide(a.page_to), Math.max(slides.length, 1)) : a.page_to ?? null;
       if (to != null && to <= page) to = null;
       if (page === a.page && to === (a.page_to ?? null)) continue;
       const change = { page };
@@ -770,21 +746,28 @@ async function reorderSlides(order, ui) {
       Object.assign(editing, change);
       rebase(editing, (base) => Object.assign(base, change));
     }
-    const anim = steps ? slides.map((s) => Math.min(steps[s - 1] - 1, 35).toString(36)).join("") : "";
-    const small = /[?&]sm=1/.test(lesson.slide_dir);
-    const dir = withFx(lesson.slide_dir.split("?")[0] + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));
-    const change = { slide_dir: dir, page: order.indexOf(lesson.page) + 1 || 1 };
+    const change = { slide_dir: dir, slide_count: keep.length, page: Math.min(nearestKept(pages, lesson.page, count), Math.max(keep.length, 1)) };
     const u = await sb.from("lessons").update(change).eq("id", lesson.id);
     if (u.error) throw u.error;
-    // 수업 전체를 다시 불러오면 화면이 통째로 깜빡이므로 이 수업의 값만 바꾸고 칸 번호를 고친다
+    // 지운 그림 파일은 주소를 바꾼 뒤에 지운다(지우다 멈추면 남은 파일은 「번호 다시 맞추기」가 맨 뒤에 되살린다)
+    if (gone.length && !total) {
+      slideWork(ui, gone.length + "장의 그림 파일을 지우는 중…", 0, 1);
+      await st.remove(gone.flatMap(both));
+    }
+    // 수업 전체를 다시 불러오면 화면이 통째로 깜빡이므로, 순서만 바꿨으면 이 수업의 값만 바꾸고 칸 번호를 고친다
     Object.assign(lesson, change);
     const same = lessons.find((l) => l.id === lesson.id);
     if (same && same !== lesson) Object.assign(same, change);
     slideOrder = null;
     slideBusy = false;
-    ui.saved(order);
     selectedSlides.clear();
-    flash("슬라이드 순서를 저장했습니다.");
+    slidePicking = false;
+    flash(fix ? "슬라이드 번호를 맞췄습니다 (" + keep.length + "장)." : cut ? cut + "장을 지우고 슬라이드를 저장했습니다." : "슬라이드 순서를 저장했습니다.");
+    if (fix || cut) await loadLessons(lesson.id);
+    else {
+      document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = false; });
+      ui.saved(pages);
+    }
   } catch (e) {
     slideBusy = false;
     document.querySelectorAll(".thumb button, .slide-tools button").forEach((b) => { b.disabled = false; });
@@ -840,7 +823,7 @@ async function appendSlides(L, home, images, progress) {
   let st = home.store;
   if (home.folder !== folder) {
     st = await newSlideStore();
-    const names = Array.from({ length: L.slide_count }, (_, i) => i + 1).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
+    const names = fileNums(L).flatMap((n) => (small ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]));
     for (const [i, name] of names.entries()) {
       progress(i, names.length, "지금 슬라이드 복사하는 중");
       const r = await fetch(home.store.base + home.folder + name + (query ? "?" + query : ""));
@@ -848,18 +831,20 @@ async function appendSlides(L, home, images, progress) {
       await st.put(folder + name, await r.blob(), "image/jpeg");
     }
   }
-  const start = L.slide_count;
+  // 새 그림은 지금 가장 큰 파일 번호 다음부터(순서를 바꾼 수업은 파일 번호가 쪽 번호와 다르다)
+  const files = fileNums(L), start = Math.max(0, ...files);
   for (const [i, pair] of images.entries()) {
     progress(i, images.length, "올리는 중");
     await st.put(folder + (start + i + 1) + ".jpg", pair.big, "image/jpeg");
     await st.put(folder + (start + i + 1) + "s.jpg", pair.small, "image/jpeg");
+    files.push(start + i + 1);
   }
   progress(images.length, images.length, "올리는 중");
   // 단계 그림 수업이면 새 그림은 단계가 하나뿐인 슬라이드("0")로 덧붙인다
   const steps = slideSteps(L);
   const anim = steps ? steps.map((n) => Math.min(n - 1, 35).toString(36)).join("") + "0".repeat(images.length) : "";
-  const dir = withFx(st.base + folder + "{n}.jpg?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(L));
-  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: start + images.length }).eq("id", L.id);
+  const dir = slideDirOf(L, st.base + folder + "{n}.jpg", { v: Date.now(), small, anim, files });
+  const { error } = await sb.from("lessons").update({ slide_dir: dir, slide_count: files.length }).eq("id", L.id);
   if (error) throw error;
   return images.length;
 }
@@ -884,7 +869,7 @@ async function copySlideFiles(src, copy, progress) {
     const folder = slideFolder(copy);
     const tail = /(?:\{n\}\.jpg|deck\.pptx)(\?.*)?$/.exec(dir);
     const query = tail[1] || "";
-    const names = isPptx(src) ? ["deck.pptx"] : Array.from({ length: src.slide_count }, (_, i) => i + 1).flatMap((n) => /[?&]sm=1/.test(dir) ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]);
+    const names = isPptx(src) ? ["deck.pptx"] : fileNums(src).flatMap((n) => /[?&]sm=1/.test(dir) ? [n + ".jpg", n + "s.jpg"] : [n + ".jpg"]);
     let done = 0, next = 0;
     const worker = async () => {
       while (next < names.length) {

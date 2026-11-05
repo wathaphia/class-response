@@ -79,8 +79,6 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // 가입: 이메일 인증을 먼저 받으려고 계정을 임시 비밀번호로 만들고, 「가입하기」 때 입력한 비밀번호로 바꾼다. 메모리에만 있다(다시 보내도 Supabase 는 처음 비밀번호를 유지하므로 한 값만 쓴다)
 const tempPw = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
 let passwordChange = false;     // 프로필의 「비밀번호 재설정」을 눌러 변경 칸을 열었음(현재 비밀번호도 묻는다)
-let passwordRecovery = false;   // 비밀번호 재설정 메일의 링크로 들어옴: 로그인된 채로 「프로필」의 새 비밀번호 칸을 연다
-let booted = false;              // init 을 끝까지 마쳤는지(탭을 그릴 수 있는지)
 let screenChannel = null;
 let screenChannelKey = "";
 let screenChannelReady = null;
@@ -89,27 +87,22 @@ const screenWatchers = new Map();
 
 addEventListener("DOMContentLoaded", () => {
   if (!sb) return notConfigured(app);
-  sb.auth.onAuthStateChange((event) => {
-    if (event === "PASSWORD_RECOVERY") {
-      passwordRecovery = true;
-      if (booted) goTab("profile");   // 아직 시작 중이면 init 끝에서 연다
-    }
-  });
   init();
 });
 
 // ---------- 로그인 ----------
 // fresh: 방금 로그인 칸에서 들어옴. 아니면 저장된 로그인(자동 로그인·새로 고침)으로 들어온 것.
 async function init(fresh) {
+  if (authLink.get("type") === "recovery") return refuseOldResetLink();
+  if (resetLink.has("code")) return openResetLink(resetLink.get("code"));
   const { data } = await sb.auth.getSession();
-  if (authLink.get("type") === "signup" || authLink.get("error_code")) return showEmailVerified(!authLink.get("error_code"));
+  if (authLink.get("type") === "signup" || authLink.get("error_code") || resetLink.get("error_code")) return showEmailVerified(!authLink.get("error_code") && !resetLink.get("error_code"));
   if (!data.session) return showLogin();
   me = data.session.user;
   // 저장된 로그인은 서버에 계정이 아직 있는지 확인한다(지워진 계정이면 getUser 가 실패)
-  const gone = fresh || passwordRecovery ? null : (await sb.auth.getUser()).error;
+  const gone = fresh ? null : (await sb.auth.getUser()).error;
   const { data: ok, error } = gone ? { data: false, error: gone } : await sb.rpc("is_teacher");
   if (error || !ok) {
-    if (passwordRecovery) return showPasswordRecovery();   // 교사 화면을 못 쓰는 계정: 비밀번호만 바꾼다
     if (fresh !== true) return autoLoginFailed(gone ? "로그인하지 못했습니다: " + gone.message : "교사로 등록되지 않은 계정입니다. 개발자에게 문의해 주세요.");
     return app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
       h("h1", {}, "아직 교사로 승인되지 않았습니다"),
@@ -120,8 +113,6 @@ async function init(fresh) {
   await loadProfile();   // 개발자인지 알아야 탭 줄을 그린다
   loadTabCustom();
   await loadLessons(localStorage.getItem("cra-lesson"));
-  booted = true;
-  if (passwordRecovery) goTab("profile");   // 재설정 메일의 링크로 들어옴: 「프로필」의 새 비밀번호 칸으로
   document.addEventListener("keydown", (e) => {
     const el = document.activeElement;
     if (tab !== "run" || !lesson || /INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable) return;
@@ -140,7 +131,7 @@ async function autoLoginFailed(text) {
 
 // 인증 메일의 링크로 열린 창: 결과만 알리고 로그인은 남기지 않는다(가입은 원래 창의 「가입하기」로)
 async function showEmailVerified(ok) {
-  history.replaceState(null, "", location.pathname + location.search);
+  history.replaceState(null, "", location.pathname);
   await sb.auth.signOut({ scope: "local" }).catch(() => {});
   app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
     h("h1", {}, ok ? "이메일 인증이 완료되었습니다" : "인증하지 못했습니다"),
@@ -152,6 +143,15 @@ async function showEmailVerified(ok) {
 // 교사 화면은 teachers 표에 있는 이메일만 쓸 수 있다. 없는 이메일로 가입하면 개발자의 승인을 기다린다(request_teacher_signup).
 // 비밀번호 재설정 메일: 한 사람(이메일)이 하루(한국 시간) 3번까지, 3초 간격. 서버(claim_password_reset)가 세고 쓴 횟수를 돌려준다.
 const RESET_COOLDOWN = 3;
+// 재설정 링크는 PKCE: 메일을 요청한 브라우저에만 남는 확인 값(code verifier)이 있어야 열린다 → 링크가 새어도 다른 기기·브라우저에서는 쓸 수 없다.
+// 링크로 들어와도 교사 화면에는 로그인하지 않는다(따로 쓰는 sbReset 에만 잠깐 로그인해 새 비밀번호만 저장하고 바로 로그아웃).
+// 확인 값은 메일을 연 새 탭에서도 읽혀야 하므로 자동 로그인과 상관없이 localStorage 에 둔다.
+const RESET_KEY = "cra-reset";
+const resetLink = new URLSearchParams(location.search);   // 링크가 돌려보낸 ?code=…(교사 화면은 다른 곳에서 주소 ? 뒤를 쓰지 않는다)
+const resetStore = { getItem(k) { try { return localStorage.getItem(k); } catch { return null; } }, setItem(k, v) { try { localStorage.setItem(k, v); } catch {} }, removeItem(k) { try { localStorage.removeItem(k); } catch {} } };
+if (!resetLink.has("code")) for (const k of [RESET_KEY, RESET_KEY + "-user"]) resetStore.removeItem(k);   // 끝내지 않은 재설정 로그인은 버린다(확인 값은 남김)
+const sbReset = sb && supabase.createClient(SB_URL, String(SUPABASE_KEY).trim(), { global: { fetch: watchedFetch },
+  auth: { flowType: "pkce", storageKey: RESET_KEY, storage: resetStore, detectSessionInUrl: false, autoRefreshToken: false } });
 async function sendResetMail(address, btn, msgEl) {
   const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
   btn.disabled = true;
@@ -164,7 +164,7 @@ async function sendResetMail(address, btn, msgEl) {
     if (q.reason === "limit") { msgEl.textContent = "오늘은 더 보낼 수 없습니다(" + count + "). 내일 다시 해 주세요."; return; }
     if (q.reason === "cooldown") { msgEl.textContent = "3초 뒤에 다시 눌러 주세요(" + count + ")."; return; }
     msgEl.textContent = "재설정 메일을 보내는 중…";
-    const { error } = await sb.auth.resetPasswordForEmail(address, { redirectTo: new URL(location.pathname, location.origin).href });
+    const { error } = await sbReset.auth.resetPasswordForEmail(address, { redirectTo: new URL(location.pathname, location.origin).href });
     if (!error) { msgEl.textContent = "메일함에서 비밀번호 재설정 링크를 확인해 주세요(30분 동안 쓸 수 있습니다). · " + count; return; }
     // 메일이 안 나갔으면 받아 간 한 번을 돌려준다(안 보낸 것만 지워짐)
     const { data: back } = await sb.rpc("release_password_reset", { p_email: address });
@@ -350,6 +350,29 @@ function showLogin(signup) {
   email.focus();
 }
 
+// 재설정 메일의 링크(?code=…): 이 브라우저에 남긴 확인 값으로 code 를 바꿔야 새 비밀번호 칸이 열린다
+async function openResetLink(code) {
+  resetLink.delete("code");   // 로그인 뒤 init 이 다시 불려도 한 번만
+  const { error } = await sbReset.auth.exchangeCodeForSession(code);   // 주소의 흐름 번호도 읽으므로 주소는 그다음에 지운다
+  history.replaceState(null, "", location.pathname);
+  if (!error) return showPasswordRecovery();
+  const otherBrowser = error.name === "AuthPKCECodeVerifierMissingError";
+  resetLinkRefused(otherBrowser ? "보안을 위해 재설정 메일을 요청한 브라우저(같은 기기·같은 브라우저)에서만 링크가 열립니다. 그 브라우저에서 링크를 다시 열거나, 이 브라우저에서 메일을 다시 받아 주세요."
+    : "만료되었거나 이미 사용한 링크입니다. 로그인 화면에서 재설정 메일을 다시 받아 주세요.");
+}
+// 예전 방식(주소 # 에 로그인 정보가 붙은) 재설정 링크: 바로 로그인되므로 쓰지 않는다
+async function refuseOldResetLink() {
+  history.replaceState(null, "", location.pathname);
+  authLink.delete("type");
+  await sb.auth.signOut({ scope: "local" }).catch(() => {});
+  resetLinkRefused("예전 방식의 재설정 링크라 쓸 수 없습니다. 로그인 화면에서 재설정 메일을 다시 받아 주세요.");
+}
+function resetLinkRefused(text) {
+  app.replaceChildren(h("main", { class: "narrow" }, h("section", { class: "card stack" },
+    h("h1", {}, "이 링크로는 비밀번호를 바꿀 수 없습니다"), h("p", {}, text),
+    h("button", { class: "primary big", type: "button", onclick: () => showLogin() }, "로그인으로 이동"))));
+}
+
 function showPasswordRecovery() {
   const password = h("input", { type: "password", autocomplete: "new-password", required: true });
   const confirm = h("input", { type: "password", autocomplete: "new-password", required: true });
@@ -365,13 +388,12 @@ function showPasswordRecovery() {
           return;
         }
         msg.textContent = "비밀번호를 저장하는 중…";
-        const { error } = await sb.auth.updateUser({ password: password.value });
+        const { error } = await sbReset.auth.updateUser({ password: password.value });
         if (error) {
           msg.textContent = "비밀번호를 저장하지 못했습니다: " + error.message;
           return;
         }
-        passwordRecovery = false;
-        await sb.auth.signOut();
+        await sbReset.auth.signOut().catch(() => {});
         app.replaceChildren(h("main", { class: "narrow" },
           h("section", { class: "card stack" },
             h("h1", {}, "비밀번호를 변경했습니다."),
@@ -379,7 +401,8 @@ function showPasswordRecovery() {
             h("button", { class: "primary big", type: "button", onclick: showLogin }, "로그인으로 이동"))));
       },
     }, h("label", {}, "새 비밀번호", password), h("label", {}, "새 비밀번호 확인", confirm),
-      h("button", { class: "primary big", type: "submit" }, "비밀번호 저장"), msg)));
+      h("button", { class: "primary big", type: "submit" }, "비밀번호 저장"),
+      h("button", { class: "ghost", type: "button", async onclick() { await sbReset.auth.signOut().catch(() => {}); showLogin(); } }, "취소"), msg)));
 }
 
 // ---------- 데이터 ----------
