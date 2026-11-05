@@ -589,12 +589,12 @@ grant execute on function create_lesson(text, text) to authenticated;
 grant execute on function is_teacher() to authenticated;
 
 -- ------------------------------------------------------------
--- 슬라이드 저장소(그림·PPTX): 누구나 주소로 볼 수 있고(학생 화면), 교사만 올리고 지운다.
+-- 슬라이드 저장소(그림·PPTX·원본 PDF): 누구나 주소로 볼 수 있고(학생 화면), 교사만 올리고 지운다.
 -- ------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-  values ('slides', 'slides', true, 52428800, array['image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'])
+  values ('slides', 'slides', true, 52428800, array['image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/pdf'])
   on conflict (id) do update set public = true, file_size_limit = 52428800,
-    allowed_mime_types = array['image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'];
+    allowed_mime_types = array['image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/pdf'];
 
 drop policy if exists slides_teacher_read on storage.objects;
 drop policy if exists slides_teacher_insert on storage.objects;
@@ -1022,18 +1022,25 @@ end $$;
 drop trigger if exists lessons_owner_guard on lessons;
 create trigger lessons_owner_guard before update of owner on lessons for each row execute function lessons_owner_guard();
 
--- 3) Supabase 슬라이드 저장소: 올리기·고치기는 자기 폴더(교사 id/수업 id/)만, 지우기는 자기 폴더 또는 손댈 수 있는 수업 폴더
+-- 3) Supabase 슬라이드 저장소: 올리기·고치기·지우기는 자기 폴더(교사 id/수업 id/) 또는 손댈 수 있는 수업(주인·공동 작업자·개발자)의 폴더
+--    공동 작업자도 주인이 올린 그 수업 폴더를 그대로 고친다(사본을 만들지 않는다)
+create or replace function can_slide_path(p_name text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select is_teacher() and ((storage.foldername(p_name))[1] = auth.uid()::text or is_admin()
+    or exists (select 1 from lessons l where l.id::text = (storage.foldername(p_name))[2] and can_lesson(l.id)))
+$$;
+revoke all on function can_slide_path(text) from public, anon;
+grant execute on function can_slide_path(text) to authenticated;
 drop policy if exists slides_teacher_insert on storage.objects;
 drop policy if exists slides_teacher_update on storage.objects;
 drop policy if exists slides_teacher_delete on storage.objects;
 create policy slides_teacher_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()));
+  with check (bucket_id = 'slides' and can_slide_path(name));
 create policy slides_teacher_update on storage.objects for update to authenticated
-  using (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()))
-  with check (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()));
+  using (bucket_id = 'slides' and can_slide_path(name))
+  with check (bucket_id = 'slides' and can_slide_path(name));
 create policy slides_teacher_delete on storage.objects for delete to authenticated
-  using (bucket_id = 'slides' and is_teacher() and ((storage.foldername(name))[1] = auth.uid()::text or is_admin()
-    or exists (select 1 from lessons l where l.id::text = (storage.foldername(name))[2] and can_lesson(l.id))));
+  using (bucket_id = 'slides' and can_slide_path(name));
 
 -- 학생용 기본 수업: 개발자가 「전체 수업」에서 별로 고른 수업 하나. 학생 화면은 주소에 ?c= 가 없으면 이 코드를 미리 넣는다.
 create table if not exists student_default (

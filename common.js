@@ -661,6 +661,88 @@ document.addEventListener("error", (e) => {
   if (big !== img.src) img.src = big;
 }, true);
 
+// pdf: 올린 원본 PDF 목록. 「k-n」 = 같은 폴더의 k.pdf 가 파일 번호 k … k+n-1 그림의 원본(36진수, 「.」로 나눔)
+function slidePdfs(lesson) {
+  const m = /[?&]pdf=([0-9a-z.-]+)/.exec(lesson.slide_dir || "");
+  return m ? m[1].split(".").map((t) => t.split("-").map((x) => parseInt(x, 36))).filter(([k, n]) => k > 0 && n > 0).map(([k, n]) => ({ k, n })) : [];
+}
+const pdfText = (pdfs) => pdfs.map(({ k, n }) => k.toString(36) + "-" + n.toString(36)).join(".");
+
+// 「슬라이드 PDF 받기」(교사·학생 공용): 지금 순서·지우기·이어 붙이기를 그대로 따른다.
+// 원본 PDF에서 온 쪽은 그 PDF의 쪽을 그대로 옮겨(글자·도형이 그림으로 바뀌지 않아 화질 그대로), 나머지 쪽(그림·PPTX로 올린 것)은 큰 그림으로 넣는다.
+// 애니메이션 단계 그림이 있는 수업은 슬라이드마다 마지막 단계만.
+const PDF_LIB = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js";
+async function loadPdfLib() {
+  if (!window.PDFLib) {
+    await new Promise((ok, fail) => document.head.append(h("script", { src: PDF_LIB, onload: ok, onerror: () => fail(new Error("PDF 도구를 불러오지 못했습니다")) })));
+  }
+  return window.PDFLib;
+}
+function pdfPages(l) {
+  const steps = slideSteps(l);
+  if (!steps) return Array.from({ length: l.slide_count }, (_, i) => i + 1);
+  let first = 1;
+  return steps.map((n) => { const p = first + n - 1; first += n; return p; });
+}
+async function exportSlidesPdf(l, msg) {
+  if (!l.slide_count) { msg.textContent = "슬라이드가 없는 수업입니다."; return; }
+  if (isPptx(l)) { msg.textContent = "PowerPoint 파일 그대로 올린 수업은 여기서 PDF로 바꿀 수 없습니다. PowerPoint에서 PDF로 저장해 주세요."; return; }
+  try {
+    const { PDFDocument } = await loadPdfLib();
+    const doc = await PDFDocument.create();
+    const pages = pdfPages(l);
+    const files = slideFiles(l);
+    const pdfs = slidePdfs(l);
+    const base = l.slide_dir.trim().split("{n}")[0];
+    const v = (/[?&]v=(\d+)/.exec(l.slide_dir) || [])[1];
+    const srcDocs = new Map();   // k → 원본 PDF(못 받으면 null → 그 쪽들은 그림으로)
+    const srcOf = async (k) => {
+      if (!srcDocs.has(k)) {
+        srcDocs.set(k, (async () => {
+          try {
+            const r = await fetch(encodeURI(base + k + ".pdf" + (v ? "?v=" + v : "")));
+            return r.ok ? await PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true }) : null;
+          } catch { return null; }
+        })());
+      }
+      return srcDocs.get(k);
+    };
+    const miss = [];   // 저장소에 그림이 없는 쪽(지우기·순서 저장이 중간에 멈춘 수업)은 빼고 만든다
+    let vector = 0;
+    for (const [i, pg] of pages.entries()) {
+      msg.textContent = "PDF 만드는 중 " + (i + 1) + " / " + pages.length;
+      const f = l.slide_dir.includes("{n}") ? (files || [])[pg - 1] || pg : pg;
+      const from = pdfs.find(({ k, n }) => f >= k && f < k + n);
+      const src = from && (await srcOf(from.k));
+      if (src && f - from.k < src.getPageCount()) {
+        const [page] = await doc.copyPages(src, [f - from.k]);
+        doc.addPage(page);
+        vector++;
+        continue;
+      }
+      const r = await fetch(slideSrc(l, pg));
+      const blob = r.ok ? await r.blob() : null;
+      if (!blob || !/^image\//.test(blob.type)) { miss.push(slideNo(l, pg)); continue; }
+      const bytes = await blob.arrayBuffer();
+      const img = /png/i.test(blob.type) ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+      // 그림 쪽은 PowerPoint 기본 크기처럼 가로 960pt(13.33인치)로
+      const w = 960, hh = Math.round((960 * img.height) / img.width);
+      doc.addPage([w, hh]).drawImage(img, { x: 0, y: 0, width: w, height: hh });
+    }
+    if (!doc.getPageCount()) throw new Error("슬라이드 그림을 하나도 받지 못했습니다");
+    const url = URL.createObjectURL(new Blob([await doc.save()], { type: "application/pdf" }));
+    const a = h("a", { href: url, download: (l.title || l.code).replace(/[\\/:*?"<>|]/g, "_") + "_슬라이드.pdf" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    msg.textContent = "PDF를 받았습니다 (" + doc.getPageCount() + "쪽" + (vector ? ", 원본 PDF 화질 " + vector + "쪽" : "") + ")."
+      + (miss.length ? " " + miss.join(", ") + "번 슬라이드는 그림이 저장소에 없어 뺐습니다." : "");
+  } catch (e) {
+    msg.textContent = "PDF를 만들지 못했습니다: " + (e.message || e);
+  }
+}
+
 function isPptx(lesson) { return (lesson.slide_dir || "").startsWith("pptx:"); }
 function pptxUrl(lesson, page) {
   const src = lesson.slide_dir.slice(5).split("?")[0];
