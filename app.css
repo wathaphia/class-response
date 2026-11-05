@@ -814,7 +814,11 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .thumbs:not(.picking) .thumb-hitbox:hover { border-color: rgba(36, 86, 214, .45); }
 .thumb.viewing:not(.selected) .thumb-hitbox { border-color: var(--accent); }
 .slide-tools { flex-wrap: nowrap; }
-.slide-tools .bulk-del { width: 13em; white-space: nowrap; flex: none; }
+.slide-tools .bulk-del { width: 13em; white-space: nowrap; flex: none; background: #fff; color: var(--bad); border: 1px solid #f0a39b; }
+.slide-tools .bulk-del:hover:not(:disabled) { filter: none; background: #fde7e5; border-color: var(--bad); }
+/* 고르는 중: 진한 빨강(지우는 단추임이 분명하게) */
+.slide-tools .bulk-del.on { background: var(--bad); color: #fff; border-color: var(--bad); }
+.slide-tools .bulk-del.on:hover:not(:disabled) { background: #912018; }
 .slide-tools .cancel-pick, .slide-tools .save-order { flex: none; }
 .slide-tools > .grow { flex: 1 1 0; min-width: 0; }   /* 「삭제할 슬라이드 선택하기」 ↔ 「선택한 슬라이드 삭제 (n)」 너비 고정 */
 .sorting .thumb { cursor: grabbing; }
