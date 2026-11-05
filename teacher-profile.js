@@ -25,6 +25,13 @@ async function loadProfile() {
   paintPeople();
 }
 
+// 학생용 링크: 개발자는 예전 주소 그대로, 다른 선생님은 주소 끝에 아이디(404.html 이 학생용 페이지로 옮겨 준다). t = 프로필 또는 선생님 목록의 한 줄
+function studentLinkOf(t) { return new URL(".", location.href).href + (t.admin || !t.link ? "" : t.link); }
+function copyButton(text) {
+  return h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(text).then(() => { e.target.textContent = "복사했습니다"; }, () => prompt("복사해 쓰세요.", text)); } }, "복사");
+}
+const starText = (s) => (s ? s.title + " (" + s.code + ")" : "고른 수업 없음");
+
 const dateText = (t) => (t ? new Date(t).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 function paintProfile() {
@@ -33,8 +40,9 @@ function paintProfile() {
   const p = profile && !profile.error ? profile : null;
   const email = (p && p.email) || me.email || "";
   const info = (label, value) => h("div", { class: "profile-row" }, h("dt", {}, label), h("dd", {}, value));
-  const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code),
-    h("button", { class: "link", type: "button", onclick(e) { navigator.clipboard.writeText(p.code).then(() => { e.target.textContent = "복사했습니다"; }, () => prompt("복사해 쓰세요.", p.code)); } }, "복사")) : "—";
+  const idBox = p ? h("span", { class: "teacher-id" }, h("strong", {}, p.code), copyButton(p.code)) : "—";
+  const link = p ? studentLinkOf(p) : "";
+  const linkBox = p ? h("span", { class: "teacher-id student-link" }, h("a", { href: link, target: "_blank", rel: "noopener" }, link), copyButton(link)) : "—";
   // 재설정 메일의 링크로 들어옴(로그인된 채) 또는 프로필의 「비밀번호 재설정」: 여기서 새 비밀번호를 정한다. 프로필에서 열면 현재 비밀번호도 확인한다
   const pw0 = passwordChange && !passwordRecovery ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
   const pw1 = h("input", { type: "password", autocomplete: "new-password", minlength: 6, required: true });
@@ -82,6 +90,8 @@ function paintProfile() {
       profile && profile.error ? h("p", { class: "error small" }, "프로필을 불러오지 못했습니다: " + profile.error) : null,
       h("dl", { class: "profile-info" },
         info("교사 ID", idBox),
+        info("학생용 링크", linkBox),
+        info("별표 수업", p ? starText(p.star) : "—"),
         info("이메일", email),
         info("계정 만든 날", dateText(me.created_at)),
         info("마지막 로그인", dateText(me.last_sign_in_at)),
@@ -411,17 +421,20 @@ function teachersCard(p) {
   };
   // 입력란·단추는 칸 위에 띄워(.add-line) 열 너비·줄 높이·다른 요소 위치가 바뀌지 않게 한다. 숨은 「추가」 글자가 줄 높이를 잡는다
   const addRow = h("tr", { class: "add-row" }, h("td", { class: "pick" }),
-    h("td", { class: "add-cell", colspan: 7 }, h("span", { class: "add-spacer", "aria-hidden": "true" }, "추가"), h("div", { class: "add-line" }, addBtn, newEmail, cancelBtn)));
+    h("td", { class: "add-cell", colspan: 9 }, h("span", { class: "add-spacer", "aria-hidden": "true" }, "추가"), h("div", { class: "add-line" }, addBtn, newEmail, cancelBtn)));
   return h("section", { class: "card stack teachers-card" },
     h("h3", {}, "선생님 관리"),
     bulkBar(picked, ids, repaint, h("button", { class: "ghost small danger", type: "button", onclick: devOnly(removeMany) }, "빼기" + (picked.size ? " (" + picked.size + ")" : ""))),
     h("div", { class: "table-wrap" }, h("table", { class: "teachers-table" },
-      h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "직위", "수업", "마지막 로그인", "오늘 비밀번호 재설정", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, pickHead(picked, ids, repaint), ["ID", "이메일", "직위", "수업", "학생용 링크", "별표 수업", "마지막 로그인", "오늘 비밀번호 재설정", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, (p.teachers || []).map((t) => h("tr", { class: picked.has(t.email) ? "picked-row" : null },
         t.admin ? h("td", { class: "pick" }) : pickCell(picked, t.email, t.email, repaint),
         h("td", {}, t.code), h("td", {}, t.email),
         h("td", {}, t.admin ? h("span", { class: "tag warn" }, "개발자") : roleSwitch(t)),
-        h("td", {}, t.lessons + "개"), h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"), resetCell(t),
+        h("td", {}, t.lessons + "개"),
+        h("td", { class: "link-cell" }, h("a", { href: studentLinkOf(t), target: "_blank", rel: "noopener" }, t.admin ? "(기본 주소)" : t.link || "—")),
+        h("td", { class: "star-cell" }, starText(t.star)),
+        h("td", {}, t.last_sign_in ? dateText(t.last_sign_in) : "로그인 안 함"), resetCell(t),
         h("td", {}, t.admin ? null : h("button", { class: "link danger", type: "button", onclick: devOnly(() => set(t.email, false)) }, "빼기")))),
         addRow))),
     h("div", { class: "stack" }, h("h4", {}, "승인 대기 중 (" + requests.length + ")"),

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학생용</title>
+</head>
+<body>
+  <p id="msg">불러오는 중…</p>
+  <script>
+    // 선생님별 학생용 링크(…/class-response/아이디)는 실제 파일이 없어 GitHub Pages 가 이 쪽을 보낸다 → 학생용 페이지(?t=아이디)로 옮긴다
+    (function () {
+      var p = location.pathname.replace(/\/+$/, ""), i = p.lastIndexOf("/"), id = p.slice(i + 1);
+      if (/^[A-Za-z0-9]{1,30}$/.test(id)) {
+        var q = new URLSearchParams(location.search);
+        q.set("t", id.toLowerCase());
+        location.replace(p.slice(0, i + 1) + "?" + q);
+      } else document.getElementById("msg").textContent = "없는 주소입니다. 주소를 다시 확인해 주세요.";
+    })();
+  </script>
+</body>
+</html>

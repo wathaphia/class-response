@@ -392,24 +392,25 @@ async function loadPdfJs() {
   return window.pdfjsLib;
 }
 
-// 학생 기기로 내려가는 그림 크기: 1280px·품질 0.72면 글씨는 또렷하고 1600px·0.85의 약 3분의 1 크기다(Supabase 전송량 절약)
-const SLIDE_WIDTH = 1280;
-const SLIDE_QUALITY = 0.72;
+// 큰 그림(n.jpg)은 교사 화면(TV·프로젝터)과 학생의 「크게 보기」에만 쓴다: 1920px·품질 0.82(2026-11-05, 1280px·0.72는 큰 화면에서 흐렸다)
+const SLIDE_WIDTH = 1920;
+const SLIDE_QUALITY = 0.82;
 
-// 학생 기기·썸네일용 작은 그림(n s.jpg): 휴대폰·태블릿 화면에는 1024px이면 충분하고 1280px보다 약 35% 작다
+// 학생 기기·썸네일용 작은 그림(n s.jpg): 휴대폰·태블릿 화면에는 1024px·0.72면 충분하다(학생 수만큼 내려가므로 작게)
 const SMALL_WIDTH = 1024;
+const SMALL_QUALITY = 0.72;
 
-function canvasToJpeg(canvas) {
-  return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("그림으로 바꾸지 못했습니다"))), "image/jpeg", SLIDE_QUALITY));
+function canvasToJpeg(canvas, quality) {
+  return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("그림으로 바꾸지 못했습니다"))), "image/jpeg", quality));
 }
-// 한 쪽 → { big: 1280px, small: 1024px } JPG
+// 한 쪽 → { big: 1920px, small: 1024px } JPG
 async function slidePair(canvas) {
   const scale = Math.min(1, SMALL_WIDTH / canvas.width);
   const c = h("canvas", { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
   const ctx = c.getContext("2d");
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(canvas, 0, 0, c.width, c.height);
-  const pair = { big: await canvasToJpeg(canvas), small: await canvasToJpeg(c) };
+  const pair = { big: await canvasToJpeg(canvas, SLIDE_QUALITY), small: await canvasToJpeg(c, SMALL_QUALITY) };
   canvas.width = canvas.height = c.width = c.height = 0;
   return pair;
 }
