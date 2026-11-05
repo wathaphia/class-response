@@ -104,7 +104,10 @@ function slidesCard() {
   const queue = [];   // 올릴 파일들(올릴 순서)
   const list = h("ol", { class: "upload-list" });
   const btn = h("button", { class: "primary", type: "button", disabled: true });
-  const btnName = lesson.slide_count && !isPptx(lesson) ? "맨 뒤에 이어 붙이기" : "올리기";
+  const canAppend = lesson.slide_count && !isPptx(lesson);
+  const btnName = canAppend ? "맨 뒤에 이어 붙이기" : "올리기";
+  // 「기존 슬라이드 대체하기」: 이어 붙일 수 있는 자료에서만 보인다(그 밖에는 「올리기」가 이미 바꾸기)
+  const replaceBtn = canAppend ? h("button", { class: "ghost", type: "button", disabled: true }, "기존 슬라이드 대체하기") : null;
   const paintQueue = () => {
     list.replaceChildren(...queue.map((f, k) => h("li", {},
       h("span", { class: "grow" }, f.name),
@@ -112,6 +115,7 @@ function slidesCard() {
     list.hidden = !queue.length;
     btn.disabled = !queue.length;
     btn.textContent = btnName + (queue.length ? " (" + queue.length + "개)" : "");
+    if (replaceBtn) replaceBtn.disabled = !queue.length;
   };
   const add = (files) => {
     const ok = files.filter(isSlideFile).sort((a, b) => a.name.normalize("NFC").localeCompare(b.name.normalize("NFC"), "ko", { numeric: true }));
@@ -130,26 +134,28 @@ function slidesCard() {
     ondrop(ev) { ev.preventDefault(); ev.stopPropagation(); dropBox.classList.remove("over"); add([...ev.dataTransfer.files]); } },
     h("strong", {}, "파일을 이 상자에 끌어다 놓으세요"),
     h("span", { class: "muted small" }, "또는 눌러서 고르기 · 여러 개를 한 번에 넣을 수 있고, 넣은 순서대로 슬라이드가 됩니다"));
-  const upload = async () => {
+  const upload = async (replace) => {
     if (!queue.length) { status.textContent = "PPTX, PDF 또는 그림 파일을 먼저 넣으세요."; return; }
     if (btn.disabled) return;
-    btn.disabled = true;
+    const busy = (on) => { btn.disabled = on; if (replaceBtn) replaceBtn.disabled = on; };
+    busy(true);
     bar.hidden = false;
     try {
       const n = await uploadSlides(queue.slice(), (done, total, what) => {
         bar.max = total;
         bar.value = done;
         status.textContent = what + " " + done + " / " + total;
-      });
-      if (n == null) { btn.disabled = false; bar.hidden = true; return; }   // 바꾸기 확인에서 취소
+      }, replace);
+      if (n == null) { busy(false); bar.hidden = true; return; }   // 바꾸기 확인에서 취소
       flash("슬라이드 " + n + "장을 올렸습니다.");
       await loadLessons(lesson.id);
     } catch (e) {
       status.textContent = "올리지 못했습니다: " + (e.message || e);
-      btn.disabled = false;
+      busy(false);
     }
   };
-  btn.addEventListener("click", upload);
+  btn.addEventListener("click", () => upload(false));
+  if (replaceBtn) replaceBtn.addEventListener("click", () => upload(true));
   const thumbs = h("div", { class: "thumbs" });
   // 작은 그림은 오른쪽 스크롤 상자에서 보일 즈음 받는다. 브라우저의 loading="lazy" 는 고정된 칸 안 스크롤 상자에서
   // 그림을 받지 않고 비워 두는 경우가 있어 직접 지켜본다
@@ -230,6 +236,7 @@ function slidesCard() {
     pvWhere.textContent = slideLabel(lesson, to);
     paintViewing();
   };
+  slideEditStep = lesson.slide_count && !ppt ? (k) => pvShow(pvAt + k) : null;   // 좌우 화살표 키(아래 keydown)
   // 오른쪽 그림을 누르면 효과 없이 바로 그 그림으로
   const pvJump = (to) => {
     if (ppt || !lesson.slide_count) return;
@@ -342,8 +349,8 @@ function slidesCard() {
     ondragover(ev) { if (hasFiles(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = "none"; } },
     ondrop(ev) { ev.preventDefault(); } },
     h("h2", {}, "슬라이드 " + (lesson.slide_count ? slideTotal(lesson) + "장" + (anim ? " (애니메이션 단계 그림 " + lesson.slide_count + "장)" : "") : "없음")),
-    h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. PDF·그림은 여러 개를 함께 올릴 수 있고, 넣은 순서대로(한 번에 고른 파일끼리는 이름순) 슬라이드가 됩니다. 슬라이드가 이미 있으면 맨 뒤에 이어 붙습니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
-    file, dropBox, list, h("div", { class: "row" }, btn), bar, status,
+    h("p", { class: "muted small" }, "PowerPoint 파일(PPTX), PDF 파일, 그림 파일(PNG·JPG)을 올릴 수 있습니다. PPTX는 애니메이션을 살려 보여 주고, PDF는 쪽마다 그림으로 바뀝니다. PDF·그림은 여러 개를 함께 올릴 수 있고, 넣은 순서대로(한 번에 고른 파일끼리는 이름순) 슬라이드가 됩니다. 슬라이드가 이미 있으면 맨 뒤에 이어 붙고, 「기존 슬라이드 대체하기」를 누르면 지금 슬라이드를 모두 지우고 새 파일로 바꿉니다. 예전 형식(PPT)은 PowerPoint에서 PPTX로 다시 저장해 올리세요."),
+    file, dropBox, list, h("div", { class: "row" }, btn, replaceBtn), bar, status,
     anim ? h("p", { class: "muted small" }, "애니메이션 단계 그림 자료입니다(교사 PC의 올리기 도구로 올림). 수업 진행에서 「애니메이션」 버튼으로 클릭 단계를 넘깁니다. 아래 미리보기에서 단계 그림을 골라 지울 수 있고, 한 슬라이드의 단계를 모두 지우면 그 슬라이드가 빠집니다.") : null,
     ppt ? h("p", { class: "muted small" }, "지금은 PPTX 자료입니다. 쪽 미리보기와 쪽 삭제는 PDF·그림으로 올린 자료에서만 쓸 수 있습니다. PPTX 자료는 이어 붙일 수 없어서, 파일을 올리면 지금 자료가 새 파일로 바뀝니다.") : null);
   return { mainCard, allCard, fxCard: lesson.slide_count && !ppt ? fxBox : null };
@@ -532,6 +539,14 @@ async function cleanSlideFolder(old, store, folder, keep) {
 // k 가 없으면(번호 다시 맞추기) 아무것도 지우지 않고 번호만 맞춘다.
 let slideBusy = false;
 const selectedSlides = new Set();
+let slideEditStep = null;   // 슬라이드 편집 미리보기를 k칸 넘기기(slidesCard 가 정한다)
+// 슬라이드 편집 탭에서 좌우 화살표(PageUp/Down)로 위 미리보기를 넘긴다(입력 칸에 있을 땐 그대로)
+document.addEventListener("keydown", (e) => {
+  const el = document.activeElement;
+  if (tab !== "settings" || !slideEditStep || /INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable) return;
+  const k = slideKey(e);
+  if (k) { e.preventDefault(); slideEditStep(k); }
+});
 let slidePicking = false;   // 「삭제할 슬라이드 선택하기」를 눌러 지울 슬라이드를 고르는 중
 let slideOrder = null;   // 끌어서 바꾸고 아직 저장하지 않은 순서 { id, dir, order: 새 순서의 예전 그림 번호들 }
 addEventListener("beforeunload", (ev) => { if (slideOrder) ev.preventDefault(); });
@@ -556,6 +571,7 @@ function setSlideSelection(page, selected, figure, checkbox, hitbox) {
 function paintBulk(bulk = document.querySelector(".slide-tools .bulk-del")) {
   if (!bulk) return;
   bulk.disabled = slidePicking && !selectedSlides.size;
+  bulk.classList.toggle("on", slidePicking);
   bulk.textContent = slidePicking ? "선택한 슬라이드 삭제 (" + selectedSlides.size + ")" : "삭제할 슬라이드 선택하기";
 }
 
@@ -739,19 +755,22 @@ async function reorderSlides(order, ui) {
   }
 }
 
-async function uploadSlides(files, progress) {
+// replace: 「기존 슬라이드 대체하기」(이어 붙이지 않고 지금 슬라이드를 모두 지운 뒤 새 파일로)
+async function uploadSlides(files, progress, replace = false) {
   const L = lesson;   // 올리는 동안 다른 수업을 골라도 처음 수업에 저장
   if (files.some((f) => /\.ppt$/i.test(f.name))) throw new Error("예전 PowerPoint 형식(PPT)은 올릴 수 없습니다. PowerPoint에서 파일 → 다른 이름으로 저장 → PPTX로 저장해 올리세요.");
   const pptx = files.filter((f) => /\.pptx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   if (pptx.length) {
     if (pptx.length !== 1 || files.length !== 1) throw new Error("PPTX는 한 번에 하나만 올릴 수 있습니다.");
-    if (L.slide_count && !confirm("PPTX 파일은 이어 붙일 수 없어서 지금 슬라이드를 이 파일로 바꿉니다. 계속할까요?")) return null;
+    if (replace) { if (!confirm(replaceNote(L))) return null; }
+    else if (L.slide_count && !confirm("PPTX 파일은 이어 붙일 수 없어서 지금 슬라이드를 이 파일로 바꿉니다. 계속할까요?")) return null;
     return uploadPptx(pptx[0], progress, L);
   }
   // 그림 슬라이드가 이미 있으면 맨 뒤에 이어 붙인다. PPTX 자료(또는 위치를 모르는 자료)만 새 파일로 바꾼다
   const home = slideHome(L);
-  const append = L.slide_count && !isPptx(L) && home;
-  if (L.slide_count && !append && !confirm("지금 자료에는 이어 붙일 수 없어서 슬라이드를 새 파일로 바꿉니다. 계속할까요?")) return null;
+  const append = !replace && L.slide_count && !isPptx(L) && home;
+  if (replace && L.slide_count && !confirm(replaceNote(L))) return null;
+  if (!replace && L.slide_count && !append && !confirm("지금 자료에는 이어 붙일 수 없어서 슬라이드를 새 파일로 바꿉니다. 계속할까요?")) return null;
   const images = await toSlideImages(files, progress);
   if (append) return appendSlides(L, home, images, progress);
   const folder = slideFolder(L);
@@ -770,6 +789,8 @@ async function uploadSlides(files, progress) {
   await cleanSlideFolder(old, store, folder, (n) => { const m = /^(\d+)s?\.jpg$/.exec(n); return !!m && +m[1] <= images.length; });
   return images.length;
 }
+
+const replaceNote = (L) => "지금 슬라이드 " + slideTotal(L) + "장을 모두 지우고 새로 올린 슬라이드로 바꿉니다. 지운 슬라이드는 되돌릴 수 없습니다. 계속할까요?";
 
 // 이어 붙이기: 새 그림을 지금 마지막 번호 다음부터 올린다(지금 쪽·질문 쪽 번호는 그대로).
 // 복제해 온 그림(다른 수업 폴더)이면 지금 그림을 먼저 이 수업 폴더로 복사해 원래 수업은 건드리지 않는다.
