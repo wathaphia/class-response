@@ -889,7 +889,7 @@ function openBugs() {
         text, h("div", { class: "row" }, send, full ? h("span", { class: "muted small" }, "5개를 다 썼습니다. 예전 제보를 고치거나 지우면 새로 쓸 수 있습니다.") : null), msg),
       items && items.error ? h("p", { class: "banner bad" }, "불러오지 못했습니다: " + items.error)
         : !items ? h("p", { class: "muted small" }, "불러오는 중…")
-        : list.length ? list.map(card) : h("p", { class: "muted small" }, "아직 제보가 없습니다."));
+        : list.length ? h("div", { class: "stack" }, list.map(card)) : h("p", { class: "muted small" }, "아직 제보가 없습니다."));
   }
   paint();
   load();
