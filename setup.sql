@@ -447,7 +447,8 @@ begin
   res := jsonb_build_object(
     'me', jsonb_build_object('id', s.id, 'class_no', s.class_no, 'name', s.name, 'monitor', s.monitor_consent),
     'lesson', jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title, 'slide_dir', l.slide_dir,
-                                 'slide_count', l.slide_count, 'page', l.page, 'open', l.open, 'kind', l.kind),
+                                 'slide_count', l.slide_count, 'page', l.page, 'open', l.open, 'kind', l.kind,
+                                 'slide_q', coalesce((select t.slide_q from auth.users u join teachers t on t.email = lower(u.email) where u.id = l.owner), 'hi')),
     'activities', coalesce((
       select jsonb_agg(jsonb_build_object(
         'id', a.id, 'kind', a.kind, 'title', a.title, 'page', a.page, 'page_to', a.page_to, 'named', a.named, 'shared', a.shared,
@@ -745,7 +746,7 @@ begin
   if not found then raise exception 'not a teacher'; end if;
   if t.code is null then update teachers set code = new_teacher_code() where email = me returning * into t; end if;
   return jsonb_build_object(
-    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at,
+    'email', t.email, 'code', t.code, 'admin', t.is_admin, 'observer', t.is_observer, 'since', t.created_at, 'slide_q', t.slide_q,
     -- 학생용 링크 아이디와 별 수업(개발자는 학생용 기본 수업)
     'link', t.link, 'star', (select jsonb_build_object('id', l.id, 'code', l.code, 'title', l.title) from lessons l
       where l.id = case when t.is_admin then (select lesson_id from student_default where id = 1) else t.star_lesson end),
@@ -984,6 +985,74 @@ create policy bug_edit  on bug_reports for update to authenticated using (is_tea
 create policy bug_del   on bug_reports for delete to authenticated using (is_teacher() and (author = auth.uid() or is_admin()));
 grant select, insert, update, delete on bug_reports to authenticated;
 
+-- 학생 버그 제보(학생 화면 「버그 제보」): 학생은 자기 제보만 보고, 선생님은 그 수업의 제보를, 개발자는 모두 본다.
+-- 한 학생당 5개까지. 학생은 열쇠(p_token)로만 쓰고 고치고 지운다(아래 student_bug_* 함수).
+create table if not exists student_bug_reports (
+  id           uuid primary key default gen_random_uuid(),
+  student_id   uuid not null references students(id) on delete cascade,
+  lesson_id    uuid references lessons(id) on delete set null,
+  author_label text not null default '',
+  body         text not null check (length(btrim(body)) between 1 and 4000),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists student_bug_reports_student on student_bug_reports (student_id);
+alter table student_bug_reports enable row level security;
+drop policy if exists sbug_read on student_bug_reports;
+drop policy if exists sbug_del on student_bug_reports;
+create policy sbug_read on student_bug_reports for select to authenticated
+  using (is_admin() or (lesson_id is not null and can_lesson(lesson_id)));
+create policy sbug_del  on student_bug_reports for delete to authenticated using (is_admin());
+grant select, delete on student_bug_reports to authenticated;
+
+create or replace function student_bugs(p_token text)
+returns jsonb language plpgsql stable security definer set search_path = public as $
+declare s students;
+begin
+  select * into s from students where token = p_token and p_token is not null;
+  if not found then return jsonb_build_object('error', 'logged_out'); end if;
+  return jsonb_build_object('items', coalesce((select jsonb_agg(jsonb_build_object(
+      'id', b.id, 'body', b.body, 'created_at', b.created_at, 'updated_at', b.updated_at,
+      'lesson', (select l.title from lessons l where l.id = b.lesson_id)) order by b.created_at desc)
+    from student_bug_reports b where b.student_id = s.id), '[]'::jsonb));
+end $;
+
+-- p_id 가 비면 새로 쓰고, 있으면 자기 제보를 고친다
+create or replace function student_bug_save(p_token text, p_id uuid, p_body text, p_lesson uuid)
+returns jsonb language plpgsql security definer set search_path = public as $
+declare s students;
+begin
+  select * into s from students where token = p_token and p_token is not null;
+  if not found then return jsonb_build_object('error', 'logged_out'); end if;
+  if length(btrim(coalesce(p_body, ''))) not between 1 and 4000 then return jsonb_build_object('error', 'bad_value'); end if;
+  if p_id is null then
+    if (select count(*) from student_bug_reports where student_id = s.id) >= 5 then return jsonb_build_object('error', 'full'); end if;
+    insert into student_bug_reports (student_id, lesson_id, author_label, body)
+      values (s.id, (select ls.lesson_id from lesson_students ls where ls.lesson_id = p_lesson and ls.student_id = s.id),
+              s.class_no || ' ' || s.name, btrim(p_body));
+  else
+    update student_bug_reports set body = btrim(p_body), updated_at = now() where id = p_id and student_id = s.id;
+    if not found then return jsonb_build_object('error', 'not_found'); end if;
+  end if;
+  return jsonb_build_object('ok', true);
+end $;
+
+create or replace function student_bug_delete(p_token text, p_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $
+declare s students;
+begin
+  select * into s from students where token = p_token and p_token is not null;
+  if not found then return jsonb_build_object('error', 'logged_out'); end if;
+  delete from student_bug_reports where id = p_id and student_id = s.id;
+  return jsonb_build_object('ok', true);
+end $;
+revoke all on function student_bugs(text) from public;
+revoke all on function student_bug_save(text, uuid, text, uuid) from public;
+revoke all on function student_bug_delete(text, uuid) from public;
+grant execute on function student_bugs(text) to anon, authenticated;
+grant execute on function student_bug_save(text, uuid, text, uuid) to anon, authenticated;
+grant execute on function student_bug_delete(text, uuid) to anon, authenticated;
+
 -- ------------------------------------------------------------
 -- 교사 이메일: teacher@example.com 을 자기 이메일(소문자)로 바꾸세요. 여러 명이면 줄을 더하면 됩니다.
 -- ------------------------------------------------------------
@@ -1117,6 +1186,20 @@ begin
 end $$;
 revoke execute on function set_my_star(uuid) from public, anon;
 grant execute on function set_my_star(uuid) to authenticated;
+
+-- 학생 슬라이드 화질(기타 관리): mid=보통(1024px 그림), hi=높음(1920px 그림). 학생은 수업 주인의 설정을 따른다
+alter table teachers add column if not exists slide_q text not null default 'hi';
+alter table teachers drop constraint if exists teachers_slide_q_check;
+alter table teachers add constraint teachers_slide_q_check check (slide_q in ('mid', 'hi'));
+create or replace function set_my_slide_q(p text) returns void
+language plpgsql security definer set search_path = public as $
+begin
+  if not is_teacher() then raise exception 'teacher only'; end if;
+  if p not in ('mid', 'hi') then raise exception 'bad value'; end if;
+  update teachers set slide_q = p where email = verified_email();
+end $;
+revoke execute on function set_my_slide_q(text) from public, anon;
+grant execute on function set_my_slide_q(text) to authenticated;
 
 -- ---------- 관찰자(2026-10-30) ----------
 -- 보기: 다른 선생님의 수업(존재·제목·첫 슬라이드)·학생 명단·공동 작업자·기본 수업. 활동·응답은 못 본다. 쓰기 정책은 그대로라 자기 것만 고친다.
