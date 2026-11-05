@@ -123,9 +123,10 @@ async function init(fresh) {
   booted = true;
   if (passwordRecovery) goTab("profile");   // 재설정 메일의 링크로 들어옴: 「프로필」의 새 비밀번호 칸으로
   document.addEventListener("keydown", (e) => {
-    if (tab !== "run" || !lesson || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-    if (e.key === "ArrowRight") setPage(lesson.page + 1);
-    if (e.key === "ArrowLeft") setPage(lesson.page - 1);
+    const el = document.activeElement;
+    if (tab !== "run" || !lesson || /INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable) return;
+    const k = slideKey(e);
+    if (k) { e.preventDefault(); setPage(lesson.page + k); }
   });
 }
 
@@ -404,6 +405,7 @@ async function loadLesson() {
   const L = lesson;
   if (L) {
     try { localStorage.setItem("cra-lesson", L.id); } catch {}
+    preloadSlides(L, L.page || 1);   // 수업을 고르자마자 슬라이드 그림을 모두 받기 시작한다(넘길 때 기다리지 않게)
     const { data, error } = await sb.from("activities").select("*").eq("lesson_id", L.id);
     if (lesson !== L) return;   // 받는 사이 다른 수업을 골랐다(그쪽 loadLesson 이 그린다)
     if (error) return fatal(error);
@@ -530,6 +532,7 @@ function tabIcon(k) {
 function dragSort(box, opts) {
   const unitOf = opts.unit || ((x) => x);
   const groupOf = opts.group || (() => "");
+  box.addEventListener("dragstart", (e) => { if (!e.target.closest?.("input, textarea, [contenteditable]")) e.preventDefault(); });
   box.addEventListener("pointerdown", (down) => {
     if (down.button !== 0 || down.target.closest("input, textarea, select, a, iframe, [contenteditable], .no-drag")) return;
     const all = opts.items();
@@ -552,6 +555,7 @@ function dragSort(box, opts) {
       const me = slots[list.indexOf(el)];
       st = { slots, units, s, order: units.map((_, i) => i), start: { x: down.clientX - b.left, y: down.clientY - b.top }, grab: { x: me.x + me.w / 2, y: me.y + me.h / 2 } };
       box.classList.add("sorting");
+      getSelection()?.removeAllRanges();
       list.forEach((x) => x.classList.add("sort-item"));
       units[s].idx.forEach((i) => list[i].classList.add("sort-lift"));
       try { box.setPointerCapture(down.pointerId); } catch {}
@@ -687,7 +691,7 @@ function topBar() {
   const titleBox = h("input", {
     type: "text", class: "lesson-title", maxlength: 100, "aria-label": "수업 제목", disabled: !lesson,
     value: lesson ? lesson.title : "", placeholder: lesson ? "수업 제목" : "새 수업 (슬라이드 편집에서 만듭니다)",
-    onkeydown(e) { if (e.key === "Enter") titleBox.blur(); else if (e.key === "Escape") { titleBox.value = lesson.title; titleBox.blur(); } },
+    onkeydown(e) { if (imeBusy(e)) return; if (e.key === "Enter") titleBox.blur(); else if (e.key === "Escape") { titleBox.value = lesson.title; titleBox.blur(); } },
     async onchange() {
       const t = titleBox.value.trim();
       if (!t || t === lesson.title) { titleBox.value = lesson.title; return; }
@@ -789,6 +793,7 @@ function custTab(k, row) {
   const d = tabEdit.draft;
   const label = h("span", { class: "tab-label", contenteditable: "plaintext-only", spellcheck: "false", "aria-label": tabName(k, {}) + " 탭 이름" }, tabName(k, d));
   label.addEventListener("keydown", (e) => {
+    if (imeBusy(e)) return;
     if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); label.blur(); }
   });
   label.addEventListener("input", () => {
