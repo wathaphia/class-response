@@ -863,3 +863,4 @@ input.mismatch:focus { outline-color: #fde7e5; }
 .top > .screen-share-note button { padding: 3px 8px; font-size: .8rem; min-height: 0; }
 @media (max-width: 640px) { .top > .screen-share-note { order: 3; flex-basis: 100%; } }
 .pdf-prog { display: inline-block; width: 10rem; max-width: 40vw; height: 8px; margin-left: .5rem; vertical-align: middle; }
+.pdf-cancel { margin-left: .5rem; padding: .15rem .6rem; font-size: .8rem; vertical-align: middle; }
