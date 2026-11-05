@@ -703,6 +703,13 @@ async function reorderSlides(order, ui) {
       Object.assign(a, change);
     }
     activities = sortActivities(activities);
+    // 「자료 추가」에 열어 둔 편집기의 표시 위치도 같이 옮긴다(저장됨 상태는 그대로)
+    if (editing && editing.page != null && editing.page !== "") {
+      const change = { page: newSlide(editing.page) };
+      if (editing.page_to > editing.page) { const to = newSlide(editing.page_to); change.page_to = to > change.page ? to : null; }
+      Object.assign(editing, change);
+      rebase(editing, (base) => Object.assign(base, change));
+    }
     const anim = steps ? slides.map((s) => Math.min(steps[s - 1] - 1, 35).toString(36)).join("") : "";
     const small = /[?&]sm=1/.test(lesson.slide_dir);
     const dir = withFx(lesson.slide_dir.split("?")[0] + "?v=" + Date.now() + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : ""), slideFx(lesson));

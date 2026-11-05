@@ -14,8 +14,8 @@ function buildSimFrame(a) {
   if (!s || s.key !== key) {
     const f = simFrame(withSimPause(a.html || ""), a.title);
     s = { key, box: simScaled(f), playing: false };
-    // 작은 슬라이드 위의 같은 시뮬레이션도 이 버튼을 따라 돌고 멈춘다
-    s.play = simPlayButton(f, (on) => { s.playing = on; document.querySelectorAll('.act-slide .sim-over[data-sim="' + a.id + '"]').forEach(simOverPause); });
+    // 작은 슬라이드·크게 본 슬라이드 위의 같은 시뮬레이션도 이 버튼을 따라 돌고 멈춘다
+    s.play = simPlayButton(f, (on) => { s.playing = on; document.querySelectorAll('.act-slide .sim-over[data-sim="' + a.id + '"], .slide-view .sim-over[data-sim="' + a.id + '"]').forEach(simOverPause); });
     buildSimFrames.set(a.id, s);
   }
   return s;
@@ -36,7 +36,7 @@ function activityPreview(a) {
 
 // 오른쪽 활동 목록이 바뀌었는지 가리는 표시(시뮬레이션 html은 길이만 본다)
 // 활동 칸 하나의 내용 열쇠. 쪽·순서는 빼서, 쪽만 옮기거나 순서만 바꾸면 칸을 새로 만들지 않는다
-const rowKey = (a) => JSON.stringify({ ...a, html: (a.html || "").length, page: 0, page_to: 0, sort: 0 });
+const rowKey = (a) => JSON.stringify({ ...a, html: (a.html || "").length, page: 0, page_to: 0, sort: 0, sim_place: 0 });
 
 // 활동 칸의 「수정/수정 중」 표시만 지금 편집 중인 활동에 맞춘다
 function markEditingRow(row, a) {
@@ -46,90 +46,252 @@ function markEditingRow(row, a) {
   if (btn) { btn.className = "act-edit " + (on ? "primary" : "ghost"); btn.textContent = on ? "수정 중" : "수정"; }
 }
 
-// 활동 목록의 쪽 칸: 숫자와 「쪽」을 나눠 두고, ▲▼를 누르거나 숫자를 고쳐 쪽을 옮긴다(여러 쪽에 걸친 활동은 끝 쪽도 함께)
+// 활동 목록의 쪽 칸: 「시작 ~ 끝 쪽」을 늘 같은 모양으로 보이고, 숫자를 눌러 키보드로 고친다(한 쪽짜리는 시작 = 끝)
 function pageCell(a) {
   if (a.page == null || !lesson.slide_count) return h("strong", { class: "act-page" }, whereText(a));
-  const max = Math.max(slideTotal(lesson), 1);
-  const num = h("input", { type: "text", inputmode: "numeric", maxlength: 3, class: "act-num", value: a.page, "aria-label": "쪽 번호",
-    onkeydown(ev) { if (ev.key === "Enter") num.blur(); else if (ev.key === "Escape") { num.value = a.page; num.blur(); } },
-    onchange() { const n = parseInt(num.value, 10); if (n >= 1) movePage(a, n); else num.value = a.page; } });
-  const step = (d) => h("button", { type: "button", class: "act-step", "aria-label": d > 0 ? "한 쪽 뒤로" : "한 쪽 앞으로",
-    disabled: d > 0 ? a.page >= max : a.page <= 1, onclick() { movePage(a, a.page + d); } }, d > 0 ? "▲" : "▼");
-  return h("div", { class: "act-page split" },
-    h("div", { class: "act-spin" }, step(1), num, step(-1)),
-    h("span", { class: "act-unit" }, (a.page_to > a.page ? "~" + a.page_to : "") + "쪽"));
+  const num = (v, label, set) => {
+    const el = h("input", { type: "text", inputmode: "numeric", maxlength: 3, class: "act-num", value: v, "aria-label": label,
+      onkeydown(ev) { if (ev.key === "Enter") el.blur(); else if (ev.key === "Escape") { el.value = v; el.blur(); } },
+      onchange() { const n = parseInt(el.value, 10); if (n >= 1 && n !== v) set(n); else el.value = v; } });
+    return el;
+  };
+  const end = a.page_to > a.page ? a.page_to : a.page;
+  return h("div", { class: "act-page range" },
+    // 시작을 끝보다 뒤로 고치면 한 쪽짜리로, 끝을 시작보다 앞으로 고치면 둘을 맞바꾼다
+    num(a.page, "시작 쪽", (n) => changeLayout(() => setPages(a, n, n <= end ? end : n))),
+    h("span", { class: "act-tilde" }, "~"),
+    num(end, "끝 쪽", (n) => changeLayout(() => setPages(a, Math.min(a.page, n), Math.max(a.page, n)))),
+    h("span", { class: "act-unit" }, "쪽"));
 }
 
-async function movePage(a, n) {
+// 쪽을 from~to 로(같으면 한 쪽). page_to 칸이 없는 예전 데이터베이스에서는 여러 쪽으로 늘리지 못한다
+function setPages(a, from, to) {
   const max = Math.max(slideTotal(lesson), 1);
-  n = Math.max(1, Math.min(n, max));
-  if (n === a.page) { drawBuild(); return; }
-  const change = { page: n };
-  if (a.page_to > a.page) { const to = Math.min(a.page_to + n - a.page, max); change.page_to = to > n ? to : null; }
-  Object.assign(a, change);
-  // 이 활동만 고치는 중이면 편집기의 표시 위치도 맞춘다
-  if (editing && (editing.blocks ? editing.blocks.length === 1 && editing.blocks[0].id === a.id : editing.id === a.id)) {
-    Object.assign(editing, change);
-    rebase(editing, (base) => Object.assign(base, change));
+  from = Math.max(1, Math.min(from, max));
+  to = Math.max(from, Math.min(to, max));
+  if (to > from && !("page_to" in a)) { alert(PAGE_TO_SETUP); return; }
+  a.page = from;
+  if ("page_to" in a) a.page_to = to > from ? to : null;
+}
+
+// 쪽 n 에 끌어 놓으면: 여러 쪽에 걸친 활동은 길이를 그대로 옮기고, 그 쪽 활동들의 맨 뒤에 놓는다
+function dropLayout(a, n) {
+  const span = a.page_to > a.page ? a.page_to - a.page : 0;
+  const sort = Math.max(-1, ...activities.filter((x) => x !== a && x.page === n).map((x) => x.sort ?? 0)) + 1;
+  return { page: n, to: n + span, sort };
+}
+
+// ---------- 목록에서 바꾼 쪽·순서·얹은 자리 ----------
+// 쪽 칸 고치기·끌어 옮기기·크게 본 슬라이드에서 시뮬레이션 옮기기는 바로 저장하지 않고 모아 두었다가 「저장하기」로 한 번에 보낸다.
+// 「되돌리기」는 바꾸기 전 모습을 최대 LAYOUT_UNDO_MAX 번까지 되살린다.
+const LAYOUT_UNDO_MAX = 20;
+const layoutOf = (a) => ({ page: a.page ?? null, page_to: a.page_to ?? null, sort: a.sort ?? 0, sim_place: a.sim_place ?? null });
+let layoutDraft = null;   // { lesson, base: Map(id → 저장된 값 JSON), undo: [Map(id → 값)] }
+function layoutFor() {
+  if (!layoutDraft || layoutDraft.lesson !== lesson.id) layoutDraft = { lesson: lesson.id, base: new Map(), undo: [] };
+  for (const a of activities) if (!layoutDraft.base.has(a.id)) layoutDraft.base.set(a.id, JSON.stringify(layoutOf(a)));
+  return layoutDraft;
+}
+const layoutChanged = (a) => !!layoutDraft && layoutDraft.base.has(a.id) && layoutDraft.base.get(a.id) !== JSON.stringify(layoutOf(a));
+const layoutDirty = () => !!layoutDraft && activities.some(layoutChanged);
+// 값을 넣되, page_to 칸이 없는 활동에 칸을 새로 만들지 않는다(pageTo 가 칸이 있는지를 이것으로 본다)
+function applyLayout(a, v) {
+  for (const k in v) if (k in a || v[k] != null) a[k] = v[k];
+}
+const layoutSnap = () => JSON.stringify(activities.map((a) => [a.id, layoutOf(a)]));
+function changeLayout(fn) {
+  const d = layoutFor(), before = layoutSnap();
+  fn();
+  if (layoutSnap() !== before) {
+    d.undo.push(new Map(JSON.parse(before)));
+    if (d.undo.length > LAYOUT_UNDO_MAX) d.undo.shift();
+    syncEditingLayout();
   }
   drawBuild();
-  const { error } = await sb.from("activities").update(change).eq("id", a.id);
-  if (error) { alert("쪽을 바꾸지 못했습니다: " + error.message); await loadLesson(); }
+}
+function undoLayout() {
+  const d = layoutDraft;
+  if (!d || d.lesson !== lesson.id || !d.undo.length) return;
+  const snap = d.undo.pop();
+  for (const a of activities) if (snap.has(a.id)) applyLayout(a, snap.get(a.id));
+  syncEditingLayout();
+  drawBuild();
+}
+function revertLayout() {
+  if (!layoutDraft) return;
+  for (const a of activities) if (layoutChanged(a)) applyLayout(a, JSON.parse(layoutDraft.base.get(a.id)));
+  layoutDraft.undo = [];
+  syncEditingLayout();
+}
+// 그 활동 하나만 고치는 중이면 편집기의 표시 위치·얹은 자리도 맞춘다(편집기의 「저장됨」 상태는 그대로)
+function syncEditingLayout() {
+  if (!editing) return;
+  const id = editing.blocks ? (editing.blocks.length === 1 ? editing.blocks[0].id : null) : editing.id;
+  const a = id && activities.find((x) => x.id === id);
+  if (!a) return;
+  const change = { page: a.page ?? null, page_to: a.page_to ?? null };
+  if (!editing.blocks && editing.sim_place && a.sim_place) change.sim_place = a.sim_place;
+  Object.assign(editing, change);
+  rebase(editing, (base) => Object.assign(base, change));
+}
+async function saveLayout() {
+  const d = layoutDraft, L = lesson;
+  if (!d) return;
+  const jobs = activities.filter(layoutChanged).map((a) => {
+    const was = JSON.parse(d.base.get(a.id)), now = layoutOf(a), change = {};
+    for (const k in now) if (JSON.stringify(was[k]) !== JSON.stringify(now[k])) change[k] = now[k];
+    if (!("page_to" in a)) delete change.page_to;
+    return { a, change, was: d.base.get(a.id) };
+  });
+  if (!jobs.length) return;
+  // 먼저 저장한 것으로 적어 두어, 보내는 사이 다시 그려도 「저장하기」가 또 뜨지 않게 한다(실패한 것만 되돌려 다시 뜨게)
+  jobs.forEach((j) => d.base.set(j.a.id, JSON.stringify(layoutOf(j.a))));
+  d.undo = [];
+  if (lesson === L && tab === "build") drawBuild();
+  const done = await Promise.all(jobs.map((j) => Object.keys(j.change).length ? sb.from("activities").update(j.change).eq("id", j.a.id) : {}));
+  const bad = done.map((r, i) => [r, jobs[i]]).filter(([r]) => r.error);
+  bad.forEach(([, j]) => d.base.set(j.a.id, j.was));
+  if (lesson === L && tab === "build") drawBuild();
+  if (bad.length) alert("바꾼 자리를 저장하지 못했습니다: " + bad[0][0].error.message);
+  else flash("저장했습니다.");
+}
+// 「자료 추가」를 떠날 때(다른 탭·다른 수업) 저장하지 않은 변경을 묻는다. activities 는 아직 떠나는 수업의 것.
+// 떠나면 기록을 버린다: 다른 탭(슬라이드 편집 등)에서 쪽이 바뀌어도 돌아와서 새로 센다
+function leaveLayout() {
+  if (layoutDirty()) {
+    if (confirm("「자료 추가」에서 옮긴 쪽·순서·자리를 아직 저장하지 않았습니다. 저장할까요?\n(취소를 누르면 옮기기 전으로 돌아갑니다.)")) saveLayout();
+    else revertLayout();
+  }
+  layoutDraft = null;
+}
+addEventListener("beforeunload", (ev) => { if (layoutDirty()) ev.preventDefault(); });
+// 서버에서 다시 받은 목록으로 바꾸되, 저장하지 않은 변경은 남긴다(saved: 방금 편집기로 저장한 활동 — 쪽·자리는 저장됐으니 순서만)
+function takeActivities(data, saved = []) {
+  const d = layoutDraft && layoutDraft.lesson === lesson.id ? layoutDraft : null;
+  const old = new Map(activities.map((a) => [a.id, a]));
+  const list = data || [];
+  if (d) for (const a of list) {
+    const o = old.get(a.id), pending = o && layoutChanged(o) ? layoutOf(o) : null;
+    d.base.set(a.id, JSON.stringify(layoutOf(a)));
+    if (pending) applyLayout(a, saved.includes(a.id) ? { sort: pending.sort } : pending);
+  }
+  activities = sortActivities(list);
 }
 
-// 끌어서 순서 바꾸기(dragSort, teacher.js): 같은 쪽 활동끼리만 자리를 바꾸고, 왼쪽 작은 슬라이드 위에 놓으면 그 쪽으로 옮긴다
+// 목록 머리의 [되돌리기] [저장하기]: 늘 보이고, 바꾼 것이 있을 때만 누를 수 있다
+function layoutBar() {
+  const d = layoutDraft && layoutDraft.lesson === lesson.id ? layoutDraft : null;
+  const dirty = layoutDirty();
+  return h("div", { class: "act-tools" },
+    h("button", { type: "button", class: "ghost act-undo", disabled: !(d && d.undo.length), title: "바꾸기 전으로 되돌립니다(최대 " + LAYOUT_UNDO_MAX + "번).", onclick: undoLayout }, "↶ 되돌리기"),
+    h("button", { type: "button", class: "act-save " + (dirty ? "primary" : "ghost"), disabled: !dirty, onclick: saveLayout }, dirty ? "저장하기" : "저장됨"));
+}
+
+// 끌어서 순서 바꾸기(dragSort, teacher.js): 같은 쪽 활동끼리만 자리를 바꾸고, 왼쪽 작은 슬라이드 위에 놓으면 그 쪽으로 옮긴다.
+// 다른 쪽 슬라이드 위에 있는 동안은 놓일 자리를 점선 칸으로 미리 보인다(dropPreview)
 const pageGroup = (a) => (a.page ?? "") + "|" + (a.page_to > a.page ? a.page_to : "");
 function sortRows(grid) {
   dragSort(grid, {
     items: () => activities.map((a) => grid.querySelector(':scope > .act-row[data-id="' + a.id + '"]')).filter(Boolean),
     group: (row) => pageGroup(row.act),
-    over(ev) {
+    over(ev, row) {
       const cell = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".act-slide[data-n]");
-      return cell && grid.contains(cell) && +cell.dataset.n <= Math.max(slideTotal(lesson), 1) ? cell : null;
+      const n = cell && grid.contains(cell) ? +cell.dataset.n : 0;
+      // 제 쪽 슬라이드 위에서는 보통의 순서 바꾸기
+      return n && n <= Math.max(slideTotal(lesson), 1) && !(row && row.act.page === n) ? cell : null;
     },
-    dropOver(cell, row) { movePage(row.act, +cell.dataset.n); },
-    onDrop: (rows) => reorderActivities(rows.map((r) => r.act)),
+    hover: (cell, row) => dropPreview(grid, cell, row),
+    dropOver(cell, row) {
+      const a = row.act, d = dropLayout(a, +cell.dataset.n);
+      changeLayout(() => { setPages(a, d.page, d.to); if (a.page === d.page) a.sort = d.sort; });
+    },
+    onDrop: (rows) => changeLayout(() => rows.forEach((r, i) => { r.act.sort = i; })),
     scroller: () => main.querySelector(".act-scroll"),
   });
 }
 
-async function reorderActivities(group) {
-  const changed = group.map((x, i) => [x, i]).filter(([x, i]) => x.sort !== i);
-  if (!changed.length) return;
-  changed.forEach(([x, i]) => { x.sort = i; });
-  drawBuild();
-  const done = await Promise.all(changed.map(([x, i]) => sb.from("activities").update({ sort: i }).eq("id", x.id)));
-  const bad = done.find((r) => r.error);
-  if (bad) { alert("순서를 저장하지 못했습니다: " + bad.error.message); await loadLesson(); }
+// 끌던 활동을 쪽 n 에 놓으면 그 줄 몇째 칸이 될지 셈해, 그 줄 칸들을 비켜 세우고 빈 점선 칸을 보인다
+function dropPreview(grid, cell, row) {
+  grid.querySelector(":scope > .act-ghost")?.remove();
+  layoutBySlide(grid);
+  if (!cell || !row || !grid.classList.contains("by-slide")) return;
+  const a = row.act, d = dropLayout(a, +cell.dataset.n);
+  const moved = { ...a, page: d.page, sort: d.sort };
+  const total = Math.max(slideTotal(lesson), 1);
+  const list = sortActivities(activities.map((x) => (x === a ? moved : x))).filter((x) => x.page != null && slideRow(x, total) === d.page);
+  list.forEach((x, i) => {
+    if (x === moved) grid.append(h("div", { class: "act-ghost", style: "grid-row:" + d.page + ";grid-column:" + (i + 2) }, "여기로"));
+    else { const r = grid.querySelector(':scope > .act-row[data-id="' + x.id + '"]'); if (r) r.style.gridColumn = i + 2; }
+  });
+}
+
+// 「슬라이드와 함께 보기」에서 누른 슬라이드를 왼쪽(새로 만들기 아래)에 크게 보인다. 그 위에 얹은 시뮬레이션은 끌어 옮기고 크기를 바꿀 수 있다
+let slideView = null;   // { lesson, n }
+const viewN = () => {
+  const total = Math.max(slideTotal(lesson), 1);
+  return slideView && slideView.lesson === lesson.id && bySlide && lesson.slide_count > 0 && !isPptx(lesson) && slideView.n <= total ? slideView.n : 0;
+};
+const lastStepOf = (n) => { const steps = slideSteps(lesson); return pageOfSlide(lesson, n) + (steps ? steps[n - 1] - 1 : 0); };   // 애니메이션이 모두 끝난 모습
+function fillSlideView(slot) {
+  const n = viewN();
+  if (!n) { slot.replaceChildren(); return; }
+  const key = lesson.slide_dir + "|" + n;
+  let card = slot.querySelector(":scope > .slide-view");
+  // 같은 슬라이드면 그대로 두고 시뮬레이션 자리만 맞춘다(다시 만들면 iframe 이 처음부터 다시 불러와진다)
+  if (!card || card.dataset.key !== key) {
+    card = h("section", { class: "card stack slide-view", "data-key": key },
+      h("div", { class: "row between" }, h("h2", {}, n + "쪽"),
+        h("button", { type: "button", class: "ghost", onclick() { slideView = null; drawBuild(); } }, "닫기")),
+      h("div", { class: "slide-view-pic" }, h("img", { src: slideSrc(lesson, lastStepOf(n)), alt: "슬라이드 " + n }), h("div", { class: "sim-layer" })),
+      h("p", { class: "muted small slide-view-hint" }));
+    slot.replaceChildren(card);
+  }
+  const list = activities.filter((a) => isOverSim(a) && simOnSlide(a, n));
+  renderSimLayer(card.querySelector(".sim-layer"), list, { load: (a) => a.html, ver: (a) => (a.html || "").length + ":" + a.title, editable: true,
+    onMove: (a, p) => changeLayout(() => { const x = activities.find((y) => y.id === a.id); if (x) x.sim_place = p; }),
+    paused: (a) => !buildSimFrame(a).playing });
+  card.querySelector(".slide-view-hint").textContent = list.length
+    ? "시뮬레이션을 끌어 옮기거나 오른쪽 아래 모서리를 끌어 크기를 바꾸세요. 「저장하기」를 눌러야 저장됩니다."
+    : "이 쪽 위에 얹은 시뮬레이션이 없습니다.";
 }
 
 function drawBuild() {
   activities = sortActivities(activities);
+  layoutFor();
   const ids = new Set(activities.map((a) => a.id));
   for (const id of buildSimFrames.keys()) if (!ids.has(id)) buildSimFrames.delete(id);
-  const startPage = lesson.slide_count ? slideNo(lesson, lesson.page) : null;
+  // 새로 만들 때 쪽 칸은 비워 둔다. 아직 저장하지 않은 것을 쓰다가 종류를 바꾸면 적어 둔 쪽은 그대로 가져간다
+  const where = () => editing && !isSavedEdit(editing) ? { page: editing.page ?? null, page_to: editing.page_to ?? null }
+    : { page: lesson.slide_count ? "" : null, page_to: null };
   const kinds = h("div", { class: "kinds" },
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "sim", title: "", page: startPage, sim_full: false, sim_place: lesson.slide_count ? { ...SIM_PLACE_DEFAULT } : null, html: "", questions: [] };
+      editing = { kind: "sim", title: "", ...where(), sim_full: false, sim_place: lesson.slide_count ? { ...SIM_PLACE_DEFAULT } : null, html: "", questions: [] };
       drawBuild();
     } }, h("strong", {}, "시뮬레이션")),
     // 설명 및 질문: 설명 칸·질문 칸을 여러 개 만들고, 저장하면 칸마다 활동 하나가 된다
     h("button", { type: "button", class: "kind", onclick() {
-      editing = { kind: "compose", page: startPage, page_to: null, blocks: [] };
+      editing = { kind: "compose", ...where(), blocks: [] };
       drawBuild();
     } }, h("strong", {}, "설명 및 질문")));
-  const asideKids = [h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds), editing ? editor() : null];
+  const newCard = h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds);
   const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
   const listTitle = "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "");
+  // 왼쪽: 새로 만들기 | 크게 본 슬라이드 | 편집기. 크게 본 슬라이드는 같은 쪽이면 그대로 둔다(fillSlideView)
+  const fillAside = (aside) => {
+    aside.querySelector(":scope > .new-slot").replaceChildren(newCard);
+    fillSlideView(aside.querySelector(":scope > .slide-view-slot"));
+    aside.querySelector(":scope > .editor-slot").replaceChildren(...[editing ? editor() : null].filter(Boolean));
+  };
   const box = main.querySelector(".build");
   // 같은 수업이면 왼쪽만 다시 그리고 오른쪽 활동 칸은 그대로 두고 맞춘다(syncRows).
   // 오른쪽을 다시 붙이면 시뮬레이션 칸(iframe)이 처음부터 다시 실행되어 깜빡인다.
   if (box && box.dataset.lesson === String(lesson.id)) {
     const aside = box.querySelector(":scope > aside");
     const y = aside.scrollTop;
-    aside.replaceChildren(...asideKids.filter(Boolean));
+    fillAside(aside);
     aside.scrollTop = y;
     box.querySelector(".act-list h2").textContent = listTitle;
+    box.querySelector(".act-tools").replaceWith(layoutBar());
     box.querySelector(".act-hint").replaceChildren(...[hint()].filter(Boolean));
     syncRows(box.querySelector(".act-grid"));
     return;
@@ -139,9 +301,11 @@ function drawBuild() {
   sortRows(grid);
   // 다시 그려도 왼쪽(편집기)·오른쪽(활동 목록)의 스크롤 자리를 지킨다
   const keep = [".build > aside", ".act-scroll"].map((q) => main.querySelector(q)?.scrollTop || 0);
+  const aside = h("aside", { class: "stack" }, h("div", { class: "new-slot" }), h("div", { class: "slide-view-slot" }), h("div", { class: "editor-slot" }));
+  fillAside(aside);
   main.classList.add("build-page");
   main.replaceChildren(h("div", { class: "build", "data-lesson": lesson.id },
-    h("aside", { class: "stack" }, asideKids),
+    aside,
     h("div", { class: "build-main stack" },
       h("section", { class: "card stack act-list" },
         h("div", { class: "row between" },
@@ -149,8 +313,9 @@ function drawBuild() {
             lesson.slide_count ? h("label", { class: "act-toggle" }, h("input", { type: "checkbox", checked: bySlide, onchange(ev) {
               bySlide = ev.target.checked;
               try { localStorage.setItem("cra-build-slides", bySlide ? "1" : "0"); } catch {}
-              syncRows(grid);
-            } }), "슬라이드와 함께 보기") : null),
+              drawBuild();
+            } }), "슬라이드와 함께 보기") : null,
+            layoutBar()),
           h("div", { class: "act-hint" }, hint())),
         h("div", { class: "act-scroll" }, grid)))));
   [".build > aside", ".act-scroll"].forEach((q, i) => { const el = main.querySelector(q); if (el) el.scrollTop = keep[i]; });
@@ -185,10 +350,10 @@ function syncRows(grid) {
 // 「슬라이드와 함께 보기」: 슬라이드 n은 n번째 줄 맨 왼쪽, 그 쪽 활동은 목록 순서대로 오른쪽으로(여러 쪽에 걸친 활동은 첫 쪽에),
 // 「언제든」 활동은 맨 아래 줄. 칸은 grid-row/grid-column으로만 옮긴다(DOM에서 옮기면 시뮬레이션이 다시 불러와짐)
 let bySlide = (() => { try { return localStorage.getItem("cra-build-slides") === "1"; } catch { return false; } })();
+const slideRow = (a, total) => (a.page == null ? total + 1 : Math.min(Math.max(a.page, 1), total));
 function layoutBySlide(grid) {
   const on = bySlide && lesson.slide_count > 0;
   const total = on ? Math.max(slideTotal(lesson), 1) : 0;
-  const rowOf = (a) => (a.page == null ? total + 1 : Math.min(Math.max(a.page, 1), total));
   grid.classList.toggle("by-slide", on);
   const anytime = on && activities.some((a) => a.page == null);
   const key = on ? lesson.slide_dir + "|" + total + "|" + anytime : "";
@@ -197,6 +362,8 @@ function layoutBySlide(grid) {
     grid.querySelectorAll(":scope > .act-slide").forEach((el) => el.remove());
     for (let n = 1; on && n <= total + (anytime ? 1 : 0); n++) grid.append(slideCell(n, total));
   }
+  const picked = viewN();
+  grid.querySelectorAll(":scope > .act-slide").forEach((el) => el.classList.toggle("picked", +el.dataset.n === picked));
   const overs = on ? activities.filter(isOverSim) : [];
   grid.querySelectorAll(":scope > .act-slide .sim-layer").forEach((layer) => {
     const n = +layer.closest(".act-slide").dataset.n, list = overs.filter((a) => simOnSlide(a, n));
@@ -206,25 +373,28 @@ function layoutBySlide(grid) {
   for (const a of activities) {
     const row = grid.querySelector(':scope > .act-row[data-id="' + a.id + '"]');
     if (!row) continue;
-    row.classList.toggle("on-slide", on && a.page != null && overs.includes(a));   // 미리보기는 왼쪽 슬라이드 위에 있으니 카드에서는 접는다
     if (!on) { row.style.gridRow = row.style.gridColumn = ""; continue; }
-    const r = rowOf(a), c = (col.get(r) || 1) + 1;
+    const r = slideRow(a, total), c = (col.get(r) || 1) + 1;
     col.set(r, c);
     row.style.gridRow = r;
     row.style.gridColumn = c;
   }
 }
 
-// 왼쪽 열의 작은 슬라이드. 활동을 여기로 끌어 놓으면 그 쪽으로 옮긴다(sortRows 의 over)
+// 왼쪽 열의 작은 슬라이드. 활동을 여기로 끌어 놓으면 그 쪽으로 옮기고(sortRows 의 over), 누르면 왼쪽에 크게 보인다(slideView)
 function slideCell(n, total) {
   const label = n > total ? "언제든" : n + "쪽";
-  const steps = slideSteps(lesson);
-  const last = pageOfSlide(lesson, n) + (steps ? steps[n - 1] - 1 : 0);   // 애니메이션이 모두 끝난 모습
+  const real = n <= total && !isPptx(lesson);
   // 슬라이드 위에 얹은 시뮬레이션은 수업 화면처럼 그 자리에 함께 보인다(layoutBySlide 가 .sim-layer 를 채움)
-  const pic = n > total || isPptx(lesson) ? h("div", { class: "act-slide-blank" }, label)
-    : h("div", { class: "act-slide-pic" }, h("img", { src: slideSrc(lesson, last, true), alt: "슬라이드 " + n, loading: "lazy" }), h("div", { class: "sim-layer" }));
-  const cell = h("div", { class: "act-slide", "data-n": n, style: "grid-row:" + n + ";grid-column:1" }, pic, h("span", {}, label));
-  return cell;
+  const pic = !real ? h("div", { class: "act-slide-blank" }, label)
+    : h("div", { class: "act-slide-pic" }, h("img", { src: slideSrc(lesson, lastStepOf(n), true), alt: "슬라이드 " + n, loading: "lazy" }), h("div", { class: "sim-layer" }));
+  return h("div", { class: "act-slide" + (real ? " pickable" : ""), "data-n": n, style: "grid-row:" + n + ";grid-column:1",
+    title: real ? "눌러서 왼쪽에 크게 보기" : null,
+    onclick: real ? () => {
+      slideView = viewN() === n ? null : { lesson: lesson.id, n };
+      drawBuild();
+      if (slideView) main.querySelector(".slide-view")?.scrollIntoView({ block: "nearest" });
+    } : null }, pic, h("span", {}, label));
 }
 
 function activityRow(a) {
@@ -236,8 +406,8 @@ function activityRow(a) {
         h("div", { class: "act-name" },
           h("p", { class: "muted small" }, activityName(a)),
           h("h3", {}, a.title))),
+      // 오른쪽: 수정, 그 아래 같은 크기로 재생
       h("div", { class: "act-btns" },
-        a.kind === "sim" && a.html ? buildSimFrame(a).play : null,
         h("button", { type: "button", class: "act-edit",
           onclick() {
             // 칸을 다시 쓰므로 지금 활동(row.act)을 고친다
@@ -245,7 +415,8 @@ function activityRow(a) {
             editing = copy.kind === "sim" ? copy : toCompose(copy);
             drawBuild();
             main.querySelector(".editor")?.scrollIntoView({ block: "start" });
-          } }))),
+          } }),
+        a.kind === "sim" && a.html ? buildSimFrame(a).play : null)),
     h("div", { class: "act-body" }, activityPreview(a)));
   return row;
 }
@@ -299,6 +470,7 @@ function simEditor() {
     if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
     if (!(e.html || "").trim()) { msg.textContent = "html 파일을 고르거나 코드를 붙여넣으세요."; return; }
     if (e.html.length > 500000) { msg.textContent = "코드가 너무 깁니다(최대 50만 자)."; return; }
+    if (lesson.slide_count && e.page === "") { msg.textContent = PAGE_EMPTY; return; }
     const row = { kind: "sim", title: e.title, page: lesson.slide_count ? e.page : null, html: e.html, sim_full: !!e.sim_full && lesson.slide_count > 0,
       sim_place: lesson.slide_count && !e.sim_full && e.sim_place ? e.sim_place : null, show_answer: false, named: false, questions: [] };
     const to = pageTo(e);
@@ -312,7 +484,7 @@ function simEditor() {
     if (lesson !== L) return;   // 그사이 다른 수업으로 옮겼으면 그 화면은 건드리지 않는다
     const { data } = await sb.from("activities").select("*").eq("lesson_id", L.id);
     if (lesson !== L) return;
-    activities = sortActivities(data || []);
+    takeActivities(data, [e.id]);
     editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
     if (tab === "build") drawBuild();
     flash("저장했습니다.");
@@ -390,13 +562,14 @@ function toggleBox(text, on, onchange, cls) {
 function placeField(e) {
   if (!lesson.slide_count) return Object.assign(document.createDocumentFragment(), { refresh() {} });
   const max = Math.max(slideTotal(lesson), 1);
-  const pageIn = h("input", { type: "number", min: 1, max, value: e.page ?? slideNo(lesson, lesson.page), class: "num page-num", "aria-label": "시작 쪽",
-    oninput() { e.page = parseInt(pageIn.value, 10) || 1; } });
+  // 새로 만들 때는 비어 있다(""). 저장할 때 비어 있으면 묻는다
+  const pageIn = h("input", { type: "number", min: 1, max, value: e.page ?? "", class: "num page-num", "aria-label": "시작 쪽",
+    oninput() { e.page = parseInt(pageIn.value, 10) || ""; } });
   // 여러 쪽에 걸쳐 같은 활동을 띄울 때 끝 쪽. 비우면 시작 쪽 한 쪽에만 보인다
   const pageToIn = h("input", { type: "number", min: 1, max, value: e.page_to > e.page ? e.page_to : "", class: "num page-num", "aria-label": "끝 쪽",
     oninput() { e.page_to = parseInt(pageToIn.value, 10) || null; } });
   const hint = h("p", { class: "muted small" });
-  const all = toggleBox("모든 페이지", e.page == null, (on) => { e.page = on ? null : parseInt(pageIn.value, 10) || 1; refresh(); });
+  const all = toggleBox("모든 페이지", e.page == null, (on) => { e.page = on ? null : parseInt(pageIn.value, 10) || ""; refresh(); });
   const refresh = () => {
     const on = e.page == null;
     all.set(on);
@@ -516,6 +689,7 @@ function composeEditor() {
         show_answer: !!b.show_answer, named: !q.anon, questions: [clean] }]);
     }
     if (!rows.length) { msg.textContent = "설명이나 질문을 입력하세요."; return; }
+    if (lesson.slide_count && e.page === "") { msg.textContent = PAGE_EMPTY; return; }
     const to = pageTo(e);
     if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
     // 새 활동은 같은 쪽 활동들의 맨 뒤에 편집기 순서대로 붙인다
@@ -536,7 +710,7 @@ function composeEditor() {
     if (lesson !== L) return;
     const { data } = await sb.from("activities").select("*").eq("lesson_id", L.id);
     if (lesson !== L) return;
-    activities = sortActivities(data || []);
+    takeActivities(data, e.blocks.map((b) => b.id));
     editing = null;   // 저장하면 왼쪽은 「새로 만들기」만 남는다
     if (tab === "build") drawBuild();
     flash(rows.length > 1 ? rows.length + "개를 저장했습니다." : "저장했습니다.");
@@ -648,6 +822,7 @@ const isChoice = (q) => q.type === "choice" || q.type === "multi";
 
 // 저장할 끝 쪽. undefined = 보내지 않음, null/숫자 = 보냄, false = 데이터베이스에 page_to 칸이 없어 저장할 수 없음
 // (page_to 칸이 없는 예전 데이터베이스에서도 한 쪽짜리는 저장되도록 필요할 때만 보낸다)
+const PAGE_EMPTY = "표시 위치의 쪽을 입력하세요.";
 const PAGE_TO_SETUP = "여러 쪽에 걸친 활동을 쓰려면 먼저 Supabase에서 setup.sql을 한 번 실행해야 합니다. 끝 쪽 칸을 비우면 지금도 저장할 수 있습니다.";
 function pageTo(e) {
   const to = e.page != null && e.page_to > e.page ? Math.min(e.page_to, Math.max(slideTotal(lesson), e.page)) : null;
