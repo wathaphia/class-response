@@ -183,16 +183,6 @@ function withFx(dir, fx) {
   const base = dir.replace(/([?&])fx=\w+&?/, "$1").replace(/[?&]$/, "");
   return fx === "fade" || !base ? base : base + (base.includes("?") ? "&" : "?") + "fx=" + fx;
 }
-// 학생 화면 슬라이드 화질: slide_dir 끝의 q=hi 면 학생도 큰 그림(새로 올린 것은 1920px), 없으면 작은 그림(1024px). 「전체 수업」에서 고른다.
-// 「슬라이드 PDF 받기」는 이 값과 상관없이 늘 원본 PDF·큰 그림으로 만든다.
-const SLIDE_Q = { mid: "보통 (가로 1024px, 데이터 적음)", hi: "높음 (큰 그림, 최대 1920px)" };
-function slideQ(lesson) {
-  return /[?&]q=hi(&|$)/.test(lesson.slide_dir || "") ? "hi" : "mid";
-}
-function withQ(dir, q) {
-  const base = dir.replace(/([?&])q=\w+&?/, "$1").replace(/[?&]$/, "");
-  return q !== "hi" || !base ? base : base + (base.includes("?") ? "&" : "?") + "q=hi";
-}
 // 슬라이드 그림을 바꾸며 전환 효과를 준다. dir: 1 앞으로, -1 뒤로, 0 같은 슬라이드 안의 애니메이션 단계
 // 새 그림을 먼저 받아 둔 뒤 바꿔서, 효과 도중에 예전 그림이 비치지 않게 한다.
 function swapSlide(img, src, fx, dir) {
@@ -626,8 +616,8 @@ function openSimFull(title, html, { autoplay = false } = {}) {
   goFull(box).then(() => { if (box.isConnected) unfull = onFullExit(close); }, () => {});
 }
 
-// small: 학생 기기·썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.
-// 교사 화면(TV)과 학생의 「크게 보기」는 큰 그림(새로 올린 것은 1920px)을 쓴다.
+// small: 썸네일용 작은 그림(가로 1024px). 주소에 sm=1 이 있는 수업만 3.jpg 옆에 3s.jpg 가 있다.
+// 교사 화면(TV)과 학생 화면은 늘 큰 그림(새로 올린 것은 1920px)을 쓴다.
 // ord: n번째 그림의 저장소 파일 번호 목록(순서를 바꾸거나 지운 수업). 36진수, 「.」로 나누고 「a-b」는 a부터 b까지. 없으면 n번째 = n.jpg
 const slideFilesMemo = new Map();
 function slideFiles(lesson) {
@@ -672,11 +662,16 @@ document.addEventListener("error", (e) => {
 }, true);
 
 // pdf: 올린 원본 PDF 목록. 「k-n」 = 같은 폴더의 k.pdf 가 파일 번호 k … k+n-1 그림의 원본(36진수, 「.」로 나눔)
+// 「k-n-r」 = 슬라이드를 지울 때 지운 쪽을 빼고 다시 쓴 PDF(r: 다시 쓴 횟수, 주소에 붙여 예전 파일을 받아 두지 않게). 그 범위의 남은 그림만 차례로 들어 있다
 function slidePdfs(lesson) {
   const m = /[?&]pdf=([0-9a-z.-]+)/.exec(lesson.slide_dir || "");
-  return m ? m[1].split(".").map((t) => t.split("-").map((x) => parseInt(x, 36))).filter(([k, n]) => k > 0 && n > 0).map(([k, n]) => ({ k, n })) : [];
+  return m ? m[1].split(".").map((t) => t.split("-").map((x) => parseInt(x, 36))).filter(([k, n]) => k > 0 && n > 0).map(([k, n, r]) => (r > 0 ? { k, n, r } : { k, n })) : [];
 }
-const pdfText = (pdfs) => pdfs.map(({ k, n }) => k.toString(36) + "-" + n.toString(36)).join(".");
+const pdfText = (pdfs) => pdfs.map(({ k, n, r }) => k.toString(36) + "-" + n.toString(36) + (r ? "-" + r.toString(36) : "")).join(".");
+// 원본 PDF p 에 들어 있는 쪽들의 파일 번호(차례대로). all: 이 수업의 모든 파일 번호
+const pdfPageList = (p, all) => (p.r ? all.filter((f) => f >= p.k && f < p.k + p.n).sort((x, y) => x - y) : Array.from({ length: p.n }, (_, i) => p.k + i));
+// 파일 번호 f 그림이 원본 PDF p 의 몇 번째 쪽인지(0부터). 없으면 -1
+const pdfPageOf = (p, f, all) => (f < p.k || f >= p.k + p.n ? -1 : p.r ? pdfPageList(p, all).indexOf(f) : f - p.k);
 
 // 「슬라이드 PDF 받기」(교사·학생 공용): 지금 순서·지우기·이어 붙이기를 그대로 따른다.
 // 원본 PDF에서 온 쪽은 그 PDF의 쪽을 그대로 옮겨(글자·도형이 그림으로 바뀌지 않아 화질 그대로), 나머지 쪽(그림·PPTX로 올린 것)은 큰 그림으로 넣는다.
@@ -746,15 +741,16 @@ async function exportSlidesPdf(l, msg) {
     const pdfs = slidePdfs(l);
     const base = l.slide_dir.trim().split("{n}")[0];
     const v = (/[?&]v=(\d+)/.exec(l.slide_dir) || [])[1];
-    const pdfUrl = (k) => encodeURI(base + k + ".pdf" + (v ? "?v=" + v : ""));
+    const pdfUrl = (p) => encodeURI(base + p.k + ".pdf" + (v ? "?v=" + v : "") + (p.r ? (v ? "&" : "?") + "r=" + p.r : ""));
     const fileOf = (pg) => l.slide_dir.includes("{n}") ? (files || [])[pg - 1] || pg : pg;
     const fs = pages.map(fileOf);
+    const all = Array.from({ length: l.slide_count }, (_, i) => fileOf(i + 1));
     const name = l.title || l.code;
     // 슬라이드가 원본 PDF 하나 그대로(순서·지우기·덧붙이기 없음)면 그 파일을 바로 받는다: 다시 만들지 않아 가장 빠르다
-    const one = pdfs.find(({ k, n }) => n === fs.length && fs.every((f, i) => f === k + i));
+    const one = pdfs.find((p) => pdfPageList(p, all).length === fs.length && fs.every((f, i) => pdfPageOf(p, f, all) === i));
     if (one) {
       say("원본 PDF 받는 중…", null);
-      const res = await fetchBytes(pdfUrl(one.k), (got, total) => say("원본 PDF 받는 중 " + mb(got) + (total ? " / " + mb(total) : ""), total ? got / total : null), stop.signal);
+      const res = await fetchBytes(pdfUrl(one), (got, total) => say("원본 PDF 받는 중 " + mb(got) + (total ? " / " + mb(total) : ""), total ? got / total : null), stop.signal);
       halt();
       if (res && /pdf|octet/i.test(res.blob.type || "pdf")) {
         saveBlob(new Blob([res.blob], { type: "application/pdf" }), name);
@@ -768,7 +764,7 @@ async function exportSlidesPdf(l, msg) {
     // 1) 필요한 원본 PDF와 그림을 한꺼번에(동시에 6개씩) 받는다. 진행도는 받은 쪽 수로
     const need = fs.map((f) => pdfs.find(({ k, n }) => f >= k && f < k + n));
     const ks = [...new Set(need.filter(Boolean).map((p) => p.k))];
-    const jobs = ks.map((k) => ({ kind: "pdf", k, w: need.filter((p) => p && p.k === k).length }))
+    const jobs = ks.map((k) => ({ kind: "pdf", k, p: pdfs.find((p) => p.k === k), w: need.filter((p) => p && p.k === k).length }))
       .concat(pages.map((pg, i) => need[i] ? null : { kind: "img", i, pg, w: 1 }).filter(Boolean));
     const totalW = jobs.reduce((s, j) => s + j.w, 0) || 1;
     let doneW = 0, partW = new Map();
@@ -782,7 +778,7 @@ async function exportSlidesPdf(l, msg) {
       while (q < jobs.length && !stop.signal.aborted) {
         const j = jobs[q++];
         if (j.kind === "pdf") {
-          const res = await fetchBytes(pdfUrl(j.k), (got, total) => { if (total) { partW.set(j, (got / total) * j.w); tick(); } }, stop.signal);
+          const res = await fetchBytes(pdfUrl(j.p), (got, total) => { if (total) { partW.set(j, (got / total) * j.w); tick(); } }, stop.signal);
           let d = null;
           try { d = res ? await PDFDocument.load(await res.blob.arrayBuffer(), { ignoreEncryption: true }) : null; } catch {}
           srcDocs.set(j.k, d);
@@ -807,9 +803,10 @@ async function exportSlidesPdf(l, msg) {
     let vector = 0;
     for (const [i, pg] of pages.entries()) {
       if (i % 5 === 0) { say("PDF 만드는 중 " + (i + 1) + " / " + pages.length, 0.9 + (i / pages.length) * 0.08); await new Promise((r) => setTimeout(r)); halt(); }
-      const from = need[i], src = from && srcDocs.get(from.k);
-      if (src && fs[i] - from.k < src.getPageCount()) {
-        const [page] = await doc.copyPages(src, [fs[i] - from.k]);
+      const from = need[i], src = from && srcDocs.get(from.k), at = from ? pdfPageOf(from, fs[i], all) : -1;
+      // 쪽 수가 맞지 않는 원본(다시 쓰다 멈춘 것)은 믿지 않고 그림으로
+      if (src && at >= 0 && src.getPageCount() === pdfPageList(from, all).length) {
+        const [page] = await doc.copyPages(src, [at]);
         doc.addPage(page);
         vector++;
         continue;

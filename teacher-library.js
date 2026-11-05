@@ -256,7 +256,6 @@ async function drawManage() {
           await loadLessons(lesson && lesson.id !== p.id ? lesson.id : null);
           flash("「" + p.title + "」 수업을 지웠습니다.");
         } }, "수업 삭제"),
-        slideQPick(p, msg),
         h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "폴더"),
           moveSel || h("select", { "aria-label": "옮길 폴더", disabled: true }, h("option", {}, p ? "다른 선생님 수업" : "—"))))),
       msg),
@@ -265,21 +264,6 @@ async function drawManage() {
 }
 
 // 수업 삭제 확인: 수업 코드를 똑같이 쳐야 지운다. 한글 자판으로 쳐도 같은 자리의 영문 대문자로 바로 바뀐다(codeLetters)
-// 학생 화면 슬라이드 화질(수업마다, slide_dir 의 q=hi). 학생 화면은 다음 확인(몇 초 안)부터 바뀐다
-function slideQPick(p, msg) {
-  const ok = p && p.slide_count && !isPptx(p) && canOpenLesson(p);
-  const sel = h("select", { "aria-label": "학생 화면 슬라이드 화질", disabled: !ok, async onchange() {
-    const dir = withQ(p.slide_dir, sel.value);
-    sel.disabled = true;
-    const { error } = await sb.from("lessons").update({ slide_dir: dir }).eq("id", p.id);
-    sel.disabled = false;
-    if (error) { sel.value = slideQ(p); msg.textContent = "화질을 저장하지 못했습니다: " + error.message; return; }
-    for (const l of [p, lesson]) if (l && l.id === p.id) l.slide_dir = dir;
-    flash("학생 화면 슬라이드 화질: " + SLIDE_Q[sel.value]);
-  } }, Object.entries(SLIDE_Q).map(([k, t]) => h("option", { value: k, selected: !!ok && slideQ(p) === k }, t)));
-  return h("div", { class: "folder-add" }, h("span", { class: "muted small" }, "학생 화면 화질"), sel);
-}
-
 function askLessonCode(p) {
   return new Promise((done) => {
     let ok = false;
