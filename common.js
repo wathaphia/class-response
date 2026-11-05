@@ -694,45 +694,119 @@ function pdfPages(l) {
   let first = 1;
   return steps.map((n) => { const p = first + n - 1; first += n; return p; });
 }
+// 받는 양을 알리며 내려받는다. 20초 동안 한 바이트도 안 오면 끊고 실패로 본다(진행도가 멈춘 채 기다리지 않게).
+async function fetchBytes(url, onProg) {
+  const ac = new AbortController();
+  let stall = setTimeout(() => ac.abort(), 20000);
+  try {
+    const r = await fetch(url, { signal: ac.signal });
+    if (!r.ok || !r.body) return null;
+    const total = +r.headers.get("content-length") || 0;
+    const reader = r.body.getReader();
+    const parts = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      clearTimeout(stall);
+      stall = setTimeout(() => ac.abort(), 20000);
+      parts.push(value);
+      got += value.length;
+      onProg && onProg(got, total);
+    }
+    return { blob: new Blob(parts, { type: r.headers.get("content-type") || "" }), got };
+  } catch { return null; } finally { clearTimeout(stall); }
+}
+const mb = (b) => (b / 1048576).toFixed(1) + "MB";
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: name.replace(/[\/:*?"<>|]/g, "_") + "_슬라이드.pdf" });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 async function exportSlidesPdf(l, msg) {
+  const bar = h("progress", { class: "pdf-prog", max: 1, value: 0 });
+  const say = (text, frac) => {
+    if (frac == null) bar.removeAttribute("value"); else bar.value = Math.min(1, frac);
+    msg.replaceChildren(text, bar);
+  };
   if (!l.slide_count) { msg.textContent = "슬라이드가 없는 수업입니다."; return; }
   if (isPptx(l)) { msg.textContent = "PowerPoint 파일 그대로 올린 수업은 여기서 PDF로 바꿀 수 없습니다. PowerPoint에서 PDF로 저장해 주세요."; return; }
   try {
-    const { PDFDocument } = await loadPdfLib();
-    const doc = await PDFDocument.create();
     const pages = pdfPages(l);
     const files = slideFiles(l);
     const pdfs = slidePdfs(l);
     const base = l.slide_dir.trim().split("{n}")[0];
     const v = (/[?&]v=(\d+)/.exec(l.slide_dir) || [])[1];
-    const srcDocs = new Map();   // k → 원본 PDF(못 받으면 null → 그 쪽들은 그림으로)
-    const srcOf = async (k) => {
-      if (!srcDocs.has(k)) {
-        srcDocs.set(k, (async () => {
-          try {
-            const r = await fetch(encodeURI(base + k + ".pdf" + (v ? "?v=" + v : "")));
-            return r.ok ? await PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true }) : null;
-          } catch { return null; }
-        })());
+    const pdfUrl = (k) => encodeURI(base + k + ".pdf" + (v ? "?v=" + v : ""));
+    const fileOf = (pg) => l.slide_dir.includes("{n}") ? (files || [])[pg - 1] || pg : pg;
+    const fs = pages.map(fileOf);
+    const name = l.title || l.code;
+    // 슬라이드가 원본 PDF 하나 그대로(순서·지우기·덧붙이기 없음)면 그 파일을 바로 받는다: 다시 만들지 않아 가장 빠르다
+    const one = pdfs.find(({ k, n }) => n === fs.length && fs.every((f, i) => f === k + i));
+    if (one) {
+      say("원본 PDF 받는 중…", null);
+      const res = await fetchBytes(pdfUrl(one.k), (got, total) => say("원본 PDF 받는 중 " + mb(got) + (total ? " / " + mb(total) : ""), total ? got / total : null));
+      if (res && /pdf|octet/i.test(res.blob.type || "pdf")) {
+        saveBlob(new Blob([res.blob], { type: "application/pdf" }), name);
+        msg.textContent = "PDF를 받았습니다 (" + fs.length + "쪽, 원본 PDF 그대로).";
+        return;
       }
-      return srcDocs.get(k);
+    }
+    say("PDF 도구 불러오는 중…", 0);
+    const { PDFDocument } = await loadPdfLib();
+    // 1) 필요한 원본 PDF와 그림을 한꺼번에(동시에 6개씩) 받는다. 진행도는 받은 쪽 수로
+    const need = fs.map((f) => pdfs.find(({ k, n }) => f >= k && f < k + n));
+    const ks = [...new Set(need.filter(Boolean).map((p) => p.k))];
+    const jobs = ks.map((k) => ({ kind: "pdf", k, w: need.filter((p) => p && p.k === k).length }))
+      .concat(pages.map((pg, i) => need[i] ? null : { kind: "img", i, pg, w: 1 }).filter(Boolean));
+    const totalW = jobs.reduce((s, j) => s + j.w, 0) || 1;
+    let doneW = 0, partW = new Map();
+    const tick = () => {
+      const now = doneW + [...partW.values()].reduce((s, x) => s + x, 0);
+      say("슬라이드 받는 중 " + Math.round((now / totalW) * 100) + "%", (now / totalW) * 0.9);
     };
+    const srcDocs = new Map(), imgs = new Map();
+    let q = 0;
+    const worker = async () => {
+      while (q < jobs.length) {
+        const j = jobs[q++];
+        if (j.kind === "pdf") {
+          const res = await fetchBytes(pdfUrl(j.k), (got, total) => { if (total) { partW.set(j, (got / total) * j.w); tick(); } });
+          let d = null;
+          try { d = res ? await PDFDocument.load(await res.blob.arrayBuffer(), { ignoreEncryption: true }) : null; } catch {}
+          srcDocs.set(j.k, d);
+          if (!d) {   // 원본을 못 받으면 그 쪽들은 큰 그림으로
+            pages.forEach((pg, i) => { if (need[i] && need[i].k === j.k) jobs.push({ kind: "img", i, pg, w: 0 }); });
+          }
+        } else {
+          const res = await fetchBytes(slideSrc(l, j.pg));   // 학생 화면 화질과 상관없이 늘 큰 그림
+          imgs.set(j.i, res && /^image\//.test(res.blob.type) ? res.blob : null);
+        }
+        partW.delete(j);
+        doneW += j.w;
+        tick();
+      }
+    };
+    tick();
+    await Promise.all(Array.from({ length: 6 }, worker));
+    // 2) 순서대로 붙인다
+    const doc = await PDFDocument.create();
     const miss = [];   // 저장소에 그림이 없는 쪽(지우기·순서 저장이 중간에 멈춘 수업)은 빼고 만든다
     let vector = 0;
     for (const [i, pg] of pages.entries()) {
-      msg.textContent = "PDF 만드는 중 " + (i + 1) + " / " + pages.length;
-      const f = l.slide_dir.includes("{n}") ? (files || [])[pg - 1] || pg : pg;
-      const from = pdfs.find(({ k, n }) => f >= k && f < k + n);
-      const src = from && (await srcOf(from.k));
-      if (src && f - from.k < src.getPageCount()) {
-        const [page] = await doc.copyPages(src, [f - from.k]);
+      if (i % 5 === 0) { say("PDF 만드는 중 " + (i + 1) + " / " + pages.length, 0.9 + (i / pages.length) * 0.08); await new Promise((r) => setTimeout(r)); }
+      const from = need[i], src = from && srcDocs.get(from.k);
+      if (src && fs[i] - from.k < src.getPageCount()) {
+        const [page] = await doc.copyPages(src, [fs[i] - from.k]);
         doc.addPage(page);
         vector++;
         continue;
       }
-      const r = await fetch(slideSrc(l, pg));   // 학생 화면 화질과 상관없이 늘 큰 그림
-      const blob = r.ok ? await r.blob() : null;
-      if (!blob || !/^image\//.test(blob.type)) { miss.push(slideNo(l, pg)); continue; }
+      const blob = imgs.get(i);
+      if (!blob) { miss.push(slideNo(l, pg)); continue; }
       const bytes = await blob.arrayBuffer();
       const img = /png/i.test(blob.type) ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
       // 그림 쪽은 PowerPoint 기본 크기처럼 가로 960pt(13.33인치)로
@@ -740,12 +814,9 @@ async function exportSlidesPdf(l, msg) {
       doc.addPage([w, hh]).drawImage(img, { x: 0, y: 0, width: w, height: hh });
     }
     if (!doc.getPageCount()) throw new Error("슬라이드 그림을 하나도 받지 못했습니다");
-    const url = URL.createObjectURL(new Blob([await doc.save()], { type: "application/pdf" }));
-    const a = h("a", { href: url, download: (l.title || l.code).replace(/[\\/:*?"<>|]/g, "_") + "_슬라이드.pdf" });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    say("PDF 저장 중…", 0.98);
+    await new Promise((r) => setTimeout(r));
+    saveBlob(new Blob([await doc.save()], { type: "application/pdf" }), name);
     msg.textContent = "PDF를 받았습니다 (" + doc.getPageCount() + "쪽" + (vector ? ", 원본 PDF 화질 " + vector + "쪽" : "") + ")."
       + (miss.length ? " " + miss.join(", ") + "번 슬라이드는 그림이 저장소에 없어 뺐습니다." : "");
   } catch (e) {

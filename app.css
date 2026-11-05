@@ -855,3 +855,11 @@ body.present-body { margin: 0; padding: 0; height: 100vh; overflow: hidden; back
 .pw-match { min-height: 1.4em; margin: 0; font-size: .9rem; line-height: 1.4; }
 input.mismatch, input.mismatch:focus { border-color: var(--bad); }
 input.mismatch:focus { outline-color: #fde7e5; }
+
+/* 학생: 화면 보기 안내는 위쪽 띠 가운데에 작게(슬라이드가 작아지지 않게). 좁은 화면에서는 띠의 둘째 줄 */
+.top > .screen-share-note { flex: 1 1 16rem; max-width: 44rem; margin: 0 auto; padding: 3px 10px; gap: 8px; flex-wrap: nowrap; font-size: .8rem; line-height: 1.3; border-radius: 8px; }
+.top > .screen-share-note .note-text { min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.top > .screen-share-note .row { flex: 0 0 auto; flex-wrap: nowrap; gap: 4px; }
+.top > .screen-share-note button { padding: 3px 8px; font-size: .8rem; min-height: 0; }
+@media (max-width: 640px) { .top > .screen-share-note { order: 3; flex-basis: 100%; } }
+.pdf-prog { display: inline-block; width: 10rem; max-width: 40vw; height: 8px; margin-left: .5rem; vertical-align: middle; }
