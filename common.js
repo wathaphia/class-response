@@ -950,6 +950,14 @@ function codeLetters(text) {
 
 const dateText = (t) => (t ? new Date(t).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
+// 탭 기호(선 그림). 교사 탭과 학생 「버그 제보」 단추가 같은 기호를 쓴다
+const BUG_ICON = '<rect x="7" y="7" width="10" height="13" rx="5"/><path d="M12 11v9M9 4.5l1.5 2.5M15 4.5L13.5 7M3.5 13H7M17 13h3.5M4.5 8.5L7 10M19.5 8.5L17 10M4.5 18.5L7 16.5M19.5 18.5L17 16.5"/>';
+function tabIconEl(paths) {
+  const el = h("span", { class: "tab-icon", "aria-hidden": "true" });
+  el.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + "</svg>";
+  return el;
+}
+
 function openModal(title, body, onClose) {
   const close = () => { box.remove(); if (onClose) onClose(); };
   const box = h("div", { class: "overlay", onclick(e) { if (e.target === box) close(); } },
