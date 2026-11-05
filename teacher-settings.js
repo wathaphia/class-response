@@ -657,11 +657,11 @@ async function ownSlideHome(L, home, ui) {
 
 // 이 수업 그림들의 저장소 파일 번호(n번째 그림 = 배열의 n-1번째). ord 가 없으면 1, 2, 3 …
 const fileNums = (L) => slideFiles(L) || Array.from({ length: L.slide_count }, (_, i) => i + 1);
-// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·pdf(원본 PDF)·fx(전환 효과)
+// 그림 주소의 물음표 뒤: v(바꾸면 브라우저가 그림을 새로 받음)·sm(작은 그림 있음)·anim(단계 수)·ord(파일 순서)·pdf(원본 PDF)·fx(전환 효과)·q(학생 화면 화질)
 function slideDirOf(L, base, { v, small, anim, files, pdfs }) {
   const ord = files ? ordText(files) : "";
   const pdf = pdfs ? pdfText(pdfs) : "";
-  return withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : "") + (pdf ? "&pdf=" + pdf : ""), slideFx(L));
+  return withQ(withFx(base + "?v=" + v + (small ? "&sm=1" : "") + (anim ? "&anim=" + anim : "") + (ord ? "&ord=" + ord : "") + (pdf ? "&pdf=" + pdf : ""), slideFx(L)), slideQ(L));
 }
 // list 에서 x(예전 번호)의 새 자리. 빠졌으면 그 뒤에 남은 것, 없으면 그 앞에 남은 것의 자리
 function nearestKept(list, x, max) {
