@@ -220,7 +220,7 @@ function swapSlide(img, src, fx, dir) {
 // Image 를 붙잡아 두어야 Safari 가 받던 것을 버리지 않고 메모리에 남긴다. 지금 쪽부터 끝까지, 그다음 앞쪽을 3장씩 받는다.
 // upto: 거기까지만 받는다(학생은 선생님이 연 쪽까지만 볼 수 있으므로). 수업·그림 주소가 바뀌면 처음부터 다시 받는다.
 const slideCache = new Map();   // 그림 주소 → Image
-let slideQueue = [], slideBusy = 0, slideCacheKey = "";
+let slideQueue = [], slideLoading = 0, slideCacheKey = "";
 function preloadSlides(lesson, at, { small = false, upto } = {}) {
   if (!lesson || !(lesson.slide_count > 0) || isPptx(lesson)) return;
   const key = lesson.slide_dir + (small ? "|s" : "");
@@ -235,14 +235,14 @@ function preloadSlides(lesson, at, { small = false, upto } = {}) {
   pumpSlides();
 }
 function pumpSlides() {
-  while (slideBusy < 3 && slideQueue.length) {
+  while (slideLoading < 3 && slideQueue.length) {
     const src = slideQueue.shift();
     if (slideCache.has(src)) continue;
     const img = new Image();
     slideCache.set(src, img);
-    slideBusy++;
-    img.onload = () => { slideBusy--; pumpSlides(); };
-    img.onerror = () => { slideBusy--; slideCache.delete(src); pumpSlides(); };   // 다음에 다시 시도(작은 그림이 빠졌으면 화면 쪽에서 큰 그림으로 바꿈)
+    slideLoading++;
+    img.onload = () => { slideLoading--; pumpSlides(); };
+    img.onerror = () => { slideLoading--; slideCache.delete(src); pumpSlides(); };   // 다음에 다시 시도(작은 그림이 빠졌으면 화면 쪽에서 큰 그림으로 바꿈)
     img.src = src;
   }
 }
