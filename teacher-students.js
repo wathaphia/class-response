@@ -539,7 +539,7 @@ function drawStudents() {
     const last = mine.reduce((t, r) => (r.updated_at > t ? r.updated_at : t), "");
     return h("tr", {},
       h("td", {}, presenceDot(s), " ", s.class_no), h("td", {}, s.name),
-      h("td", {}, mine.length + " / " + activities.filter((a) => a.kind !== "sim").length), h("td", {}, fmtTime(last)),
+      h("td", {}, mine.length + " / " + activities.filter(isAnswerable).length), h("td", {}, fmtTime(last)),
       h("td", {}, s.monitor === true ? h("span", { class: "tag ok" }, "동의")
         : s.monitor === false ? h("span", { class: "tag" }, "동의 안 함")
         : h("span", { class: "tag info" }, "아직 안 정함"), deskTag(s)),

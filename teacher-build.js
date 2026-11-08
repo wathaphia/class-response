@@ -24,6 +24,7 @@ function buildSimFrame(a) {
 // 활동 내용 미리보기: 시뮬레이션은 실행 화면, 설명 카드는 글, 질문은 질문과 보기
 function activityPreview(a) {
   if (a.kind === "sim") return a.html ? buildSimFrame(a).box : h("p", { class: "muted small" }, "html이 없습니다.");
+  if (a.kind === "file") return fileButtons(a);
   if (isInfoActivity(a)) return linkedDescription(a.questions[0].text);
   const intro = activityDescription(a);
   return h("div", { class: "stack" }, intro ? linkedDescription(intro) : null,
@@ -276,7 +277,12 @@ function drawBuild() {
     h("button", { type: "button", class: "kind", onclick() {
       editing = { kind: "compose", ...where(), blocks: [] };
       drawBuild();
-    } }, h("strong", {}, "설명 및 질문")));
+    } }, h("strong", {}, "설명 및 질문")),
+    // 파일 업로드: 끌어 놓거나 골라 올린 파일을 학생·교사가 단추를 눌러 내려받는다
+    h("button", { type: "button", class: "kind", onclick() {
+      editing = { kind: "file", title: "", ...where(), questions: [] };
+      drawBuild();
+    } }, h("strong", {}, "파일 업로드")));
   const newCard = h("section", { class: "card stack" }, h("h2", {}, "새로 만들기"), kinds);
   const hint = () => editing ? null : h("p", { class: "muted small" }, "왼쪽에서 새로 만들거나, 활동의 「수정」을 누르세요.");
   const listTitle = "이 수업의 활동" + (activities.length ? " (" + activities.length + "개)" : "");
@@ -416,7 +422,7 @@ function activityRow(a) {
           onclick() {
             // 칸을 다시 쓰므로 지금 활동(row.act)을 고친다
             const copy = JSON.parse(JSON.stringify(row.act));
-            editing = copy.kind === "sim" ? copy : toCompose(copy);
+            editing = copy.kind === "sim" || copy.kind === "file" ? copy : toCompose(copy);
             drawBuild();
             main.querySelector(".editor")?.scrollIntoView({ block: "start" });
           } }),
@@ -512,6 +518,108 @@ function simEditor() {
       h("button", { class: "ghost", type: "button", onclick() { if ((e.html || "").trim()) openSimFull(e.title || "미리보기", e.html, { autoplay: true }); else msg.textContent = "먼저 html을 넣으세요."; } }, "미리보기")));
 }
 
+// ---------- 파일 업로드 ----------
+// 끌어 놓거나 고른 파일은 편집기에 모아 두었다가(file: File) 「저장」할 때 R2(/f/)에 올리고 활동을 저장한다.
+// 저장한 파일을 목록에서 빼면 저장한 뒤 저장소에서도 지운다(이 수업 폴더에 올린 것만: 복제한 수업의 원본 파일은 두기)
+async function fileCall(method, path, body, type) {
+  const { data } = await sb.auth.getSession();
+  const r = await fetch(FILE_BASE + path, { method, body,
+    headers: { Authorization: "Bearer " + (data.session ? data.session.access_token : ""), "content-type": type || "application/json" } });
+  if (!r.ok) throw new Error("파일 저장소 응답 " + r.status + (r.status === 413 ? " (파일이 너무 큽니다)" : ""));
+  return r.json();
+}
+const fileKeyFor = (name) => {
+  const ext = (name.match(/\.([A-Za-z0-9]{1,10})$/) || [])[1];
+  const rand = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(36).padStart(2, "0")).join("");
+  return slideFolder(lesson) + rand + (ext ? "." + ext.toLowerCase() : "");
+};
+// 이 수업 폴더(…/수업id/)에 올렸고 다른 활동이 쓰지 않는 파일만 저장소에서 지운다. 실패해도 활동은 그대로 둔다
+async function dropStoredFiles(list, keepId) {
+  const used = new Set(activities.filter((a) => a.id !== keepId).flatMap((a) => filesOf(a).map((f) => f.key)));
+  const keys = list.map((f) => f.key).filter((k) => k && k.split("/")[1] === String(lesson.id) && !used.has(k));
+  if (keys.length) try { await fileCall("POST", "", JSON.stringify({ op: "delete", keys })); } catch (err) { console.warn("파일을 저장소에서 지우지 못함", err); }
+}
+
+function fileEditor() {
+  const e = editing;
+  const msg = h("p", { class: "error" });
+  const redraw = () => { drawBuild(); };
+  const title = h("input", { type: "text", maxlength: 100, value: e.title, placeholder: "예: 활동지", oninput() { e.title = title.value; } });
+  const picker = h("input", { type: "file", multiple: true, hidden: true, onchange() { add([...picker.files]); picker.value = ""; } });
+  const add = (files) => {
+    const big = files.filter((f) => f.size > FILE_MAX), ok = files.filter((f) => f.size > 0 && f.size <= FILE_MAX);
+    ok.forEach((f) => e.questions.push({ id: newId(), type: "file", name: f.name.normalize("NFC").slice(0, 200), size: f.size, file: f }));
+    if (!e.title.trim() && ok.length) e.title = ok[0].name.normalize("NFC").replace(/\.[^.]+$/, "").slice(0, 100);
+    redraw();
+    if (big.length) main.querySelector(".editor .error").textContent = "50MB가 넘는 파일 " + big.length + "개는 뺐습니다.";
+  };
+  const pick = () => picker.click();
+  const hasFiles = (ev) => [...ev.dataTransfer.types].includes("Files");
+  const dropBox = h("div", { class: "drop-box", role: "button", tabindex: 0, onclick: pick,
+    onkeydown(ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(); } },
+    ondragover(ev) { if (!hasFiles(ev)) return; ev.preventDefault(); ev.stopPropagation(); ev.dataTransfer.dropEffect = "copy"; dropBox.classList.add("over"); },
+    ondragleave(ev) { if (!dropBox.contains(ev.relatedTarget)) dropBox.classList.remove("over"); },
+    ondrop(ev) { ev.preventDefault(); ev.stopPropagation(); dropBox.classList.remove("over"); add([...ev.dataTransfer.files]); } },
+    h("strong", {}, "파일을 이 상자에 끌어다 놓으세요"),
+    h("span", { class: "muted small" }, "또는 눌러서 고르기 · 여러 개를 한 번에 넣을 수 있습니다 · 파일 하나에 50MB까지"));
+  const list = e.questions.length ? h("ul", { class: "file-queue" }, e.questions.map((f, i) =>
+    h("li", {},
+      h("span", { class: "file-name" }, f.name),
+      h("span", { class: "muted small" }, fileSize(f.size || 0) + (f.file ? " · 저장하면 올라감" : "")),
+      h("button", { type: "button", class: "ghost danger small", onclick() { e.questions.splice(i, 1); redraw(); } }, "빼기"))))
+    : h("p", { class: "muted small" }, "아직 넣은 파일이 없습니다.");
+  async function saveFiles() {
+    e.title = e.title.trim();
+    if (!e.title) { msg.textContent = "제목을 입력하세요."; return; }
+    if (!e.questions.length) { msg.textContent = "파일을 넣으세요."; return; }
+    if (lesson.slide_count && e.page === "") { msg.textContent = PAGE_EMPTY; return; }
+    if (!FILE_BASE) { msg.textContent = "파일 저장소(Worker 주소)가 설정되지 않았습니다."; return; }
+    const to = pageTo(e);
+    if (to === false) { msg.textContent = PAGE_TO_SETUP; return; }
+    const L = lesson;
+    const waiting = e.questions.filter((f) => f.file);
+    try {
+      for (const [i, f] of waiting.entries()) {
+        msg.textContent = "";
+        main.querySelector(".editor .save-btn")?.replaceChildren("올리는 중 " + (i + 1) + " / " + waiting.length);
+        const key = fileKeyFor(f.name);
+        await fileCall("PUT", key, f.file, "application/octet-stream");
+        f.key = key;
+        delete f.file;
+      }
+    } catch (err) { msg.textContent = "파일을 올리지 못했습니다: " + (err.message || err); return; }
+    const saved0 = e.id ? activities.find((a) => a.id === e.id) : null;
+    const removed = saved0 ? filesOf(saved0).filter((f) => !e.questions.some((q) => q.key === f.key)) : [];
+    const row = { kind: "file", title: e.title, page: lesson.slide_count ? e.page : null, html: null, sim_full: false, sim_place: null,
+      show_answer: false, named: false, questions: e.questions.map(({ id, name, size, key }) => ({ id, type: "file", name, size, key })) };
+    if (to !== undefined) row.page_to = to;
+    if (!e.id) { row.lesson_id = L.id; row.sort = activities.length; }
+    const saved = await save("activities", row, e.id);
+    if (!saved) return;
+    e.id = saved.id;
+    if (lesson !== L) return;
+    const { data } = await sb.from("activities").select("*").eq("lesson_id", L.id);
+    if (lesson !== L) return;
+    takeActivities(data, [e.id]);
+    if (removed.length) dropStoredFiles(removed);
+    editing = null;
+    if (tab === "build") drawBuild();
+    flash("저장했습니다.");
+  }
+  const card = h("section", { class: "card stack editor",
+    // 상자 밖에 떨어뜨린 파일은 받지 않는다(브라우저가 파일을 열지 않게)
+    ondragover(ev) { if (hasFiles(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = "none"; } },
+    ondrop(ev) { ev.preventDefault(); } },
+    h("h2", {}, e.id ? "파일 고치기" : "파일 올리기"),
+    placeField(e),
+    h("label", {}, "제목", title),
+    picker, dropBox, list,
+    h("p", { class: "muted small" }, "학생과 선생님 모두 이 카드의 파일 단추를 눌러 내려받을 수 있습니다. 학생은 이 카드에 답을 입력하지 않습니다."),
+    msg,
+    editorButtons(saveFiles, msg, "「" + e.title + "」 파일 카드를 지울까요? 올린 파일도 함께 지워집니다."));
+  return card;
+}
+
 // 저장 버튼 상태: 저장한 활동을 열고 아무것도 바꾸지 않았으면 회색 「저장됨」(누를 수 없음), 바꾸면 파란 「저장」.
 // 편집기를 처음 그릴 때(또는 저장한 뒤) 편집 내용을 기준(editBase)으로 적어 두고 지금 내용과 비교한다.
 const editBase = new WeakMap();
@@ -549,7 +657,9 @@ function editorButtons(onSave, msg, askText, ...extra) {
       if (!confirm(askText)) return;
       const { error } = await sb.from("activities").delete().eq("id", e.id);
       if (error) { msg.textContent = error.message; return; }
+      const gone = activities.find((a) => a.id === e.id);
       activities = activities.filter((a) => a.id !== e.id); editing = null; drawBuild();
+      if (gone && gone.kind === "file") dropStoredFiles(filesOf(gone));
     } }, "삭제") : null);
 }
 
@@ -589,9 +699,9 @@ function placeField(e) {
 }
 
 function editor() {
-  if (editing.kind !== "sim" && editing.kind !== "compose") editing = toCompose(editing);
+  if (editing.kind !== "sim" && editing.kind !== "compose" && editing.kind !== "file") editing = toCompose(editing);
   if (!editBase.has(editing)) editBase.set(editing, editSnap(editing));
-  const el = editing.kind === "sim" ? simEditor() : composeEditor();
+  const el = editing.kind === "sim" ? simEditor() : editing.kind === "file" ? fileEditor() : composeEditor();
   // 입력·선택·버튼(켜고 끄기 등)이 편집 내용을 바꾼 뒤에 저장 버튼을 맞춘다
   const later = () => setTimeout(() => syncSave(), 0);
   ["input", "change", "click"].forEach((t) => el.addEventListener(t, later));
@@ -631,7 +741,7 @@ function composeEditor() {
   const redraw = (focus) => { drawBuild(); if (focus) main.querySelector('.editor [data-focus="' + focus + '"]')?.focus(); };
   const hasResponses = e.blocks.some((b) => b.id && responses.some((r) => r.activity_id === b.id));
   // 제목을 비운 질문은 「질문 n」, 설명은 「설명 n」. n은 이 수업에 이미 있는 같은 종류(이 편집기 칸 말고) 다음 번호부터
-  const others = activities.filter((a) => a.kind !== "sim" && !e.blocks.some((b) => b.id === a.id));
+  const others = activities.filter((a) => isAnswerable(a) && !e.blocks.some((b) => b.id === a.id));
   const qBase = others.filter((a) => !isInfoActivity(a)).length, iBase = others.filter(isInfoActivity).length;
   const autoTitle = (n) => "질문 " + (qBase + n);
   const autoInfo = (n) => "설명 " + (iBase + n);
