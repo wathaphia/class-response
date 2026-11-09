@@ -50,7 +50,7 @@ alter table activities add column if not exists sim_full boolean not null defaul
 -- 슬라이드 위에 얹는 시뮬레이션(테두리 없음)의 자리: 슬라이드 크기에 대한 비율 {"x","y","w","h"}(0~1). 비어 있으면 얹지 않는다.
 alter table activities add column if not exists sim_place jsonb;
 alter table activities drop constraint if exists activities_kind_check;
-alter table activities add constraint activities_kind_check check (kind in ('slide', 'survey', 'quiz', 'sim'));
+alter table activities add constraint activities_kind_check check (kind in ('slide', 'survey', 'quiz', 'sim', 'file'));
 alter table activities drop constraint if exists activities_html_size;
 alter table activities add constraint activities_html_size check (html is null or length(html) <= 500000);
 
@@ -501,7 +501,7 @@ begin
   select * into s from students where token = p_token and p_token is not null;
   if not found then return jsonb_build_object('error', 'logged_out'); end if;
   select * into a from activities where id = p_activity;
-  if not found or a.kind = 'sim' or not exists (select 1 from lesson_students where lesson_id = a.lesson_id and student_id = s.id) then
+  if not found or a.kind in ('sim', 'file') or not exists (select 1 from lesson_students where lesson_id = a.lesson_id and student_id = s.id) then
     return jsonb_build_object('error', 'no_activity');
   end if;
   select * into l from lessons where id = a.lesson_id;

@@ -99,7 +99,7 @@ function refreshRun() {
 
   const sn = slideNo(L, L.page);
   const shown = activities.filter((a) => L.slide_count === 0 || onPage(a, sn) || a.page == null);
-  drawRoster(shown.filter((a) => a.kind !== "sim"));
+  drawRoster(shown.filter(isAnswerable));
   run.panel.replaceChildren(...(shown.length ? shown.map(runBlock)
     : [h("p", { class: "card muted" }, sn + "쪽에는 활동이 없습니다. 「자료 추가」에서 추가하세요.")]));
   paintPresent();
@@ -495,6 +495,10 @@ function drawRoster(shown) {
 }
 
 function runBlock(a) {
+  if (a.kind === "file") return h("section", { class: "card stack" },
+    h("div", {}, h("p", { class: "muted small" }, "파일 · " + whereText(a)), h("h2", {}, a.title)),
+    fileButtons(a),
+    h("p", { class: "pill" }, "학생 화면: 파일 단추로 보임(누르면 내려받기)"));
   if (a.kind === "sim") return h("section", { class: "card stack" },
     h("div", { class: "row between" },
       h("div", {}, h("p", { class: "muted small" }, "시뮬레이션 · " + whereText(a)), h("h2", {}, a.title)),

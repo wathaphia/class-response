@@ -104,7 +104,7 @@ function watchedFetch(input, init) {
 // 만든 사람 표시. 고쳐 쓰거나 나눌 때도 지우지 말아 주세요(LICENSE.md).
 const CREDIT = { name: "이효송", year: 2026 };
 
-const KIND_NAME = { slide: "질문", survey: "질문", quiz: "퀴즈", sim: "시뮬레이션" };   // 슬라이드 질문·설문은 이제 「질문」 하나로 부른다
+const KIND_NAME = { slide: "질문", survey: "질문", quiz: "퀴즈", sim: "시뮬레이션", file: "파일" };   // 슬라이드 질문·설문은 이제 「질문」 하나로 부른다
 const TYPE_NAME = { choice: "하나 고르기", multi: "여러 개 고르기", short: "짧은 글", long: "긴 글" };
 
 // 화면 요소 만들기. 학생이 쓴 글은 늘 글자(텍스트)로만 넣는다(innerHTML을 쓰지 않음).
@@ -888,6 +888,27 @@ function linkedDescription(value) {
   }
   box.append(document.createTextNode(source.slice(from)));
   return box;
+}
+
+// ---------- 파일 활동 ----------
+// 「자료 추가 → 파일 업로드」로 올린 파일은 R2(Worker의 /f/)에 둔다. 활동의 questions 에 [{ id, type: "file", key, name, size }] 로 적는다.
+// 받기는 누구나(주소의 key 는 짐작할 수 없는 이름), 올리기·지우기는 그 수업에 손댈 수 있는 교사만. 학생은 이 활동에 답하지 않는다.
+const FILE_BASE = typeof TURN_URL === "string" && TURN_URL.trim() ? TURN_URL.trim().replace(/\/+$/, "") + "/f/" : "";
+const FILE_MAX = 50 * 1024 * 1024;
+const fileUrl = (f) => FILE_BASE + f.key + "?n=" + encodeURIComponent(f.name || "file");
+const filesOf = (a) => (a.questions || []).filter((q) => q.type === "file" && q.key);
+const fileSize = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + "MB" : Math.max(1, Math.round(b / 1024)) + "KB");
+// 답을 받는 활동인지(시뮬레이션·파일은 답하지 않는다)
+const isAnswerable = (a) => a.kind !== "sim" && a.kind !== "file";
+// 파일 단추 목록: 누르면 내려받는다
+function fileButtons(a) {
+  const list = filesOf(a);
+  if (!list.length) return h("p", { class: "muted small" }, "올린 파일이 없습니다.");
+  return h("div", { class: "file-list" }, list.map((f) =>
+    h("a", { class: "file-btn", href: fileUrl(f), download: f.name, rel: "noopener" },
+      h("span", { class: "file-ico", "aria-hidden": "true" }, "⬇"),
+      h("span", { class: "file-name" }, f.name),
+      h("span", { class: "muted small" }, fileSize(f.size || 0)))));
 }
 
 function activityDescription(activity) {

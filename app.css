@@ -871,3 +871,14 @@ input.mismatch:focus { outline-color: #fde7e5; }
 .quality-opt { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; padding: 6px 10px; border: 1px solid var(--line, #ddd); border-radius: 8px; cursor: pointer; }
 .quality-opt > span:last-child { grid-column: 2; }
 .quality-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+/* 파일 활동: 내려받기 단추 목록(학생·수업 진행·자료 추가), 편집기의 넣은 파일 목록 */
+.file-list { display: grid; gap: .4rem; }
+.file-btn { display: flex; align-items: center; gap: .5rem; min-height: 44px; padding: .45rem .75rem; background: #fff; color: inherit; text-decoration: none;
+  border: 1px solid var(--field); border-radius: 8px; transition: border-color .15s, background .15s; }
+.file-btn:hover, .file-btn:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.file-btn .file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-ico { color: var(--accent); font-size: 1.05rem; }
+.file-queue { margin: 0; padding: 0; list-style: none; display: grid; gap: .3rem; }
+.file-queue li { display: flex; align-items: center; gap: .5rem; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 8px; }
+.file-queue .file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-queue button { min-height: 30px; padding: .1rem .6rem; font-size: .85rem; }

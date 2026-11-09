@@ -938,7 +938,7 @@ async function copySlideFiles(src, copy, progress) {
 
 // ---------- CSV ----------
 function downloadCSV(acts, fileName) {
-  acts = acts.filter((a) => a.kind !== "sim");
+  acts = acts.filter(isAnswerable);
   const cell = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
   const head = ["학번", "이름"];
   acts.forEach((a) => {

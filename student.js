@@ -1055,10 +1055,24 @@ function simCard(a) {
 }
 
 // ---------- 활동 카드 ----------
+// 파일 활동: 제목과 내려받기 단추. 내용이 같으면 같은 칸을 다시 쓴다
+function fileCard(a) {
+  const sig = JSON.stringify([a.title, a.questions]);
+  let c = cards.get(a.id);
+  if (!c || c.sig !== sig) {
+    c = { sig, el: h("section", { class: "card activity stack" },
+      h("div", { class: "card-head" }, h("h2", {}, a.title), h("span", { class: "badge" }, KIND_NAME.file)),
+      fileButtons(a)) };
+    cards.set(a.id, c);
+  }
+  return c.el;
+}
+
 function draftKey(a) { return "cra-draft:" + token + ":" + a.id; }
 
 function cardFor(a) {
   if (a.kind === "sim") return simCard(a);
+  if (a.kind === "file") return fileCard(a);
   let c = cards.get(a.id);
   if (!c) {
     c = { el: h("section", { class: "card activity" }), form: h("div", { class: "stack" }), others: h("div", {}) };
