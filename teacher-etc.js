@@ -375,7 +375,7 @@ function egressDayChart(title, m, field, at = lastSync() || Date.now()) {
     h("figcaption", {}, h("strong", {}, title), h("span", { class: "muted small" }, " " + (mo + 1) + "월 합계 " + usageAmount(total, "bytes") + " / 5GB")),
     h("div", { class: "eg-scroll" }, box));
 }
-// 이번 달 집계(매시 5분까지) + 그 뒤 동기화 시각까지(Worker egressTail)
+// 이번 달 집계(매일 0시 10분까지). Worker egressTail 은 로그 조회 비용 때문에 끔(null) → m 그대로
 function egressWithTail(m, tail) {
   if (!m || !tail || !tail.until || (m.until && Date.parse(tail.until) <= Date.parse(m.until))) return m;
   const days = { ...m.days };
@@ -389,7 +389,7 @@ function egressWithTail(m, tail) {
 const SB_KIND = { rest: "데이터", storage: "파일", auth: "로그인", realtime: "실시간", other: "기타" };
 const SB_HEALTH = { db: "데이터베이스", auth: "로그인", rest: "데이터 API", realtime: "실시간", storage: "파일 저장소" };
 const EGRESS_FROM = { site: "학생·교사 사이트", test: "시험(로컬)", tool: "올리기 도구", other: "그 밖" };
-// 전송량 표: 한눈에 · 날마다 · 누가 받았나 · 종류별(m 은 오늘 몫을 더한 값, raw 는 매시 집계 그대로)
+// 전송량 표: 한눈에 · 날마다 · 누가 받았나 · 종류별(m 과 raw 는 하루 집계 그대로)
 function egressView(m, ep, raw) {
   const amt = (n) => usageAmount(n || 0, "bytes");
   const days = m && m.days ? Object.entries(m.days).sort((a, b) => b[0].localeCompare(a[0])) : [];
@@ -432,9 +432,9 @@ function supabaseView() {
   const items = [
     { label: "데이터베이스", used: d.db_bytes, limit: 500 * MB, fmt: "bytes", period: "누적", side: tablesSide },
     { label: "파일 저장소", used: d.storage_bytes, limit: GB, fmt: "bytes", period: "누적", hint: d.storage_files + "개 파일 · 새 슬라이드는 Cloudflare R2에 저장(여기 남은 것은 예전 사본·PPTX)" },
-    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "bytes", at }, side: egressSide, missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+    { label: "전송량", used: m ? m.bytes : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "bytes", at }, side: egressSide, missing: noApi || (m ? null : "첫 집계 기다리는 중(매일 0시 10분)"),
       hint: (ep ? "월말 예상 " + usageAmount(ep.bytes, "bytes") + " · " : "") + (since || "CDN 캐시를 거치지 않은 응답") },
-    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "cached", at }, side: egressSide, missing: noApi || (m ? null : "첫 집계 기다리는 중(매시 5분)"),
+    { label: "캐시 전송량", used: m ? m.cached : null, limit: 5 * GB, fmt: "bytes", period: "이번 달", asOf: m && Date.parse(m.until), days: m && { m, field: "cached", at }, side: egressSide, missing: noApi || (m ? null : "첫 집계 기다리는 중(매일 0시 10분)"),
       hint: (ep ? "월말 예상 " + usageAmount(ep.cached, "bytes") + " · " : "") + (since ? since + " · " : "") + "CDN 캐시에서 나간 슬라이드 그림 등" },
     { label: "접속 중 학생", used: d.online, limit: 200, period: "실시간", hint: "실시간 동시 연결 한도 200" },
     { label: "DB 연결", used: d.db_conn, limit: d.db_conn_max, period: "실시간" },
@@ -443,12 +443,12 @@ function supabaseView() {
       hint: (d.reset_day != null ? "오늘 비밀번호 재설정 " + d.reset_day + "통(한 사람 하루 3번) · " : "") + "비밀번호 재설정·가입 확인 메일을 개발자 Gmail(Apps Script)로 보냄 · 하루 100통" },
     { label: "Edge Function 호출", used: d.mail_month, limit: 500000, period: "이번 달", missing: d.mail_month == null ? "setup.sql 적용 필요" : null,
       hint: "지금 쓰는 함수는 인증 메일(send-email) 하나 · 보낸 메일 수로 셈" },
-    { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi, side: requestsSide, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
+    { label: "일시정지까지", used: idle, limit: 7, fmt: "days", period: "실시간", missing: noApi || (s && !s.apiCounts ? "로그 조회 비용 때문에 끔" : null), side: requestsSide, hint: "요청 없이 7일이 지나면 프로젝트가 잠듦(keep-alive가 매일 깨움)" },
   ];
-  const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 3 * 3600000);
+  const stale = s && (!s.egressLast || at - Date.parse(s.egressLast) > 26 * 3600000);   // 집계는 하루 1번(로그 조회 비용)
   return [
     usageRings("Supabase", items),
-    s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 매시 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
+    s && stale ? h("p", { class: "banner bad egress-stale" }, "전송량 하루 집계가 " + (s.egressLast ? shortTime(s.egressLast) + " 뒤로 멈춰 있습니다" : "아직 한 번도 되지 않았습니다")
       + ". 무료 요금제 로그는 하루만 남으므로 그보다 오래 멈추면 그동안의 전송량은 이번 달 합계에서 빠집니다."
       + (s.egressError ? " 마지막 실패(" + shortTime(s.egressError.at) + "): " + s.egressError.message
         + (/ 40[13]$/.test(s.egressError.message) ? " → Worker의 Supabase 관리 토큰이 만료·취소됐습니다. 새 토큰을 supabase.xml에 저장하고 PC에서 class-tools\\usage-setup.ps1 을 다시 실행하세요." : "") : "")) : null,
@@ -456,7 +456,7 @@ function supabaseView() {
       s.health.map((x) => h("span", { class: "tag " + (x.healthy ? "ok" : "bad") }, (x.healthy ? "● " : "■ ") + (SB_HEALTH[x.name] || x.name) + " " + (x.healthy ? "정상" : x.status)))) : null,
     h("p", { class: "muted small" }, "표(전송량 한눈에·누가 받았나·종류별, 최근 7일 요청 수, 표별 크기)는 「전송량」·「일시정지까지」·「데이터베이스」 원을 누르면 오른쪽에 보입니다."),
     h("p", { class: "muted small" }, (noApi === "관리 토큰 필요" ? "전송량·요청 수·서비스 상태는 Worker에 Supabase 관리 토큰이 들어가야 보입니다(PC에서 class-tools\\usage-setup.ps1 실행). " : "")
-      + "전송량은 응답 크기가 적힌 것만 더합니다. 데이터 API의 압축 응답과 실시간 연결은 크기가 기록되지 않아 빠지므로 「전송량」은 실제보다 적게 나옵니다(슬라이드 그림인 「캐시 전송량」은 정확함). 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
+      + "전송량은 하루 한 번(0시 10분) 전날 몫을 더하므로 오늘 쓴 양은 내일 보입니다(Supabase 로그 조회 한도를 아끼려고 화면에서는 로그를 읽지 않음). 응답 크기가 적힌 것만 더합니다. 데이터 API의 압축 응답과 실시간 연결은 크기가 기록되지 않아 빠지므로 「전송량」은 실제보다 적게 나옵니다(슬라이드 그림인 「캐시 전송량」은 정확함). 실시간 메시지 수(월 200만 건)는 Supabase가 어떤 API로도 내주지 않습니다."
       + (s && s.errors && s.errors.length ? " (일부 못 받음: " + s.errors.join(", ") + ")" : "")),
   ];
 }
@@ -494,8 +494,9 @@ function cloudflareView() {
 }
 
 // 동기화 비용: 이 탭이 사용량을 받느라 무료 한도를 얼마나 쓰는지. 마지막 동기화에서 잰 값 × 하루 자동 동기화 횟수(이 탭을 하루 종일 켜 둔 최악의 경우).
-// Worker 매시 집계(cron)는 탭과 상관없이 하루 24번 돈다. 아직 Worker가 재지 않았으면 코드대로 센 값(CRON_COST)을 쓴다.
+// Worker 하루 집계(cron)는 탭과 상관없이 하루 1번 돈다(Supabase 로그 조회 한도 때문에 매시 금지). 아직 Worker가 재지 않았으면 코드대로 센 값(CRON_COST)을 쓴다.
 const AUTO_PER_DAY = 86400000 / ETC_AUTO_MS;
+const CRON_PER_DAY = 1, LOGQ_DAILY_MAX = 3;   // Worker LOGQ_DAILY_MAX 와 같게
 const CRON_COST = { kvRead: 2, kvList: 0, kvWrite: 2, r2ClassA: 0, sbRest: 0, sbApi: 1, cfApi: 0 };
 function syncCostView() {
   const net = (k) => usage[k] && usage[k].net;
@@ -506,23 +507,24 @@ function syncCostView() {
   const m = w && w.supabase && w.supabase.egressMonth;
   const cron = (m && m.cron) || CRON_COST;
   const noCost = c ? null : "Worker 새로 배포 필요";
-  const day = (perSync, perCron = 0) => AUTO_PER_DAY * perSync + 24 * perCron;
+  const day = (perSync, perCron = 0) => AUTO_PER_DAY * perSync + CRON_PER_DAY * perCron;
   const ghCounted = gh ? Math.max(0, gh.requests - 1) : 0;   // rate_limit 요청은 한도에 세지 않는다
   const dbBytes = db ? db.bytes : 0;
   const items = [
-    { label: "Worker 요청", used: day(wk ? 1 : 0, 1), limit: 100000, period: "하루", hint: "동기화 " + AUTO_PER_DAY + "번 + 매시 집계 24번" },
+    { label: "Worker 요청", used: day(wk ? 1 : 0, 1), limit: 100000, period: "하루", hint: "동기화 " + AUTO_PER_DAY + "번 + 하루 집계 " + CRON_PER_DAY + "번" },
+    { label: "Supabase 로그 조회", used: CRON_PER_DAY, limit: LOGQ_DAILY_MAX, unit: "번", period: "하루", hint: "하루 집계가 24시간 창으로 1번만 읽음(Worker 상한 " + LOGQ_DAILY_MAX + "번) · 화면 동기화는 로그를 읽지 않음" },
     { label: "KV 읽기", used: c && day(c.kvRead, cron.kvRead), limit: 100000, period: "하루", missing: noCost },
     { label: "KV 목록", used: c && day(c.kvList, cron.kvList), limit: 1000, period: "하루", missing: noCost },
-    { label: "KV 쓰기", used: c && day(c.kvWrite, cron.kvWrite), limit: 1000, period: "하루", missing: noCost, hint: "거의 다 매시 집계가 씀" },
+    { label: "KV 쓰기", used: c && day(c.kvWrite, cron.kvWrite), limit: 1000, period: "하루", missing: noCost, hint: "하루 집계 · TURN 발급이 씀" },
     { label: "R2 목록(Class A)", used: c && day(c.r2ClassA) * 30, limit: 1000000, period: "한 달", missing: noCost },
     { label: "Supabase 전송량", used: day(dbBytes) * 30, limit: 5 * GB, fmt: "bytes", period: "한 달", hint: "DB 함수 응답 " + usageAmount(dbBytes, "bytes") + " × " + AUTO_PER_DAY * 30 + "번(압축 전)" },
     { label: "GitHub API", used: ghCounted, limit: 60, period: "1시간", hint: "자동은 1시간에 1번 · 버튼을 10분마다 눌러도 최대 " + ghCounted * 6 + "건" },
   ];
   return [
     h("p", { class: "small" }, "자동 동기화는 1시간마다(이 탭이 열려 있고 화면에 보일 때만), 「동기화」 버튼은 마지막 동기화 뒤 10분이 지나야 다시 됩니다. "
-      + "계산은 각 서비스 서버가 하고(Supabase DB 함수 · Supabase 로그 · Cloudflare 분석) 이 브라우저는 받은 숫자로 그림만 그립니다. 학생 기기는 쓰지 않습니다."),
+      + "계산은 각 서비스 서버가 하고(Supabase DB 함수 · Cloudflare 분석, Supabase 로그는 하루 1번 Worker만) 이 브라우저는 받은 숫자로 그림만 그립니다. 학생 기기는 쓰지 않습니다."),
     usageRings("동기화 비용", items, { noRisk: true }),
-    h("p", { class: "muted small" }, "원 그래프는 이 탭을 하루 종일 켜 둔 최악의 경우(자동 동기화 하루 " + AUTO_PER_DAY + "번 + 매시 집계 24번)가 무료 한도에서 차지하는 몫입니다."),
+    h("p", { class: "muted small" }, "원 그래프는 이 탭을 하루 종일 켜 둔 최악의 경우(자동 동기화 하루 " + AUTO_PER_DAY + "번 + 하루 집계 " + CRON_PER_DAY + "번)가 무료 한도에서 차지하는 몫입니다."),
   ];
 }
 
