@@ -36,7 +36,7 @@
 ## 규칙
 - 버튼: 호버·선택 시 시각 피드백을 주고, 활성화해도 크기·자리가 변하지 않는다(글자 굵기·테두리 두께·`transform` 이동 금지, 글자가 바뀌면 너비 고정, 숨길 땐 `visibility`).
 - 나중에 고치기 쉽게 짠다: 화면 그리기와 서버 요청을 섞지 않고, 둘 이상이 쓰는 것은 `common.js` 로, 저장소 키·RPC 이름은 한 곳에 상수로, 로그인 정보는 `loginStore` 로만.
-- JS/CSS를 바꾸면 `node C:\Users\neptu\class-project\class-tools\bump-version.js <이름> [작업트리]`.
+- JS/CSS를 바꾸면 `node C:\Users\neptu\claude\class-project\class-tools\bump-version.js <이름> [작업트리]`.
 - 학생 표는 열 단위 권한: 교사도 `token`·`pin_hash` 를 못 읽는다(`select` 에 넣지 말 것). 수업 주인(`owner`)은 개발자만 바꾼다.
 - 자원 관리(`teacher-etc.js` `teacher-etc.css`)는 최적화 끝남: 직접 언급이 없으면 전체 최적화·코드 제거 요청에서도 손대지 않는다. 고칠 땐 원·표를 지우지 말고 옮기기만, `etc` 시나리오 꼭 통과. 묶음마다 try/catch(`paintEtc` 의 `section`).
 - 패치 노트: 말하지 않아도 PR마다 병합 전에 `patch-notes.js` 맨 위에 [번호, 날, 글, 성격] 한 줄 + 그날 `PATCH_DAYS` 요약(PR 번호를 받은 뒤 커밋), 시기가 바뀌면 `PATCH_ERAS` 끝 줄도.
